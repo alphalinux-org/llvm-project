@@ -586,6 +586,54 @@ MachineBasicBlock *
 AlphaTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
                                                  MachineBasicBlock *MBB) const {
   switch (MI.getOpcode()) {
+  case Alpha::ATOMIC_ADD_I8:
+    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_SUBWORD_RMW_LOOP,
+                          /*NumScratch=*/4, /*NumDefs=*/1,
+                          {Alpha::ADDQ, 0});
+  case Alpha::ATOMIC_SUB_I8:
+    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_SUBWORD_RMW_LOOP,
+                          /*NumScratch=*/4, /*NumDefs=*/1,
+                          {Alpha::SUBQ, 0});
+  case Alpha::ATOMIC_AND_I8:
+    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_SUBWORD_RMW_LOOP,
+                          /*NumScratch=*/4, /*NumDefs=*/1,
+                          {Alpha::AND, 0});
+  case Alpha::ATOMIC_OR_I8:
+    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_SUBWORD_RMW_LOOP,
+                          /*NumScratch=*/4, /*NumDefs=*/1,
+                          {Alpha::BIS, 0});
+  case Alpha::ATOMIC_XOR_I8:
+    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_SUBWORD_RMW_LOOP,
+                          /*NumScratch=*/4, /*NumDefs=*/1,
+                          {Alpha::XOR, 0});
+  case Alpha::ATOMIC_XCHG_I8:
+    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_SUBWORD_RMW_LOOP,
+                          /*NumScratch=*/4, /*NumDefs=*/1,
+                          {0, 0});
+  case Alpha::ATOMIC_ADD_I16:
+    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_SUBWORD_RMW_LOOP,
+                          /*NumScratch=*/4, /*NumDefs=*/1,
+                          {Alpha::ADDQ, 1});
+  case Alpha::ATOMIC_SUB_I16:
+    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_SUBWORD_RMW_LOOP,
+                          /*NumScratch=*/4, /*NumDefs=*/1,
+                          {Alpha::SUBQ, 1});
+  case Alpha::ATOMIC_AND_I16:
+    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_SUBWORD_RMW_LOOP,
+                          /*NumScratch=*/4, /*NumDefs=*/1,
+                          {Alpha::AND, 1});
+  case Alpha::ATOMIC_OR_I16:
+    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_SUBWORD_RMW_LOOP,
+                          /*NumScratch=*/4, /*NumDefs=*/1,
+                          {Alpha::BIS, 1});
+  case Alpha::ATOMIC_XOR_I16:
+    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_SUBWORD_RMW_LOOP,
+                          /*NumScratch=*/4, /*NumDefs=*/1,
+                          {Alpha::XOR, 1});
+  case Alpha::ATOMIC_XCHG_I16:
+    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_SUBWORD_RMW_LOOP,
+                          /*NumScratch=*/4, /*NumDefs=*/1,
+                          {0, 1});
   case Alpha::SAFE_STOREI8:
     return emitAtomicLoop(MI, MBB, Alpha::SAFE_STORE_LOOP,
                           /*NumScratch=*/3, /*NumDefs=*/0,

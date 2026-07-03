@@ -102,6 +102,14 @@ public:
     return AtomicExpansionKind::None;
   }
 
+  // Alpha holds a value narrower than a register in sign-extended form, and the
+  // loop below produces its result that way, so say so: otherwise a narrow
+  // atomic result is compared against a constant materialized zero-extended and
+  // a negative one never matches.
+  ISD::NodeType getExtendForAtomicOps() const override {
+    return ISD::SIGN_EXTEND;
+  }
+
   SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
                                bool IsVarArg,
                                const SmallVectorImpl<ISD::InputArg> &Ins,

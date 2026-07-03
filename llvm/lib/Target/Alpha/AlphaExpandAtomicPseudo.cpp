@@ -70,11 +70,26 @@ private:
   bool expandAtomicCmpXchg(MachineBasicBlock &MBB,
                            MachineBasicBlock::iterator MBBI,
                            MachineBasicBlock::iterator &NextMBBI);
+  bool expandSubwordRMW(MachineBasicBlock &MBB,
+                        MachineBasicBlock::iterator MBBI,
+                        MachineBasicBlock::iterator &NextMBBI);
   bool expandSafeStore(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
                        MachineBasicBlock::iterator &NextMBBI);
 };
 
 char AlphaExpandAtomicPseudo::ID = 0;
+
+// Sign-extend the low byte or word of Src into Dst.  sextb and sextw are BWX
+// instructions; without BWX this is a shift up to the top of the register and
+// an arithmetic shift back down, which is what the sext_inreg patterns do.
+// Dst doubles as the intermediate, so this needs no scratch of its own.
+static void emitSignExtendField(MachineBasicBlock *MBB, const DebugLoc &DL,
+                                const AlphaInstrInfo *TII, bool IsWord,
+                                Register Dst, Register Src) {
+  unsigned Shift = IsWord ? 48 : 56;
+  BuildMI(MBB, DL, TII->get(Alpha::SLLi), Dst).addReg(Src).addImm(Shift);
+  BuildMI(MBB, DL, TII->get(Alpha::SRAi), Dst).addReg(Dst).addImm(Shift);
+}
 
 bool AlphaExpandAtomicPseudo::runOnMachineFunction(MachineFunction &MF) {
   STI = &MF.getSubtarget<AlphaSubtarget>();
@@ -107,6 +122,8 @@ bool AlphaExpandAtomicPseudo::expandMI(MachineBasicBlock &MBB,
     return expandAtomicRMW(MBB, MBBI, NextMBBI);
   case Alpha::ATOMIC_CAS_LOOP:
     return expandAtomicCmpXchg(MBB, MBBI, NextMBBI);
+  case Alpha::ATOMIC_SUBWORD_RMW_LOOP:
+    return expandSubwordRMW(MBB, MBBI, NextMBBI);
   case Alpha::SAFE_STORE_LOOP:
     return expandSafeStore(MBB, MBBI, NextMBBI);
   }
@@ -249,6 +266,82 @@ bool AlphaExpandAtomicPseudo::expandAtomicCmpXchg(
             .addImm(0);
   addNarrowedMemOperands(MIB, MI, MachineMemOperand::MOStore);
   BuildMI(StoreBB, DL, TII->get(Alpha::BEQ)).addReg(Tmp).addMBB(LoopBB);
+
+  NextMBBI = MBB.end();
+  MI.eraseFromParent();
+  addLiveIns(Blocks);
+  return true;
+}
+
+//          bic    Aligned, Addr, 7
+// LoopBB:  ldq_l  Quad, 0(Aligned)
+//          ext    Field, Quad, Addr     ; old field, zero-extended
+//          sext   Dst, Field            ; the result is sign-extended
+//          <op>   Tmp, Field, Val       ; bis $31, Val for an exchange
+//          msk    Field, Quad, Addr
+//          ins    Quad, Tmp, Addr
+//          bis    Quad, Field, Quad
+//          stq_c  Quad, 0(Aligned)      ; Quad <- success
+//          beq    Quad, LoopBB
+bool AlphaExpandAtomicPseudo::expandSubwordRMW(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
+    MachineBasicBlock::iterator &NextMBBI) {
+  MachineInstr &MI = *MBBI;
+  const DebugLoc &DL = MI.getDebugLoc();
+
+  Register Dst = MI.getOperand(0).getReg();
+  Register Aligned = MI.getOperand(1).getReg();
+  Register Quad = MI.getOperand(2).getReg();
+  Register Field = MI.getOperand(3).getReg();
+  Register Tmp = MI.getOperand(4).getReg();
+  Register Addr = MI.getOperand(5).getReg();
+  Register Val = MI.getOperand(6).getReg();
+  unsigned Opc = MI.getOperand(7).getImm();
+  bool IsWord = MI.getOperand(8).getImm() != 0;
+  unsigned ExtOpc = IsWord ? Alpha::EXTWL : Alpha::EXTBL;
+  unsigned MskOpc = IsWord ? Alpha::MSKWL : Alpha::MSKBL;
+  unsigned InsOpc = IsWord ? Alpha::INSWL : Alpha::INSBL;
+
+  BuildMI(MBB, MI, DL, TII->get(Alpha::BICi), Aligned).addReg(Addr).addImm(7);
+  // An exchange writes the operand back whatever the load returns, so
+  // positioning it in the quadword does not depend on the loop and is done
+  // once, before it.
+  if (!Opc)
+    BuildMI(MBB, MI, DL, TII->get(InsOpc), Tmp).addReg(Val).addReg(Addr);
+
+  SmallVector<MachineBasicBlock *, 2> Blocks;
+  splitBlock(MBB, MI, Blocks, 2);
+  MachineBasicBlock *LoopBB = Blocks[0], *ExitBB = Blocks[1];
+  MBB.addSuccessor(LoopBB);
+  LoopBB->addSuccessor(LoopBB);
+  LoopBB->addSuccessor(ExitBB);
+
+  MachineInstrBuilder MIB =
+      BuildMI(LoopBB, DL, TII->get(Alpha::LDQ_L), Quad)
+          .addReg(Aligned)
+          .addImm(0);
+  addNarrowedMemOperands(MIB, MI, MachineMemOperand::MOLoad);
+  BuildMI(LoopBB, DL, TII->get(ExtOpc), Field).addReg(Quad).addReg(Addr);
+  emitSignExtendField(LoopBB, DL, TII, IsWord, Dst, Field);
+  if (Opc)
+    BuildMI(LoopBB, DL, TII->get(Opc), Tmp).addReg(Field).addReg(Val);
+
+  // Dst already holds the value the extract produced, so Field is free to take
+  // the masked quadword, and Quad the positioned field: the merge needs no
+  // register beyond the ones already in hand.
+  BuildMI(LoopBB, DL, TII->get(MskOpc), Field).addReg(Quad).addReg(Addr);
+  if (Opc) {
+    BuildMI(LoopBB, DL, TII->get(InsOpc), Quad).addReg(Tmp).addReg(Addr);
+    BuildMI(LoopBB, DL, TII->get(Alpha::BIS), Quad).addReg(Quad).addReg(Field);
+  } else {
+    BuildMI(LoopBB, DL, TII->get(Alpha::BIS), Quad).addReg(Tmp).addReg(Field);
+  }
+  MIB = BuildMI(LoopBB, DL, TII->get(Alpha::STQ_C), Quad)
+            .addReg(Quad)
+            .addReg(Aligned)
+            .addImm(0);
+  addNarrowedMemOperands(MIB, MI, MachineMemOperand::MOStore);
+  BuildMI(LoopBB, DL, TII->get(Alpha::BEQ)).addReg(Quad).addMBB(LoopBB);
 
   NextMBBI = MBB.end();
   MI.eraseFromParent();

@@ -598,27 +598,29 @@ def : Pat<(atomic_store_32 GPRC:$val, ADDRri:$addr),
 // Load-locked / store-conditional, the primitives for atomic read-modify-write.
 // stq_c overwrites its source register with 1 on success or 0 on failure.
 let mayLoad = 1, hasSideEffects = 0 in {
-def LDL_L : AlphaInst<(outs GPRC:$Ra), (ins memri:$addr), "ldl_l $Ra, $addr",
-                      []> {
-  let Opcode = 0x2a;
-}
-def LDQ_L : AlphaInst<(outs GPRC:$Ra), (ins memri:$addr), "ldq_l $Ra, $addr",
-                      []> {
-  let Opcode = 0x2b;
-}
+def LDL_L : MForm<0x2a, (outs GPRC:$Ra), (ins memri:$addr), "ldl_l $Ra, $addr",
+                  []>;
+def LDQ_L : MForm<0x2b, (outs GPRC:$Ra), (ins memri:$addr), "ldq_l $Ra, $addr",
+                  []>;
 }
 let mayStore = 1, Constraints = "$Ra = $out", hasSideEffects = 0 in {
-def STL_C : AlphaInst<(outs GPRC:$out), (ins GPRC:$Ra, memri:$addr),
-                      "stl_c $Ra, $addr", []> {
-  let Opcode = 0x2e;
-}
-def STQ_C : AlphaInst<(outs GPRC:$out), (ins GPRC:$Ra, memri:$addr),
-                      "stq_c $Ra, $addr", []> {
-  let Opcode = 0x2f;
-}
+def STL_C : MForm<0x2e, (outs GPRC:$out), (ins GPRC:$Ra, memri:$addr),
+                  "stl_c $Ra, $addr", []>;
+def STQ_C : MForm<0x2f, (outs GPRC:$out), (ins GPRC:$Ra, memri:$addr),
+                  "stq_c $Ra, $addr", []>;
 }
 
-// An atomic read-modify-write whose memory operand is 32 bits wide.
+// Atomic read-modify-write pattern fragments by memory width.
+class AtomicI8<SDPatternOperator op>
+    : PatFrag<(ops node:$ptr, node:$val), (op node:$ptr, node:$val)> {
+  let IsAtomic = 1;
+  let MemoryVT = i8;
+}
+class AtomicI16<SDPatternOperator op>
+    : PatFrag<(ops node:$ptr, node:$val), (op node:$ptr, node:$val)> {
+  let IsAtomic = 1;
+  let MemoryVT = i16;
+}
 class AtomicI32<SDPatternOperator op>
     : PatFrag<(ops node:$ptr, node:$val), (op node:$ptr, node:$val)> {
   let IsAtomic = 1;
@@ -655,6 +657,20 @@ def ATOMIC_AND_I32  : AtomicRMW<AtomicI32<atomic_load_and>>;
 def ATOMIC_OR_I32   : AtomicRMW<AtomicI32<atomic_load_or>>;
 def ATOMIC_XOR_I32  : AtomicRMW<AtomicI32<atomic_load_xor>>;
 def ATOMIC_XCHG_I32 : AtomicRMW<AtomicI32<atomic_swap>>;
+
+def ATOMIC_ADD_I16  : AtomicRMW<AtomicI16<atomic_load_add>>;
+def ATOMIC_SUB_I16  : AtomicRMW<AtomicI16<atomic_load_sub>>;
+def ATOMIC_AND_I16  : AtomicRMW<AtomicI16<atomic_load_and>>;
+def ATOMIC_OR_I16   : AtomicRMW<AtomicI16<atomic_load_or>>;
+def ATOMIC_XOR_I16  : AtomicRMW<AtomicI16<atomic_load_xor>>;
+def ATOMIC_XCHG_I16 : AtomicRMW<AtomicI16<atomic_swap>>;
+
+def ATOMIC_ADD_I8  : AtomicRMW<AtomicI8<atomic_load_add>>;
+def ATOMIC_SUB_I8  : AtomicRMW<AtomicI8<atomic_load_sub>>;
+def ATOMIC_AND_I8  : AtomicRMW<AtomicI8<atomic_load_and>>;
+def ATOMIC_OR_I8   : AtomicRMW<AtomicI8<atomic_load_or>>;
+def ATOMIC_XOR_I8  : AtomicRMW<AtomicI8<atomic_load_xor>>;
+def ATOMIC_XCHG_I8 : AtomicRMW<AtomicI8<atomic_swap>>;
 
 // Compare-and-swap, also expanded to an ldq_l/stq_c loop.  $dst receives the
 // value read; the caller compares it against $cmp to determine success.
@@ -704,6 +720,16 @@ let Size = 28,
 def ATOMIC_CAS_LOOP : AlphaPseudo<(outs GPRC:$dst, GPRC:$t0, GPRC:$t1),
                                   (ins GPRC:$addr, GPRC:$cmp, GPRC:$new,
                                        i64imm:$is32), "", []>;
+
+// bic, then ldq_l, extract, sign-extend, the operation, mask, insert, merge,
+// stq_c and beq.  $isword selects the word forms over the byte forms.
+let Size = 44,
+    Constraints = "@earlyclobber $dst,@earlyclobber $t0,@earlyclobber $t1,"
+                  "@earlyclobber $t2,@earlyclobber $t3" in
+def ATOMIC_SUBWORD_RMW_LOOP
+    : AlphaPseudo<(outs GPRC:$dst, GPRC:$t0, GPRC:$t1, GPRC:$t2, GPRC:$t3),
+                  (ins GPRC:$addr, GPRC:$val, i64imm:$alu, i64imm:$isword), "",
+                  []>;
 
 // bic and insert, then ldq_l, mask, merge, stq_c and beq.
 let Size = 28,
