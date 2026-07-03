@@ -49,6 +49,11 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   setOperationAction(ISD::BR_CC, MVT::f64, Expand);
   setOperationAction(ISD::BR_JT, MVT::Other, Expand);
 
+  // Signed byte/word loads become a zero/any-extending load plus an explicit
+  // sign-extension, so only the extending byte/word loads need instructions.
+  for (MVT VT : {MVT::i8, MVT::i16})
+    setLoadExtAction(ISD::SEXTLOAD, MVT::i64, VT, Expand);
+
   computeRegisterProperties(STI.getRegisterInfo());
 }
 

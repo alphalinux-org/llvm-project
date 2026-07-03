@@ -349,6 +349,26 @@ def LDS : MForm<0x22, (outs FPRC:$Ra), (ins memri:$addr), "lds $Ra, $addr",
 def : Pat<(i64 (extloadi32 ADDRri:$addr)), (LDL memri:$addr)>;
 def : Pat<(i64 (zextloadi32 ADDRri:$addr)), (ZAPNOTi (LDL memri:$addr), 15)>;
 
+// Byte and word memory access (BWX extension, ev56 and later).  ldbu/ldwu
+// zero-extend; stb/stw store the low 8/16 bits.  Signed byte/word loads are
+// expanded to an extending load plus sign-extension (see setLoadExtAction).
+let Predicates = [HasBWX] in {
+let mayLoad = 1, hasSideEffects = 0 in {
+def LDBU : MForm<0x0a, (outs GPRC:$Ra), (ins memri:$addr), "ldbu $Ra, $addr",
+                 [(set i64:$Ra, (zextloadi8 ADDRri:$addr))]>;
+def LDWU : MForm<0x0c, (outs GPRC:$Ra), (ins memri:$addr), "ldwu $Ra, $addr",
+                 [(set i64:$Ra, (zextloadi16 ADDRri:$addr))]>;
+}
+let mayStore = 1, hasSideEffects = 0 in {
+def STB : MForm<0x0e, (outs), (ins GPRC:$Ra, memri:$addr), "stb $Ra, $addr",
+                [(truncstorei8 i64:$Ra, ADDRri:$addr)]>;
+def STW : MForm<0x0d, (outs), (ins GPRC:$Ra, memri:$addr), "stw $Ra, $addr",
+                [(truncstorei16 i64:$Ra, ADDRri:$addr)]>;
+}
+def : Pat<(i64 (extloadi8 ADDRri:$addr)), (LDBU memri:$addr)>;
+def : Pat<(i64 (extloadi16 ADDRri:$addr)), (LDWU memri:$addr)>;
+} // Predicates = [HasBWX]
+
 let mayStore = 1, hasSideEffects = 0 in {
 def STL : AlphaInst<(outs), (ins GPRC:$Ra, memri:$addr), "stl $Ra, $addr",
                     [(truncstorei32 i64:$Ra, ADDRri:$addr)]> { let Opcode = 0x2c; }
