@@ -19,6 +19,8 @@ using namespace llvm;
 
 extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeAlphaTarget() {
   RegisterTargetMachine<AlphaTargetMachine> X(getTheAlphaTarget());
+  PassRegistry &PR = *PassRegistry::getPassRegistry();
+  initializeAlphaExpandAtomicPseudoPass(PR);
 }
 
 static Reloc::Model getEffectiveRelocModel(bool JIT,
@@ -79,6 +81,7 @@ public:
 
   void addIRPasses() override;
   bool addInstSelector() override;
+  void addPreEmitPass() override;
 };
 } // end anonymous namespace
 
@@ -86,6 +89,15 @@ void AlphaPassConfig::addIRPasses() {
   // Expand atomic operations (inserting the memory barriers this target uses).
   addPass(createAtomicExpandLegacyPass());
   TargetPassConfig::addIRPasses();
+}
+
+void AlphaPassConfig::addPreEmitPass() {
+  // Build the ldq_l/stq_c loops.  This has to come after register allocation
+  // and after the post-RA scheduler: the architecture requires that no memory
+  // access appear between the load locked and the store conditional, and a
+  // spill, a reload or a reordering placed there makes the store conditional
+  // fail every time round the loop.
+  addPass(createAlphaExpandAtomicPseudo());
 }
 
 bool AlphaPassConfig::addInstSelector() {

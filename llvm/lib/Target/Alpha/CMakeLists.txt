@@ -13,6 +13,7 @@ add_public_tablegen_target(AlphaCommonTableGen)
 
 add_llvm_target(AlphaCodeGen
   AlphaAsmPrinter.cpp
+  AlphaExpandAtomicPseudo.cpp
   AlphaFrameLowering.cpp
   AlphaInstrInfo.cpp
   AlphaISelDAGToDAG.cpp
