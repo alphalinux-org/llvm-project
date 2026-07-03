@@ -34,6 +34,7 @@ public:
                  const MCSubtargetInfo &STI, raw_ostream &O) override;
 
   void printOperand(const MCInst *MI, int OpNum, raw_ostream &O);
+  void printMemOperand(const MCInst *MI, int OpNum, raw_ostream &O);
 };
 
 } // end namespace llvm
