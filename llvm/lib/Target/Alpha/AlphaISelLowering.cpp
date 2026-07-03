@@ -49,8 +49,9 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   setOperationAction(ISD::BR_CC, MVT::f64, Expand);
   setOperationAction(ISD::BR_JT, MVT::Other, Expand);
 
-  // Global addresses are loaded from the GOT.
+  // Global addresses are loaded from the GOT; constant pools are GP-relative.
   setOperationAction(ISD::GlobalAddress, MVT::i64, Custom);
+  setOperationAction(ISD::ConstantPool, MVT::i64, Custom);
 
   // Signed byte/word loads become a zero/any-extending load plus an explicit
   // sign-extension, so only the extending byte/word loads need instructions.
@@ -70,6 +71,10 @@ const char *AlphaTargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "AlphaISD::LITERAL";
   case AlphaISD::CALL:
     return "AlphaISD::CALL";
+  case AlphaISD::GPREL_HI:
+    return "AlphaISD::GPREL_HI";
+  case AlphaISD::GPREL_LO:
+    return "AlphaISD::GPREL_LO";
   }
   return nullptr;
 }
@@ -79,6 +84,8 @@ SDValue AlphaTargetLowering::LowerOperation(SDValue Op,
   switch (Op.getOpcode()) {
   case ISD::GlobalAddress:
     return LowerGlobalAddress(Op, DAG);
+  case ISD::ConstantPool:
+    return LowerConstantPool(Op, DAG);
   default:
     llvm_unreachable("unexpected operation to lower");
   }
@@ -94,6 +101,21 @@ SDValue AlphaTargetLowering::LowerGlobalAddress(SDValue Op,
   SDValue TGA =
       DAG.getTargetGlobalAddress(N->getGlobal(), DL, MVT::i64, N->getOffset());
   return DAG.getNode(AlphaISD::LITERAL, DL, MVT::i64, TGA);
+}
+
+SDValue AlphaTargetLowering::LowerConstantPool(SDValue Op,
+                                               SelectionDAG &DAG) const {
+  // Constant-pool entries are local, so their address is formed GP-relative:
+  // ldah $r, cp($gp) !gprelhigh ; lda $dst, cp($r) !gprellow.
+  DAG.getMachineFunction().getInfo<AlphaMachineFunctionInfo>()->setUsesGP();
+
+  auto *CP = cast<ConstantPoolSDNode>(Op);
+  SDLoc DL(Op);
+  SDValue TCP = DAG.getTargetConstantPool(CP->getConstVal(), MVT::i64,
+                                          CP->getAlign(), CP->getOffset());
+  SDValue GP = DAG.getRegister(Alpha::R29, MVT::i64);
+  SDValue Hi = DAG.getNode(AlphaISD::GPREL_HI, DL, MVT::i64, TCP, GP);
+  return DAG.getNode(AlphaISD::GPREL_LO, DL, MVT::i64, TCP, Hi);
 }
 
 SDValue AlphaTargetLowering::LowerCall(CallLoweringInfo &CLI,
