@@ -677,10 +677,107 @@ static MachineBasicBlock *emitSafeStore(MachineInstr &MI, MachineBasicBlock *BB,
   return ExitBB;
 }
 
+// Expand a sub-word (byte or word) atomic read-modify-write into an ldq_l/stq_c
+// loop that extracts the field, applies the operation and splices it back.
+static MachineBasicBlock *emitSubwordAtomicRMW(MachineInstr &MI,
+                                               MachineBasicBlock *BB,
+                                               unsigned Opc, bool IsWord) {
+  MachineFunction &MF = *BB->getParent();
+  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
+  MachineRegisterInfo &MRI = MF.getRegInfo();
+  const DebugLoc &DL = MI.getDebugLoc();
+
+  Register Dst = MI.getOperand(0).getReg();
+  Register Addr = MI.getOperand(1).getReg();
+  Register Val = MI.getOperand(2).getReg();
+  unsigned ExtOpc = IsWord ? Alpha::EXTWL : Alpha::EXTBL;
+  unsigned MskOpc = IsWord ? Alpha::MSKWL : Alpha::MSKBL;
+  unsigned InsOpc = IsWord ? Alpha::INSWL : Alpha::INSBL;
+
+  Register Aligned = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  BuildMI(*BB, MI, DL, TII.get(Alpha::BICi), Aligned).addReg(Addr).addImm(7);
+
+  const BasicBlock *LLVMBB = BB->getBasicBlock();
+  MachineFunction::iterator It = ++BB->getIterator();
+  MachineBasicBlock *LoopBB = MF.CreateMachineBasicBlock(LLVMBB);
+  MachineBasicBlock *ExitBB = MF.CreateMachineBasicBlock(LLVMBB);
+  MF.insert(It, LoopBB);
+  MF.insert(It, ExitBB);
+  ExitBB->splice(ExitBB->begin(), BB, std::next(MI.getIterator()), BB->end());
+  ExitBB->transferSuccessorsAndUpdatePHIs(BB);
+  BB->addSuccessor(LoopBB);
+  LoopBB->addSuccessor(LoopBB);
+  LoopBB->addSuccessor(ExitBB);
+
+  //   ldq_l  Quad, 0(Aligned)
+  //   ext    Quad, Addr, Dst        ; old field, zero-extended
+  //   <op>   Dst, Val, NewField     ; (or copy Val for xchg)
+  //   msk    Quad, Addr, Cleared
+  //   ins    NewField, Addr, Positioned
+  //   bis    Cleared, Positioned, Merged
+  //   stq_c  Merged, 0(Aligned)
+  //   beq    Merged, LoopBB
+  Register Quad = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  BuildMI(LoopBB, DL, TII.get(Alpha::LDQ_L), Quad).addReg(Aligned).addImm(0);
+  BuildMI(LoopBB, DL, TII.get(ExtOpc), Dst).addReg(Quad).addReg(Addr);
+
+  Register NewField = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  if (Opc)
+    BuildMI(LoopBB, DL, TII.get(Opc), NewField).addReg(Dst).addReg(Val);
+  else
+    BuildMI(LoopBB, DL, TII.get(Alpha::BIS), NewField)
+        .addReg(Alpha::R31)
+        .addReg(Val);
+
+  Register Cleared = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  BuildMI(LoopBB, DL, TII.get(MskOpc), Cleared).addReg(Quad).addReg(Addr);
+  Register Positioned = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  BuildMI(LoopBB, DL, TII.get(InsOpc), Positioned)
+      .addReg(NewField)
+      .addReg(Addr);
+  Register Merged = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  BuildMI(LoopBB, DL, TII.get(Alpha::BIS), Merged)
+      .addReg(Cleared)
+      .addReg(Positioned);
+  Register Success = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  BuildMI(LoopBB, DL, TII.get(Alpha::STQ_C), Success)
+      .addReg(Merged)
+      .addReg(Aligned)
+      .addImm(0);
+  BuildMI(LoopBB, DL, TII.get(Alpha::BEQ)).addReg(Success).addMBB(LoopBB);
+
+  MI.eraseFromParent();
+  return ExitBB;
+}
+
 MachineBasicBlock *
 AlphaTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
                                                  MachineBasicBlock *MBB) const {
   switch (MI.getOpcode()) {
+  case Alpha::ATOMIC_ADD_I8:
+    return emitSubwordAtomicRMW(MI, MBB, Alpha::ADDQ, false);
+  case Alpha::ATOMIC_SUB_I8:
+    return emitSubwordAtomicRMW(MI, MBB, Alpha::SUBQ, false);
+  case Alpha::ATOMIC_AND_I8:
+    return emitSubwordAtomicRMW(MI, MBB, Alpha::AND, false);
+  case Alpha::ATOMIC_OR_I8:
+    return emitSubwordAtomicRMW(MI, MBB, Alpha::BIS, false);
+  case Alpha::ATOMIC_XOR_I8:
+    return emitSubwordAtomicRMW(MI, MBB, Alpha::XOR, false);
+  case Alpha::ATOMIC_XCHG_I8:
+    return emitSubwordAtomicRMW(MI, MBB, 0, false);
+  case Alpha::ATOMIC_ADD_I16:
+    return emitSubwordAtomicRMW(MI, MBB, Alpha::ADDQ, true);
+  case Alpha::ATOMIC_SUB_I16:
+    return emitSubwordAtomicRMW(MI, MBB, Alpha::SUBQ, true);
+  case Alpha::ATOMIC_AND_I16:
+    return emitSubwordAtomicRMW(MI, MBB, Alpha::AND, true);
+  case Alpha::ATOMIC_OR_I16:
+    return emitSubwordAtomicRMW(MI, MBB, Alpha::BIS, true);
+  case Alpha::ATOMIC_XOR_I16:
+    return emitSubwordAtomicRMW(MI, MBB, Alpha::XOR, true);
+  case Alpha::ATOMIC_XCHG_I16:
+    return emitSubwordAtomicRMW(MI, MBB, 0, true);
   case Alpha::SAFE_STOREI8:
     return emitSafeStore(MI, MBB, /*IsWord=*/false);
   case Alpha::SAFE_STOREI16:

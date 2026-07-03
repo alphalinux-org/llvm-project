@@ -586,7 +586,17 @@ def STQ_C : AlphaInst<(outs GPRC:$out), (ins GPRC:$Ra, memri:$addr),
 }
 }
 
-// An atomic read-modify-write whose memory operand is 32 bits wide.
+// Atomic read-modify-write pattern fragments by memory width.
+class AtomicI8<SDPatternOperator op>
+    : PatFrag<(ops node:$ptr, node:$val), (op node:$ptr, node:$val)> {
+  let IsAtomic = 1;
+  let MemoryVT = i8;
+}
+class AtomicI16<SDPatternOperator op>
+    : PatFrag<(ops node:$ptr, node:$val), (op node:$ptr, node:$val)> {
+  let IsAtomic = 1;
+  let MemoryVT = i16;
+}
 class AtomicI32<SDPatternOperator op>
     : PatFrag<(ops node:$ptr, node:$val), (op node:$ptr, node:$val)> {
   let IsAtomic = 1;
@@ -623,6 +633,20 @@ def ATOMIC_AND_I32  : AtomicRMW<AtomicI32<atomic_load_and>>;
 def ATOMIC_OR_I32   : AtomicRMW<AtomicI32<atomic_load_or>>;
 def ATOMIC_XOR_I32  : AtomicRMW<AtomicI32<atomic_load_xor>>;
 def ATOMIC_XCHG_I32 : AtomicRMW<AtomicI32<atomic_swap>>;
+
+def ATOMIC_ADD_I16  : AtomicRMW<AtomicI16<atomic_load_add>>;
+def ATOMIC_SUB_I16  : AtomicRMW<AtomicI16<atomic_load_sub>>;
+def ATOMIC_AND_I16  : AtomicRMW<AtomicI16<atomic_load_and>>;
+def ATOMIC_OR_I16   : AtomicRMW<AtomicI16<atomic_load_or>>;
+def ATOMIC_XOR_I16  : AtomicRMW<AtomicI16<atomic_load_xor>>;
+def ATOMIC_XCHG_I16 : AtomicRMW<AtomicI16<atomic_swap>>;
+
+def ATOMIC_ADD_I8  : AtomicRMW<AtomicI8<atomic_load_add>>;
+def ATOMIC_SUB_I8  : AtomicRMW<AtomicI8<atomic_load_sub>>;
+def ATOMIC_AND_I8  : AtomicRMW<AtomicI8<atomic_load_and>>;
+def ATOMIC_OR_I8   : AtomicRMW<AtomicI8<atomic_load_or>>;
+def ATOMIC_XOR_I8  : AtomicRMW<AtomicI8<atomic_load_xor>>;
+def ATOMIC_XCHG_I8 : AtomicRMW<AtomicI8<atomic_swap>>;
 
 // Compare-and-swap, also expanded to an ldq_l/stq_c loop.  $dst receives the
 // value read; the caller compares it against $cmp to determine success.
