@@ -519,6 +519,15 @@ def ATOMIC_OR_I64   : AtomicRMW<AtomicI64<atomic_load_or>>;
 def ATOMIC_XOR_I64  : AtomicRMW<AtomicI64<atomic_load_xor>>;
 def ATOMIC_XCHG_I64 : AtomicRMW<AtomicI64<atomic_swap>>;
 
+// Compare-and-swap, also expanded to an ldq_l/stq_c loop.  $dst receives the
+// value read; the caller compares it against $cmp to determine success.
+let usesCustomInserter = 1, mayLoad = 1, mayStore = 1 in
+def ATOMIC_CMPXCHG_I64
+    : AlphaPseudo<(outs GPRC:$dst),
+                  (ins GPRC:$addr, GPRC:$cmp, GPRC:$new), "",
+                  [(set i64:$dst,
+                        (atomic_cmp_swap iPTR:$addr, i64:$cmp, i64:$new))]>;
+
 // Subroutine return: `ret $31, ($26), 1`.
 let isReturn = 1, isTerminator = 1, isBarrier = 1, Uses = [R26] in
 def RET : AlphaInst<(outs), (ins), "ret $$31, ($$26), 1", [(AlphaRet)]> {
