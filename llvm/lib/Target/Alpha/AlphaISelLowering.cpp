@@ -81,8 +81,17 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   for (auto Op : {ISD::SDIV, ISD::UDIV, ISD::SREM, ISD::UREM})
     setOperationAction(Op, MVT::i64, Custom);
 
-  // No byte-swap instruction; expand to shift/mask.
+  // No byte-swap or rotate instructions; expand to shift/mask sequences.
   setOperationAction(ISD::BSWAP, MVT::i64, Expand);
+  setOperationAction(ISD::ROTL, MVT::i64, Expand);
+  setOperationAction(ISD::ROTR, MVT::i64, Expand);
+
+  // umulh provides the high half of an unsigned 64x64 multiply; the signed high
+  // multiply is expanded in terms of it.
+  setOperationAction(ISD::MULHU, MVT::i64, Legal);
+  setOperationAction(ISD::MULHS, MVT::i64, Expand);
+  setOperationAction(ISD::SMUL_LOHI, MVT::i64, Expand);
+  setOperationAction(ISD::UMUL_LOHI, MVT::i64, Expand);
 
   // The CIX extension (ev67) provides population/leading/trailing zero counts;
   // otherwise they are expanded to bit-twiddling sequences.
