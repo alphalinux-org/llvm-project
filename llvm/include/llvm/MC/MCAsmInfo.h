@@ -388,6 +388,10 @@ protected:
   /// True if target uses @ (expr@specifier) for relocation specifiers.
   bool UseAtForSpecifier = false;
 
+  /// True if '!' is a relocation-specifier separator rather than an infix
+  /// operator, so it terminates an expression (e.g. Alpha's `sym !literal`).
+  bool UseExclaimForSpecifier = false;
+
   /// (ARM-specific) Uses parens for relocation specifier in data
   /// directives, e.g. .word foo(got).
   bool UseParensForSpecifier = false;
@@ -686,6 +690,7 @@ public:
   bool doDwarfFDESymbolsUseAbsDiff() const { return DwarfFDESymbolsUseAbsDiff; }
   bool useDwarfRegNumForCFI() const { return DwarfRegNumForCFI; }
   bool useAtForSpecifier() const { return UseAtForSpecifier; }
+  bool useExclaimForSpecifier() const { return UseExclaimForSpecifier; }
   bool useParensForSpecifier() const { return UseParensForSpecifier; }
   bool supportsExtendedDwarfLocDirective() const {
     return SupportsExtendedDwarfLocDirective;

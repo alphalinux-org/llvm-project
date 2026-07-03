@@ -1648,7 +1648,8 @@ static unsigned getGNUBinOpPrecedence(const MCAsmInfo &MAI,
   case AsmToken::Exclaim:
     // Hack to support ARM compatible aliases (implied 'sp' operand in 'srs*'
     // instructions like 'srsda #31!') and not parse ! as an infix operator.
-    if (MAI.getCommentString() == "@")
+    // Likewise where '!' introduces a relocation specifier (e.g. Alpha).
+    if (MAI.getCommentString() == "@" || MAI.useExclaimForSpecifier())
       return 0;
     Kind = MCBinaryExpr::OrNot;
     return 5;
