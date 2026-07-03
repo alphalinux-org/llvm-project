@@ -14,6 +14,7 @@ def FeatureBWX : SubtargetFeature<"bwx", "HasBWX", "true",
                                   "Enable byte/word memory instructions (BWX)">;
 def HasBWX : Predicate<"Subtarget->hasBWX()">,
              AssemblerPredicate<(all_of FeatureBWX)>;
+def NotBWX : Predicate<"!Subtarget->hasBWX()">;
 
 // Motion Video Instructions.  (GCC spells the enabling flag -mmax, but DEC's
 // name for the instruction set is MVI.)
