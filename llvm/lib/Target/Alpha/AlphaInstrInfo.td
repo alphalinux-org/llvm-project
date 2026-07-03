@@ -483,6 +483,42 @@ def : Pat<(atomic_store_64 GPRC:$val, ADDRri:$addr),
 def : Pat<(atomic_store_32 GPRC:$val, ADDRri:$addr),
           (STL GPRC:$val, memri:$addr)>;
 
+// Load-locked / store-conditional, the primitives for atomic read-modify-write.
+// stq_c overwrites its source register with 1 on success or 0 on failure.
+let mayLoad = 1, hasSideEffects = 0 in
+def LDQ_L : AlphaInst<(outs GPRC:$Ra), (ins memri:$addr), "ldq_l $Ra, $addr",
+                      []> {
+  let Opcode = 0x2b;
+}
+let mayStore = 1, Constraints = "$Ra = $out", hasSideEffects = 0 in
+def STQ_C : AlphaInst<(outs GPRC:$out), (ins GPRC:$Ra, memri:$addr),
+                      "stq_c $Ra, $addr", []> {
+  let Opcode = 0x2f;
+}
+
+// Atomic read-modify-write pseudos, expanded to an ldq_l/stq_c retry loop by a
+// custom inserter.  $dst receives the value read before the operation.
+class AtomicRMW<PatFrag node>
+    : AlphaPseudo<(outs GPRC:$dst), (ins GPRC:$addr, GPRC:$val), "",
+                  [(set i64:$dst, (node iPTR:$addr, i64:$val))]> {
+  let usesCustomInserter = 1;
+  let mayLoad = 1;
+  let mayStore = 1;
+}
+// 64-bit memory operand.
+class AtomicI64<SDPatternOperator op>
+    : PatFrag<(ops node:$ptr, node:$val), (op node:$ptr, node:$val)> {
+  let IsAtomic = 1;
+  let MemoryVT = i64;
+}
+
+def ATOMIC_ADD_I64  : AtomicRMW<AtomicI64<atomic_load_add>>;
+def ATOMIC_SUB_I64  : AtomicRMW<AtomicI64<atomic_load_sub>>;
+def ATOMIC_AND_I64  : AtomicRMW<AtomicI64<atomic_load_and>>;
+def ATOMIC_OR_I64   : AtomicRMW<AtomicI64<atomic_load_or>>;
+def ATOMIC_XOR_I64  : AtomicRMW<AtomicI64<atomic_load_xor>>;
+def ATOMIC_XCHG_I64 : AtomicRMW<AtomicI64<atomic_swap>>;
+
 // Subroutine return: `ret $31, ($26), 1`.
 let isReturn = 1, isTerminator = 1, isBarrier = 1, Uses = [R26] in
 def RET : AlphaInst<(outs), (ins), "ret $$31, ($$26), 1", [(AlphaRet)]> {

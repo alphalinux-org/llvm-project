@@ -322,9 +322,97 @@ AlphaTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
   return DAG.getNode(AlphaISD::RET_GLUE, DL, MVT::Other, RetOps);
 }
 
+// Expand an atomic read-modify-write pseudo into an ldq_l/stq_c retry loop.
+static MachineBasicBlock *emitAtomicRMW(MachineInstr &MI,
+                                        MachineBasicBlock *BB) {
+  MachineFunction &MF = *BB->getParent();
+  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
+  MachineRegisterInfo &MRI = MF.getRegInfo();
+  const DebugLoc &DL = MI.getDebugLoc();
+
+  Register Dst = MI.getOperand(0).getReg();
+  Register Addr = MI.getOperand(1).getReg();
+  Register Val = MI.getOperand(2).getReg();
+
+  // ALU opcode applied to (old value, operand); XCHG just takes the operand.
+  unsigned Opc = 0;
+  switch (MI.getOpcode()) {
+  case Alpha::ATOMIC_ADD_I64:
+    Opc = Alpha::ADDQ;
+    break;
+  case Alpha::ATOMIC_SUB_I64:
+    Opc = Alpha::SUBQ;
+    break;
+  case Alpha::ATOMIC_AND_I64:
+    Opc = Alpha::AND;
+    break;
+  case Alpha::ATOMIC_OR_I64:
+    Opc = Alpha::BIS;
+    break;
+  case Alpha::ATOMIC_XOR_I64:
+    Opc = Alpha::XOR;
+    break;
+  case Alpha::ATOMIC_XCHG_I64:
+    Opc = 0;
+    break;
+  default:
+    llvm_unreachable("unexpected atomic pseudo");
+  }
+
+  const BasicBlock *LLVMBB = BB->getBasicBlock();
+  MachineFunction::iterator It = ++BB->getIterator();
+  MachineBasicBlock *LoopBB = MF.CreateMachineBasicBlock(LLVMBB);
+  MachineBasicBlock *ExitBB = MF.CreateMachineBasicBlock(LLVMBB);
+  MF.insert(It, LoopBB);
+  MF.insert(It, ExitBB);
+
+  ExitBB->splice(ExitBB->begin(), BB, std::next(MI.getIterator()), BB->end());
+  ExitBB->transferSuccessorsAndUpdatePHIs(BB);
+  BB->addSuccessor(LoopBB);
+  LoopBB->addSuccessor(LoopBB);
+  LoopBB->addSuccessor(ExitBB);
+
+  // LoopBB:
+  //   ldq_l   Dst, 0(Addr)
+  //   <op>    New, Dst, Val   (or a copy of Val for xchg)
+  //   stq_c   Success<-New, 0(Addr)
+  //   beq     Success, LoopBB
+  BuildMI(LoopBB, DL, TII.get(Alpha::LDQ_L), Dst).addReg(Addr).addImm(0);
+
+  Register New = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  if (Opc)
+    BuildMI(LoopBB, DL, TII.get(Opc), New).addReg(Dst).addReg(Val);
+  else
+    BuildMI(LoopBB, DL, TII.get(Alpha::BIS), New)
+        .addReg(Alpha::R31)
+        .addReg(Val);
+
+  Register Success = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  BuildMI(LoopBB, DL, TII.get(Alpha::STQ_C), Success)
+      .addReg(New)
+      .addReg(Addr)
+      .addImm(0);
+  BuildMI(LoopBB, DL, TII.get(Alpha::BEQ)).addReg(Success).addMBB(LoopBB);
+
+  MI.eraseFromParent();
+  return ExitBB;
+}
+
 MachineBasicBlock *
 AlphaTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
                                                  MachineBasicBlock *MBB) const {
+  switch (MI.getOpcode()) {
+  case Alpha::ATOMIC_ADD_I64:
+  case Alpha::ATOMIC_SUB_I64:
+  case Alpha::ATOMIC_AND_I64:
+  case Alpha::ATOMIC_OR_I64:
+  case Alpha::ATOMIC_XOR_I64:
+  case Alpha::ATOMIC_XCHG_I64:
+    return emitAtomicRMW(MI, MBB);
+  default:
+    break;
+  }
+
   // MOVi2f/MOVf2i reinterpret the 64 bits of a value by bouncing them through
   // an 8-byte stack slot, since Alpha has no direct integer/FP register move.
   MachineFunction &MF = *MBB->getParent();

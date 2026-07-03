@@ -71,6 +71,13 @@ public:
   Instruction *emitTrailingFence(IRBuilderBase &Builder, Instruction *Inst,
                                  AtomicOrdering Ord) const override;
 
+  // Atomic read-modify-writes are lowered to an ldq_l/stq_c loop by a custom
+  // inserter, so keep them as target nodes rather than expanding in IR.
+  AtomicExpansionKind
+  shouldExpandAtomicRMWInIR(const AtomicRMWInst *AI) const override {
+    return AtomicExpansionKind::None;
+  }
+
   SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
                                bool IsVarArg,
                                const SmallVectorImpl<ISD::InputArg> &Ins,
