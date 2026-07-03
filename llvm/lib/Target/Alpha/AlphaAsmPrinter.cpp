@@ -59,6 +59,14 @@ MCOperand AlphaAsmPrinter::lowerOperand(const MachineOperand &MO) const {
   case MachineOperand::MO_MachineBasicBlock:
     return MCOperand::createExpr(
         MCSymbolRefExpr::create(MO.getMBB()->getSymbol(), OutContext));
+  case MachineOperand::MO_GlobalAddress: {
+    const MCExpr *Expr =
+        MCSymbolRefExpr::create(getSymbol(MO.getGlobal()), OutContext);
+    if (MO.getOffset())
+      Expr = MCBinaryExpr::createAdd(
+          Expr, MCConstantExpr::create(MO.getOffset(), OutContext), OutContext);
+    return MCOperand::createExpr(Expr);
+  }
   default:
     llvm_unreachable("unknown operand type");
   }
