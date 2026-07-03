@@ -254,15 +254,24 @@ def : Pat<(setcc GPRC:$a, GPRC:$b, SETUGE), (CMPULE GPRC:$b, GPRC:$a)>;
 //===----------------------------------------------------------------------===//
 
 let mayLoad = 1, hasSideEffects = 0 in {
-def LDQ : AlphaInst<(outs GPRC:$Ra), (ins memri:$addr), "ldq $Ra, $addr",
-                    [(set i64:$Ra, (load ADDRri:$addr))]> { let Opcode = 0x29; }
-def LDT : AlphaInst<(outs FPRC:$Ra), (ins memri:$addr), "ldt $Ra, $addr",
-                    [(set f64:$Ra, (load ADDRri:$addr))]> { let Opcode = 0x23; }
-def LDS : AlphaInst<(outs FPRC:$Ra), (ins memri:$addr), "lds $Ra, $addr",
-                    [(set f32:$Ra, (load ADDRri:$addr))]> { let Opcode = 0x22; }
+def LDL : MForm<0x28, (outs GPRC:$Ra), (ins memri:$addr), "ldl $Ra, $addr",
+                [(set i64:$Ra, (sextloadi32 ADDRri:$addr))]>;
+def LDQ : MForm<0x29, (outs GPRC:$Ra), (ins memri:$addr), "ldq $Ra, $addr",
+                [(set i64:$Ra, (load ADDRri:$addr))]>;
+def LDT : MForm<0x23, (outs FPRC:$Ra), (ins memri:$addr), "ldt $Ra, $addr",
+                [(set f64:$Ra, (load ADDRri:$addr))]>;
+def LDS : MForm<0x22, (outs FPRC:$Ra), (ins memri:$addr), "lds $Ra, $addr",
+                [(set f32:$Ra, (load ADDRri:$addr))]>;
 }
 
+// An i32 load with don't-care high bits can use the sign-extending ldl; a
+// zero-extending load clears the high half with zapnot.
+def : Pat<(i64 (extloadi32 ADDRri:$addr)), (LDL memri:$addr)>;
+def : Pat<(i64 (zextloadi32 ADDRri:$addr)), (ZAPNOTi (LDL memri:$addr), 15)>;
+
 let mayStore = 1, hasSideEffects = 0 in {
+def STL : AlphaInst<(outs), (ins GPRC:$Ra, memri:$addr), "stl $Ra, $addr",
+                    [(truncstorei32 i64:$Ra, ADDRri:$addr)]> { let Opcode = 0x2c; }
 def STQ : AlphaInst<(outs), (ins GPRC:$Ra, memri:$addr), "stq $Ra, $addr",
                     [(store i64:$Ra, ADDRri:$addr)]> { let Opcode = 0x2d; }
 def STT : AlphaInst<(outs), (ins FPRC:$Ra, memri:$addr), "stt $Ra, $addr",
