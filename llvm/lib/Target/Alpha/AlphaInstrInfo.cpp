@@ -43,3 +43,32 @@ void AlphaInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   }
   report_fatal_error("Alpha copyPhysReg: unsupported register class");
 }
+
+void AlphaInstrInfo::storeRegToStackSlot(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, Register SrcReg,
+    bool isKill, int FrameIndex, const TargetRegisterClass *RC, Register VReg,
+    MachineInstr::MIFlag Flags) const {
+  DebugLoc DL = MBBI != MBB.end() ? MBBI->getDebugLoc() : DebugLoc();
+  unsigned Opc =
+      Alpha::GPRCRegClass.hasSubClassEq(RC) ? Alpha::STQ : Alpha::STT;
+  BuildMI(MBB, MBBI, DL, get(Opc))
+      .addReg(SrcReg, getKillRegState(isKill))
+      .addFrameIndex(FrameIndex)
+      .addImm(0)
+      .setMIFlag(Flags);
+}
+
+void AlphaInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
+                                          MachineBasicBlock::iterator MBBI,
+                                          Register DestReg, int FrameIndex,
+                                          const TargetRegisterClass *RC,
+                                          Register VReg, unsigned SubReg,
+                                          MachineInstr::MIFlag Flags) const {
+  DebugLoc DL = MBBI != MBB.end() ? MBBI->getDebugLoc() : DebugLoc();
+  unsigned Opc =
+      Alpha::GPRCRegClass.hasSubClassEq(RC) ? Alpha::LDQ : Alpha::LDT;
+  BuildMI(MBB, MBBI, DL, get(Opc), DestReg)
+      .addFrameIndex(FrameIndex)
+      .addImm(0)
+      .setMIFlag(Flags);
+}

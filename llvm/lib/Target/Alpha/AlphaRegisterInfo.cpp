@@ -48,7 +48,23 @@ BitVector AlphaRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
 bool AlphaRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
                                             int SPAdj, unsigned FIOperandNum,
                                             RegScavenger *RS) const {
-  report_fatal_error("Alpha frame index elimination is not yet implemented");
+  assert(SPAdj == 0 && "Unexpected stack pointer adjustment");
+  MachineInstr &Inst = *MI;
+  MachineFunction &MF = *Inst.getParent()->getParent();
+  const TargetFrameLowering *TFI = MF.getSubtarget().getFrameLowering();
+
+  int FI = Inst.getOperand(FIOperandNum).getIndex();
+  Register FrameReg;
+  // The displacement operand of the memory instruction follows the base.
+  int64_t Offset = TFI->getFrameIndexReference(MF, FI, FrameReg).getFixed() +
+                   Inst.getOperand(FIOperandNum + 1).getImm();
+
+  if (!isInt<16>(Offset))
+    report_fatal_error("Alpha frame offset does not fit in 16 bits");
+
+  Inst.getOperand(FIOperandNum).ChangeToRegister(FrameReg, /*isDef=*/false);
+  Inst.getOperand(FIOperandNum + 1).setImm(Offset);
+  return false;
 }
 
 Register AlphaRegisterInfo::getFrameRegister(const MachineFunction &MF) const {
