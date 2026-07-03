@@ -44,6 +44,10 @@ def ADJCALLSTACKUP   : AlphaPseudo<(outs), (ins i64imm:$amt1, i64imm:$amt2),
 def AlphaRet : SDNode<"AlphaISD::RET_GLUE", SDTNone,
                       [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 
+// Load the address of a global from the GOT (large-data model): the operand is
+// a GP-relative GOT slot resolved by an R_ALPHA_LITERAL relocation.
+def AlphaLiteral : SDNode<"AlphaISD::LITERAL", SDTIntUnaryOp>;
+
 //===----------------------------------------------------------------------===//
 // Operands and immediate predicates.
 //===----------------------------------------------------------------------===//
@@ -66,6 +70,9 @@ def memri : Operand<i64> {
   let MIOperandInfo = (ops GPRC, s16imm);
   let PrintMethod = "printMemOperand";
 }
+
+// A symbol operand (e.g. a global address), printed as its bare name.
+def symbol : Operand<i64>;
 
 def ADDRri : ComplexPattern<i64, 2, "SelectADDRri", [frameindex]>;
 
@@ -248,6 +255,23 @@ def : Pat<(i64 immSExt16:$imm), (LDA immSExt16:$imm, R31)>;
 
 // `not $x` is `ornot $31, $x` (0 OR ~x), avoiding an explicit -1.
 def : Pat<(not GPRC:$x), (ORNOT R31, GPRC:$x)>;
+
+//===----------------------------------------------------------------------===//
+// Global pointer and global addresses.
+//===----------------------------------------------------------------------===//
+
+// Establish the global pointer from the procedure value on entry.  `ldgp` is a
+// gas macro that expands to an ldah/lda pair with matching !gpdisp relocations.
+let Uses = [R27], Defs = [R29], hasSideEffects = 1, isPseudo = 1 in
+def LDGP : AlphaInst<(outs), (ins), "ldgp $$29, 0($$27)", []>;
+
+// Load a global's address from its GOT slot via an R_ALPHA_LITERAL relocation.
+let mayLoad = 1, hasSideEffects = 0, Uses = [R29] in
+def LDQl : AlphaInst<(outs GPRC:$dst), (ins symbol:$sym),
+                     "ldq $dst, $sym($$29)\t\t!literal", []> {
+  let Opcode = 0x29;
+}
+def : Pat<(AlphaLiteral tglobaladdr:$sym), (LDQl tglobaladdr:$sym)>;
 
 //===----------------------------------------------------------------------===//
 // Integer/floating register moves and conversions.
