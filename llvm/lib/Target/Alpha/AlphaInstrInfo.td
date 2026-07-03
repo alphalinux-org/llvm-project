@@ -116,11 +116,33 @@ def CMOVNE : OForm<0x11, 0x26, (outs GPRC:$Rc),
 // `bis $31, $Rb, $Rc` to move an integer register.
 def BIS : ALU_rr<0x11, 0x20, "bis", or>;
 
-// Floating-point copy-sign: `cpys $Ra, $Rb, $Rc`.  Used by copyPhysReg as
-// `cpys $Rb, $Rb, $Rc` to move a floating-point register.
+// Floating-point copy-sign: `cpys $Ra, $Rb, $Rc` builds the sign of $Ra with
+// the magnitude of $Rb.  Used by copyPhysReg as `cpys $Rb, $Rb, $Rc` to move a
+// floating-point register.
 def CPYS : AlphaInst<(outs FPRC:$Rc), (ins FPRC:$Ra, FPRC:$Rb),
                      "cpys $Ra, $Rb, $Rc", []> {
   let Opcode = 0x17;
+}
+
+// Sign manipulation, built from cpys/cpysn.  Each is defined per floating-point
+// type so the result type is unambiguous.  fabs uses the (positive) sign of
+// $f31; fneg uses the negated sign of the source; fcopysign takes the magnitude
+// of $Ra and the sign of $Rb.
+let Opcode = 0x17 in {
+def FABSS : AlphaInst<(outs FPRC:$Rc), (ins FPRC:$Rb), "cpys $$f31, $Rb, $Rc",
+                      [(set f32:$Rc, (fabs f32:$Rb))]>;
+def FABST : AlphaInst<(outs FPRC:$Rc), (ins FPRC:$Rb), "cpys $$f31, $Rb, $Rc",
+                      [(set f64:$Rc, (fabs f64:$Rb))]>;
+def FNEGS : AlphaInst<(outs FPRC:$Rc), (ins FPRC:$Rb), "cpysn $Rb, $Rb, $Rc",
+                      [(set f32:$Rc, (fneg f32:$Rb))]>;
+def FNEGT : AlphaInst<(outs FPRC:$Rc), (ins FPRC:$Rb), "cpysn $Rb, $Rb, $Rc",
+                      [(set f64:$Rc, (fneg f64:$Rb))]>;
+def FCPYSS : AlphaInst<(outs FPRC:$Rc), (ins FPRC:$Ra, FPRC:$Rb),
+                       "cpys $Rb, $Ra, $Rc",
+                       [(set f32:$Rc, (fcopysign f32:$Ra, f32:$Rb))]>;
+def FCPYST : AlphaInst<(outs FPRC:$Rc), (ins FPRC:$Ra, FPRC:$Rb),
+                       "cpys $Rb, $Ra, $Rc",
+                       [(set f64:$Rc, (fcopysign f64:$Ra, f64:$Rb))]>;
 }
 
 // IEEE floating-point operate instruction: `<mnem> $Ra, $Rb, $Rc`.  The `s`
