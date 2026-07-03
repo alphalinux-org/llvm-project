@@ -299,6 +299,15 @@ def CVTTS : AlphaInst<(outs FPRC:$Fc), (ins FPRC:$Fb), "cvtts $Fb, $Fc",
   let Opcode = 0x16;
 }
 
+// Square root, from the FIX extension (ev6).  The single source is $Fb (with
+// $Fa = $31).  sqrts is single precision, sqrtt double.
+let Predicates = [HasFIX], hasSideEffects = 0 in {
+def SQRTS : AlphaInst<(outs FPRC:$Fc), (ins FPRC:$Fb), "sqrts $Fb, $Fc",
+                      [(set f32:$Fc, (fsqrt f32:$Fb))]> { let Opcode = 0x14; }
+def SQRTT : AlphaInst<(outs FPRC:$Fc), (ins FPRC:$Fb), "sqrtt $Fb, $Fc",
+                      [(set f64:$Fc, (fsqrt f64:$Fb))]> { let Opcode = 0x14; }
+}
+
 // Integer/floating conversions on values held in floating-point registers.
 def CVTQT : AlphaInst<(outs FPRC:$Fc), (ins FPRC:$Fb), "cvtqt $Fb, $Fc", []> {
   let Opcode = 0x16;
