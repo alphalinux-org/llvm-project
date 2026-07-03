@@ -106,6 +106,13 @@ def NOP : OForm<0x11, 0x20, (outs), (ins), "nop", []> {
   let Rc = 31;
 }
 
+// Memory barrier: misc-format instruction with function code 0x4000.
+let hasSideEffects = 1 in
+def MB : AlphaInst<(outs), (ins), "mb", [(atomic_fence timm, timm)]> {
+  let Opcode = 0x18;
+  let Inst{25-0} = 0x4000;
+}
+
 // Register-register integer operate instruction: `<mnem> $Ra, $Rb, $Rc`
 // computes $Rc = $Ra <op> $Rb.
 class ALU_rr<bits<6> opc, bits<7> func, string mnem, SDPatternOperator node>
@@ -494,6 +501,21 @@ def STT : AlphaInst<(outs), (ins FPRC:$Ra, memri:$addr), "stt $Ra, $addr",
 def STS : AlphaInst<(outs), (ins FPRC:$Ra, memri:$addr), "sts $Ra, $addr",
                     [(store f32:$Ra, ADDRri:$addr)]> { let Opcode = 0x26; }
 }
+
+// Naturally aligned integer loads and stores are atomic; stronger orderings get
+// an explicit memory barrier inserted around them (shouldInsertFencesForAtomic).
+def : Pat<(i64 (atomic_load_64 ADDRri:$addr)), (LDQ memri:$addr)>;
+// ldl sign-extends, which is Alpha's canonical form for a 32-bit value, so it
+// serves the sign-extending load and the one whose high half is don't-care.  A
+// zero-extending atomic i32 load -- DAGCombiner::tryToFoldExtOfAtomicLoad forms
+// one out of `zext (atomic load i32)' -- has to have the high half cleared.
+def : Pat<(i64 (atomic_load_asext_32 ADDRri:$addr)), (LDL memri:$addr)>;
+def : Pat<(i64 (atomic_load_zext_32 ADDRri:$addr)),
+          (ZAPNOTi (LDL memri:$addr), 15)>;
+def : Pat<(atomic_store_64 GPRC:$val, ADDRri:$addr),
+          (STQ GPRC:$val, memri:$addr)>;
+def : Pat<(atomic_store_32 GPRC:$val, ADDRri:$addr),
+          (STL GPRC:$val, memri:$addr)>;
 
 // Subroutine return: `ret $31, ($26), 1`.
 // $26 is not listed as a use: the epilogue reloads it as a frame-destroy

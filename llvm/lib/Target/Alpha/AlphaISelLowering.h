@@ -54,6 +54,23 @@ public:
     return MVT::i64;
   }
 
+  // Atomic loads/stores are plain aligned accesses; the atomic expander adds
+  // memory barriers around the stronger orderings.
+  bool shouldInsertFencesForAtomic(const Instruction *I) const override {
+    return true;
+  }
+
+  // The default emits a leading fence only for an instruction that stores, so a
+  // sequentially consistent load came out as a bare `ldq; mb'.  That leaves no
+  // barrier between an earlier SC store and this load, which is exactly the
+  // store-buffer shape: two threads each storing to one location and then
+  // loading the other may both read the stale value, which sequential
+  // consistency forbids.  PowerPC overrides this for the same reason.
+  Instruction *emitLeadingFence(IRBuilderBase &Builder, Instruction *Inst,
+                                AtomicOrdering Ord) const override;
+  Instruction *emitTrailingFence(IRBuilderBase &Builder, Instruction *Inst,
+                                 AtomicOrdering Ord) const override;
+
   SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
                                bool IsVarArg,
                                const SmallVectorImpl<ISD::InputArg> &Ins,

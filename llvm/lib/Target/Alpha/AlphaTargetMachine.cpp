@@ -10,6 +10,7 @@
 #include "Alpha.h"
 #include "AlphaMachineFunctionInfo.h"
 #include "TargetInfo/AlphaTargetInfo.h"
+#include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/MC/TargetRegistry.h"
@@ -76,9 +77,16 @@ public:
     return getTM<AlphaTargetMachine>();
   }
 
+  void addIRPasses() override;
   bool addInstSelector() override;
 };
 } // end anonymous namespace
+
+void AlphaPassConfig::addIRPasses() {
+  // Expand atomic operations (inserting the memory barriers this target uses).
+  addPass(createAtomicExpandLegacyPass());
+  TargetPassConfig::addIRPasses();
+}
 
 bool AlphaPassConfig::addInstSelector() {
   addPass(createAlphaISelDag(getAlphaTargetMachine(), getOptLevel()));
