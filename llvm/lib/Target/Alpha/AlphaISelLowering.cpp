@@ -53,6 +53,16 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   setOperationAction(ISD::GlobalAddress, MVT::i64, Custom);
   setOperationAction(ISD::ConstantPool, MVT::i64, Custom);
 
+  // Only the ordered floating-point comparisons have direct instructions; the
+  // rest are expanded into combinations of them.  SETNE belongs here too: the
+  // NaN-agnostic codes otherwise map straight onto cmpteq/cmptlt/cmptle, but
+  // there is no cmptne, so it has to become an inverted cmpteq.
+  for (MVT VT : {MVT::f32, MVT::f64})
+    for (auto CC :
+         {ISD::SETONE, ISD::SETUEQ, ISD::SETUGT, ISD::SETUGE, ISD::SETULT,
+          ISD::SETULE, ISD::SETUNE, ISD::SETUO, ISD::SETO, ISD::SETNE})
+      setCondCodeAction(CC, VT, Expand);
+
   // Signed byte/word loads become a zero/any-extending load plus an explicit
   // sign-extension, so only the extending byte/word loads need instructions.
   for (MVT VT : {MVT::i8, MVT::i16})
