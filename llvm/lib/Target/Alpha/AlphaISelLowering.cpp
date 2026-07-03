@@ -416,6 +416,65 @@ static MachineBasicBlock *emitAtomicRMW(MachineInstr &MI,
   return ExitBB;
 }
 
+// Expand a compare-and-swap pseudo into an ldq_l/stq_c loop.  $dst receives the
+// value that was read; success is (dst == cmp), computed by the caller.
+static MachineBasicBlock *emitAtomicCmpXchg(MachineInstr &MI,
+                                            MachineBasicBlock *BB) {
+  MachineFunction &MF = *BB->getParent();
+  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
+  MachineRegisterInfo &MRI = MF.getRegInfo();
+  const DebugLoc &DL = MI.getDebugLoc();
+
+  Register Dst = MI.getOperand(0).getReg();
+  Register Addr = MI.getOperand(1).getReg();
+  Register Cmp = MI.getOperand(2).getReg();
+  Register New = MI.getOperand(3).getReg();
+
+  const BasicBlock *LLVMBB = BB->getBasicBlock();
+  MachineFunction::iterator It = ++BB->getIterator();
+  MachineBasicBlock *LoopBB = MF.CreateMachineBasicBlock(LLVMBB);
+  MachineBasicBlock *StoreBB = MF.CreateMachineBasicBlock(LLVMBB);
+  MachineBasicBlock *ExitBB = MF.CreateMachineBasicBlock(LLVMBB);
+  MF.insert(It, LoopBB);
+  MF.insert(It, StoreBB);
+  MF.insert(It, ExitBB);
+
+  ExitBB->splice(ExitBB->begin(), BB, std::next(MI.getIterator()), BB->end());
+  ExitBB->transferSuccessorsAndUpdatePHIs(BB);
+  BB->addSuccessor(LoopBB);
+  LoopBB->addSuccessor(StoreBB);
+  LoopBB->addSuccessor(ExitBB);
+  StoreBB->addSuccessor(LoopBB);
+  StoreBB->addSuccessor(ExitBB);
+
+  // LoopBB:
+  //   ldq_l  Dst, 0(Addr)
+  //   cmpeq  Dst, Cmp, Eq
+  //   beq    Eq, ExitBB          ; mismatch: leave Dst as read, no store
+  BuildMI(LoopBB, DL, TII.get(Alpha::LDQ_L), Dst).addReg(Addr).addImm(0);
+  Register Eq = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  BuildMI(LoopBB, DL, TII.get(Alpha::CMPEQ), Eq).addReg(Dst).addReg(Cmp);
+  BuildMI(LoopBB, DL, TII.get(Alpha::BEQ)).addReg(Eq).addMBB(ExitBB);
+
+  // StoreBB:
+  //   bis    $31, New, Store
+  //   stq_c  Store, 0(Addr)       ; Store <- success
+  //   beq    Store, LoopBB        ; retry on store-conditional failure
+  Register Store = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  BuildMI(StoreBB, DL, TII.get(Alpha::BIS), Store)
+      .addReg(Alpha::R31)
+      .addReg(New);
+  Register Success = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  BuildMI(StoreBB, DL, TII.get(Alpha::STQ_C), Success)
+      .addReg(Store)
+      .addReg(Addr)
+      .addImm(0);
+  BuildMI(StoreBB, DL, TII.get(Alpha::BEQ)).addReg(Success).addMBB(LoopBB);
+
+  MI.eraseFromParent();
+  return ExitBB;
+}
+
 MachineBasicBlock *
 AlphaTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
                                                  MachineBasicBlock *MBB) const {
@@ -427,6 +486,8 @@ AlphaTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
   case Alpha::ATOMIC_XOR_I64:
   case Alpha::ATOMIC_XCHG_I64:
     return emitAtomicRMW(MI, MBB);
+  case Alpha::ATOMIC_CMPXCHG_I64:
+    return emitAtomicCmpXchg(MI, MBB);
   default:
     break;
   }
