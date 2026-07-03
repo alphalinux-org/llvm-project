@@ -117,10 +117,11 @@ def NOP : OForm<0x11, 0x20, (outs), (ins), "nop", []> {
   let Rc = 31;
 }
 
-// Memory barrier.
+// Memory barrier: misc-format instruction with function code 0x4000.
 let hasSideEffects = 1 in
 def MB : AlphaInst<(outs), (ins), "mb", [(atomic_fence timm, timm)]> {
   let Opcode = 0x18;
+  let Inst{25-0} = 0x4000;
 }
 
 // Register-register integer operate instruction: `<mnem> $Ra, $Rb, $Rc`
@@ -400,9 +401,9 @@ def LDGP : AlphaInst<(outs), (ins), "ldgp $$29, 0($$27)", []>;
 
 // Load a global's address from its GOT slot via an R_ALPHA_LITERAL relocation.
 let mayLoad = 1, hasSideEffects = 0, Uses = [R29] in
-def LDQl : AlphaInst<(outs GPRC:$dst), (ins symbol:$sym),
-                     "ldq $dst, $sym($$29)\t\t!literal", []> {
-  let Opcode = 0x29;
+def LDQl : MFormD<0x29, (outs GPRC:$Rc), (ins literal_sym:$disp),
+                  "ldq $Rc, $disp($$29)\t\t!literal", []> {
+  let Rb = 29;
 }
 def : Pat<(AlphaLiteral tglobaladdr:$sym), (LDQl tglobaladdr:$sym)>;
 def : Pat<(AlphaLiteral texternalsym:$sym), (LDQl texternalsym:$sym)>;
@@ -410,14 +411,10 @@ def : Pat<(AlphaLiteral texternalsym:$sym), (LDQl texternalsym:$sym)>;
 // GP-relative high/low address parts.  The relocation suffix distinguishes the
 // two; the same symbol operand feeds both.
 let hasSideEffects = 0 in {
-def LDAHg : AlphaInst<(outs GPRC:$dst), (ins symbol:$sym, GPRC:$base),
-                      "ldah $dst, $sym($base)\t\t!gprelhigh", []> {
-  let Opcode = 0x09;
-}
-def LDAg : AlphaInst<(outs GPRC:$dst), (ins symbol:$sym, GPRC:$base),
-                     "lda $dst, $sym($base)\t\t!gprellow", []> {
-  let Opcode = 0x08;
-}
+def LDAHg : MFormD<0x09, (outs GPRC:$Rc), (ins gprelhigh_sym:$disp, GPRC:$Rb),
+                   "ldah $Rc, $disp($Rb)\t\t!gprelhigh", []>;
+def LDAg : MFormD<0x08, (outs GPRC:$Rc), (ins gprellow_sym:$disp, GPRC:$Rb),
+                  "lda $Rc, $disp($Rb)\t\t!gprellow", []>;
 }
 def : Pat<(AlphaGprelHi tconstpool:$sym, GPRC:$base),
           (LDAHg tconstpool:$sym, GPRC:$base)>;
@@ -435,25 +432,25 @@ def : Pat<(AlphaGprelLo tglobaladdr:$sym, GPRC:$base),
 // A load of a GP-relative address folds the !gprellow low part into the load
 // displacement, so only the ldah !gprelhigh is needed to form the address.
 let mayLoad = 1, hasSideEffects = 0 in {
-def LDLg : AlphaInst<(outs GPRC:$Ra), (ins symbol:$sym, GPRC:$base),
-                     "ldl $Ra, $sym($base)\t\t!gprellow", []> { let Opcode = 0x28; }
-def LDQg : AlphaInst<(outs GPRC:$Ra), (ins symbol:$sym, GPRC:$base),
-                     "ldq $Ra, $sym($base)\t\t!gprellow", []> { let Opcode = 0x29; }
-def LDTg : AlphaInst<(outs FPRC:$Ra), (ins symbol:$sym, GPRC:$base),
-                     "ldt $Ra, $sym($base)\t\t!gprellow", []> { let Opcode = 0x23; }
-def LDSg : AlphaInst<(outs FPRC:$Ra), (ins symbol:$sym, GPRC:$base),
-                     "lds $Ra, $sym($base)\t\t!gprellow", []> { let Opcode = 0x22; }
+def LDLg : MFormD<0x28, (outs GPRC:$Rc), (ins gprellow_sym:$disp, GPRC:$Rb),
+                  "ldl $Rc, $disp($Rb)\t\t!gprellow", []>;
+def LDQg : MFormD<0x29, (outs GPRC:$Rc), (ins gprellow_sym:$disp, GPRC:$Rb),
+                  "ldq $Rc, $disp($Rb)\t\t!gprellow", []>;
+def LDTg : MFormD<0x23, (outs FPRC:$Rc), (ins gprellow_sym:$disp, GPRC:$Rb),
+                  "ldt $Rc, $disp($Rb)\t\t!gprellow", []>;
+def LDSg : MFormD<0x22, (outs FPRC:$Rc), (ins gprellow_sym:$disp, GPRC:$Rb),
+                  "lds $Rc, $disp($Rb)\t\t!gprellow", []>;
 }
 // The corresponding stores, used for small-data globals.
 let mayStore = 1, hasSideEffects = 0 in {
-def STLg : AlphaInst<(outs), (ins GPRC:$Ra, symbol:$sym, GPRC:$base),
-                     "stl $Ra, $sym($base)\t\t!gprellow", []> { let Opcode = 0x2c; }
-def STQg : AlphaInst<(outs), (ins GPRC:$Ra, symbol:$sym, GPRC:$base),
-                     "stq $Ra, $sym($base)\t\t!gprellow", []> { let Opcode = 0x2d; }
-def STTg : AlphaInst<(outs), (ins FPRC:$Ra, symbol:$sym, GPRC:$base),
-                     "stt $Ra, $sym($base)\t\t!gprellow", []> { let Opcode = 0x27; }
-def STSg : AlphaInst<(outs), (ins FPRC:$Ra, symbol:$sym, GPRC:$base),
-                     "sts $Ra, $sym($base)\t\t!gprellow", []> { let Opcode = 0x26; }
+def STLg : MFormD<0x2c, (outs), (ins GPRC:$Rc, gprellow_sym:$disp, GPRC:$Rb),
+                  "stl $Rc, $disp($Rb)\t\t!gprellow", []>;
+def STQg : MFormD<0x2d, (outs), (ins GPRC:$Rc, gprellow_sym:$disp, GPRC:$Rb),
+                  "stq $Rc, $disp($Rb)\t\t!gprellow", []>;
+def STTg : MFormD<0x27, (outs), (ins FPRC:$Rc, gprellow_sym:$disp, GPRC:$Rb),
+                  "stt $Rc, $disp($Rb)\t\t!gprellow", []>;
+def STSg : MFormD<0x26, (outs), (ins FPRC:$Rc, gprellow_sym:$disp, GPRC:$Rb),
+                  "sts $Rc, $disp($Rb)\t\t!gprellow", []>;
 }
 // Fold the !gprellow low part into the load/store for constant pools and (with
 // small-data) globals.
@@ -494,17 +491,19 @@ defm : GprelFold<tglobaladdr>;
 // $26; the following ldgp reloads the caller's global pointer, which the callee
 // may have changed.  $29 is redefined with the caller's gp.
 let isCall = 1, Uses = [R27], Defs = [R26, R29] in
-def JSR : AlphaInst<(outs), (ins), "jsr $$26, ($$27)\n\tldgp $$29, 0($$26)",
-                    [(AlphaCall)]> {
-  let Opcode = 0x1a;
+def JSR : MbrForm<0b01, (outs), (ins), "jsr $$26, ($$27)\n\tldgp $$29, 0($$26)",
+                  [(AlphaCall)]> {
+  let Ra = 26;
+  let Rb = 27;
 }
 
 // Division millicode call: enter __divq etc. through $23; the routine preserves
 // all but a handful of registers, so no ldgp reload is needed afterwards.
 let isCall = 1, Uses = [R24, R25, R27],
     Defs = [R23, R24, R25, R27, R28] in
-def DIVCALL : AlphaInst<(outs), (ins), "jsr $$23, ($$27)", [(AlphaDivCall)]> {
-  let Opcode = 0x1a;
+def DIVCALL : MbrForm<0b01, (outs), (ins), "jsr $$23, ($$27)", [(AlphaDivCall)]> {
+  let Ra = 23;
+  let Rb = 27;
 }
 
 //===----------------------------------------------------------------------===//
@@ -590,16 +589,14 @@ def : Pat<(f64 (select GPRC:$c, FPRC:$t, FPRC:$f)),
 //===----------------------------------------------------------------------===//
 
 let mayLoad = 1, hasSideEffects = 0 in {
-def LDL : AlphaInst<(outs GPRC:$Ra), (ins memri:$addr), "ldl $Ra, $addr",
-                    [(set i64:$Ra, (sextloadi32 ADDRri:$addr))]> {
-  let Opcode = 0x28;
-}
-def LDQ : AlphaInst<(outs GPRC:$Ra), (ins memri:$addr), "ldq $Ra, $addr",
-                    [(set i64:$Ra, (load ADDRri:$addr))]> { let Opcode = 0x29; }
-def LDT : AlphaInst<(outs FPRC:$Ra), (ins memri:$addr), "ldt $Ra, $addr",
-                    [(set f64:$Ra, (load ADDRri:$addr))]> { let Opcode = 0x23; }
-def LDS : AlphaInst<(outs FPRC:$Ra), (ins memri:$addr), "lds $Ra, $addr",
-                    [(set f32:$Ra, (load ADDRri:$addr))]> { let Opcode = 0x22; }
+def LDL : MForm<0x28, (outs GPRC:$Ra), (ins memri:$addr), "ldl $Ra, $addr",
+                [(set i64:$Ra, (sextloadi32 ADDRri:$addr))]>;
+def LDQ : MForm<0x29, (outs GPRC:$Ra), (ins memri:$addr), "ldq $Ra, $addr",
+                [(set i64:$Ra, (load ADDRri:$addr))]>;
+def LDT : MForm<0x23, (outs FPRC:$Ra), (ins memri:$addr), "ldt $Ra, $addr",
+                [(set f64:$Ra, (load ADDRri:$addr))]>;
+def LDS : MForm<0x22, (outs FPRC:$Ra), (ins memri:$addr), "lds $Ra, $addr",
+                [(set f32:$Ra, (load ADDRri:$addr))]>;
 }
 
 // An i32 load with don't-care high bits can use the sign-extending ldl; a
@@ -616,20 +613,16 @@ def : Pat<(f64 (extloadf32 ADDRri:$addr)), (CVTST (LDS memri:$addr))>;
 // expanded to an extending load plus sign-extension (see setLoadExtAction).
 let Predicates = [HasBWX] in {
 let mayLoad = 1, hasSideEffects = 0 in {
-def LDBU : AlphaInst<(outs GPRC:$Ra), (ins memri:$addr), "ldbu $Ra, $addr",
-                     [(set i64:$Ra, (zextloadi8 ADDRri:$addr))]> {
-  let Opcode = 0x0a;
-}
-def LDWU : AlphaInst<(outs GPRC:$Ra), (ins memri:$addr), "ldwu $Ra, $addr",
-                     [(set i64:$Ra, (zextloadi16 ADDRri:$addr))]> {
-  let Opcode = 0x0c;
-}
+def LDBU : MForm<0x0a, (outs GPRC:$Ra), (ins memri:$addr), "ldbu $Ra, $addr",
+                 [(set i64:$Ra, (zextloadi8 ADDRri:$addr))]>;
+def LDWU : MForm<0x0c, (outs GPRC:$Ra), (ins memri:$addr), "ldwu $Ra, $addr",
+                 [(set i64:$Ra, (zextloadi16 ADDRri:$addr))]>;
 }
 let mayStore = 1, hasSideEffects = 0 in {
-def STB : AlphaInst<(outs), (ins GPRC:$Ra, memri:$addr), "stb $Ra, $addr",
-                    [(truncstorei8 i64:$Ra, ADDRri:$addr)]> { let Opcode = 0x0e; }
-def STW : AlphaInst<(outs), (ins GPRC:$Ra, memri:$addr), "stw $Ra, $addr",
-                    [(truncstorei16 i64:$Ra, ADDRri:$addr)]> { let Opcode = 0x0d; }
+def STB : MForm<0x0e, (outs), (ins GPRC:$Ra, memri:$addr), "stb $Ra, $addr",
+                [(truncstorei8 i64:$Ra, ADDRri:$addr)]>;
+def STW : MForm<0x0d, (outs), (ins GPRC:$Ra, memri:$addr), "stw $Ra, $addr",
+                [(truncstorei16 i64:$Ra, ADDRri:$addr)]>;
 }
 def : Pat<(i64 (extloadi8 ADDRri:$addr)), (LDBU memri:$addr)>;
 def : Pat<(i64 (extloadi16 ADDRri:$addr)), (LDWU memri:$addr)>;
@@ -638,16 +631,23 @@ def : Pat<(i64 (extloadi16 ADDRri:$addr)), (LDWU memri:$addr)>;
 // Pre-BWX byte/word access.  ldq_u loads the aligned quadword containing the
 // datum (ignoring the low three address bits); extbl/extwl extract the byte or
 // word at the position given by the low address bits, zero-extended.
+// ldq_u/stq_u take a base register with an implicit zero displacement; the CPU
+// ignores the low three address bits.
 let mayLoad = 1, hasSideEffects = 0 in
 def LDQ_U : AlphaInst<(outs GPRC:$Ra), (ins GPRC:$base), "ldq_u $Ra, 0($base)",
                       []> {
+  bits<5> Ra;
+  bits<5> base;
   let Opcode = 0x0b;
+  let Inst{25-21} = Ra;
+  let Inst{20-16} = base;
+  let Inst{15-0} = 0;
 }
 let hasSideEffects = 0 in {
-def EXTBL : AlphaInst<(outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
-                      "extbl $Ra, $Rb, $Rc", []> { let Opcode = 0x12; }
-def EXTWL : AlphaInst<(outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
-                      "extwl $Ra, $Rb, $Rc", []> { let Opcode = 0x12; }
+def EXTBL : OForm<0x12, 0x06, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                  "extbl $Ra, $Rb, $Rc", []>;
+def EXTWL : OForm<0x12, 0x16, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                  "extwl $Ra, $Rb, $Rc", []>;
 }
 let Predicates = [NotBWX] in {
 def : Pat<(i64 (zextloadi8 ADDRr:$a)),  (EXTBL (LDQ_U GPRC:$a), GPRC:$a)>;
@@ -662,24 +662,29 @@ def : Pat<(i64 (extloadi16 ADDRr:$a)),  (EXTWL (LDQ_U GPRC:$a), GPRC:$a)>;
 // to other accesses in the same quadword (see -msafe-bwa); a lock-based variant
 // is a later addition.
 let hasSideEffects = 0 in {
-def INSBL : AlphaInst<(outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
-                      "insbl $Ra, $Rb, $Rc", []> { let Opcode = 0x12; }
-def INSWL : AlphaInst<(outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
-                      "inswl $Ra, $Rb, $Rc", []> { let Opcode = 0x12; }
-def MSKBL : AlphaInst<(outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
-                      "mskbl $Ra, $Rb, $Rc", []> { let Opcode = 0x12; }
-def MSKWL : AlphaInst<(outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
-                      "mskwl $Ra, $Rb, $Rc", []> { let Opcode = 0x12; }
+def INSBL : OForm<0x12, 0x0b, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                  "insbl $Ra, $Rb, $Rc", []>;
+def INSWL : OForm<0x12, 0x1b, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                  "inswl $Ra, $Rb, $Rc", []>;
+def MSKBL : OForm<0x12, 0x02, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                  "mskbl $Ra, $Rb, $Rc", []>;
+def MSKWL : OForm<0x12, 0x12, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                  "mskwl $Ra, $Rb, $Rc", []>;
 }
 let mayStore = 1, hasSideEffects = 0 in
 def STQ_U : AlphaInst<(outs), (ins GPRC:$Ra, GPRC:$base), "stq_u $Ra, 0($base)",
                       []> {
+  bits<5> Ra;
+  bits<5> base;
   let Opcode = 0x0f;
+  let Inst{25-21} = Ra;
+  let Inst{20-16} = base;
+  let Inst{15-0} = 0;
 }
 // bic with an 8-bit literal, used to align an address down to a quadword.
 let hasSideEffects = 0 in
-def BICi : AlphaInst<(outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
-                     "bic $Ra, $lit, $Rc", []> { let Opcode = 0x11; }
+def BICi : OFormL<0x11, 0x08, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
+                  "bic $Ra, $lit, $Rc", []>;
 
 // The default (non-atomic) byte/word store read-modify-writes the quadword
 // holding the field.  It stays one instruction until after register allocation
@@ -713,14 +718,14 @@ def SAFE_STOREI16 : AlphaPseudo<(outs), (ins GPRC:$val, GPRC:$addr), "",
 }
 
 let mayStore = 1, hasSideEffects = 0 in {
-def STL : AlphaInst<(outs), (ins GPRC:$Ra, memri:$addr), "stl $Ra, $addr",
-                    [(truncstorei32 i64:$Ra, ADDRri:$addr)]> { let Opcode = 0x2c; }
-def STQ : AlphaInst<(outs), (ins GPRC:$Ra, memri:$addr), "stq $Ra, $addr",
-                    [(store i64:$Ra, ADDRri:$addr)]> { let Opcode = 0x2d; }
-def STT : AlphaInst<(outs), (ins FPRC:$Ra, memri:$addr), "stt $Ra, $addr",
-                    [(store f64:$Ra, ADDRri:$addr)]> { let Opcode = 0x27; }
-def STS : AlphaInst<(outs), (ins FPRC:$Ra, memri:$addr), "sts $Ra, $addr",
-                    [(store f32:$Ra, ADDRri:$addr)]> { let Opcode = 0x26; }
+def STL : MForm<0x2c, (outs), (ins GPRC:$Ra, memri:$addr), "stl $Ra, $addr",
+                [(truncstorei32 i64:$Ra, ADDRri:$addr)]>;
+def STQ : MForm<0x2d, (outs), (ins GPRC:$Ra, memri:$addr), "stq $Ra, $addr",
+                [(store i64:$Ra, ADDRri:$addr)]>;
+def STT : MForm<0x27, (outs), (ins FPRC:$Ra, memri:$addr), "stt $Ra, $addr",
+                [(store f64:$Ra, ADDRri:$addr)]>;
+def STS : MForm<0x26, (outs), (ins FPRC:$Ra, memri:$addr), "sts $Ra, $addr",
+                [(store f32:$Ra, ADDRri:$addr)]>;
 }
 
 // Naturally aligned integer loads and stores are atomic; stronger orderings get
@@ -741,24 +746,16 @@ def : Pat<(atomic_store_32 GPRC:$val, ADDRri:$addr),
 // Load-locked / store-conditional, the primitives for atomic read-modify-write.
 // stq_c overwrites its source register with 1 on success or 0 on failure.
 let mayLoad = 1, hasSideEffects = 0 in {
-def LDL_L : AlphaInst<(outs GPRC:$Ra), (ins memri:$addr), "ldl_l $Ra, $addr",
-                      []> {
-  let Opcode = 0x2a;
-}
-def LDQ_L : AlphaInst<(outs GPRC:$Ra), (ins memri:$addr), "ldq_l $Ra, $addr",
-                      []> {
-  let Opcode = 0x2b;
-}
+def LDL_L : MForm<0x2a, (outs GPRC:$Ra), (ins memri:$addr), "ldl_l $Ra, $addr",
+                  []>;
+def LDQ_L : MForm<0x2b, (outs GPRC:$Ra), (ins memri:$addr), "ldq_l $Ra, $addr",
+                  []>;
 }
 let mayStore = 1, Constraints = "$Ra = $out", hasSideEffects = 0 in {
-def STL_C : AlphaInst<(outs GPRC:$out), (ins GPRC:$Ra, memri:$addr),
-                      "stl_c $Ra, $addr", []> {
-  let Opcode = 0x2e;
-}
-def STQ_C : AlphaInst<(outs GPRC:$out), (ins GPRC:$Ra, memri:$addr),
-                      "stq_c $Ra, $addr", []> {
-  let Opcode = 0x2f;
-}
+def STL_C : MForm<0x2e, (outs GPRC:$out), (ins GPRC:$Ra, memri:$addr),
+                  "stl_c $Ra, $addr", []>;
+def STQ_C : MForm<0x2f, (outs GPRC:$out), (ins GPRC:$Ra, memri:$addr),
+                  "stq_c $Ra, $addr", []>;
 }
 
 // Atomic read-modify-write pattern fragments by memory width.
@@ -853,8 +850,10 @@ def ATOMIC_CMPXCHG_I8  : AtomicCAS<AtomicCASvt<i8>>;
 // which is only materialized in the encoding, from reading as undefined
 // before the epilogue is inserted (mirrors RISCV's PseudoRET).
 let isReturn = 1, isTerminator = 1, isBarrier = 1 in
-def RET : AlphaInst<(outs), (ins), "ret $$31, ($$26), 1", [(AlphaRet)]> {
-  let Opcode = 0x1a;   // JSR-format opcode (jmp/jsr/ret/jsr_coroutine).
+def RET : MbrForm<0b10, (outs), (ins), "ret $$31, ($$26), 1", [(AlphaRet)]> {
+  let Ra = 31;
+  let Rb = 26;
+  let hint = 1;  // return-prediction hint
 }
 
 //===----------------------------------------------------------------------===//
@@ -866,27 +865,20 @@ def brtarget : Operand<OtherVT> {
 }
 
 // Unconditional branch: `br $31, target` ($31 discards the saved PC).
-let isBranch = 1, isTerminator = 1, isBarrier = 1 in
-def BR : AlphaInst<(outs), (ins brtarget:$target), "br $$31, $target",
-                   [(br bb:$target)]> {
-  let Opcode = 0x30;
-}
+let isBranch = 1, isTerminator = 1, isBarrier = 1, Ra = 31 in
+def BR : BForm<0x30, (outs), (ins brtarget:$target), "br $$31, $target",
+               [(br bb:$target)]>;
 
 // Conditional branches test a register against zero.
 let isBranch = 1, isTerminator = 1 in {
-def BEQ : AlphaInst<(outs), (ins GPRC:$Ra, brtarget:$target),
-                    "beq $Ra, $target", []> {
-  let Opcode = 0x39;
-}
-def BNE : AlphaInst<(outs), (ins GPRC:$Ra, brtarget:$target),
-                    "bne $Ra, $target", [(brcond GPRC:$Ra, bb:$target)]> {
-  let Opcode = 0x3d;
-}
+def BEQ : BForm<0x39, (outs), (ins GPRC:$Ra, brtarget:$target),
+                "beq $Ra, $target", []>;
+def BNE : BForm<0x3d, (outs), (ins GPRC:$Ra, brtarget:$target),
+                "bne $Ra, $target", [(brcond GPRC:$Ra, bb:$target)]>;
 }
 
 // Indirect branch through a register (used for jump tables).
-let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1 in
-def JMP : AlphaInst<(outs), (ins GPRC:$target), "jmp $$31, ($target), 0",
-                    [(brind GPRC:$target)]> {
-  let Opcode = 0x1a;
-}
+let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1,
+    Ra = 31 in
+def JMP : MbrForm<0b00, (outs), (ins GPRC:$Rb), "jmp $$31, ($Rb), 0",
+                  [(brind GPRC:$Rb)]>;
