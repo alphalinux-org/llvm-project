@@ -182,8 +182,8 @@ SDValue AlphaTargetLowering::LowerCall(CallLoweringInfo &CLI,
   else if (auto *E = dyn_cast<ExternalSymbolSDNode>(Callee))
     Callee = DAG.getNode(AlphaISD::LITERAL, DL, MVT::i64,
                          DAG.getTargetExternalSymbol(E->getSymbol(), MVT::i64));
-  else
-    report_fatal_error("Alpha indirect calls are not yet implemented");
+  // Otherwise the callee address is already a value; use it directly as the
+  // procedure value for an indirect call.
   RegsToPass.emplace_back(Alpha::R27, Callee);
 
   SDValue Glue;
