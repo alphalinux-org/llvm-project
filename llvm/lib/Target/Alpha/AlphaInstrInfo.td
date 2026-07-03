@@ -364,6 +364,31 @@ def : Pat<(AlphaGprelHi tconstpool:$sym, GPRC:$base),
 def : Pat<(AlphaGprelLo tconstpool:$sym, GPRC:$base),
           (LDAg tconstpool:$sym, GPRC:$base)>;
 
+// A load of a GP-relative address folds the !gprellow low part into the load
+// displacement, so only the ldah !gprelhigh is needed to form the address.
+let mayLoad = 1, hasSideEffects = 0 in {
+def LDLg : AlphaInst<(outs GPRC:$Ra), (ins symbol:$sym, GPRC:$base),
+                     "ldl $Ra, $sym($base)\t\t!gprellow", []> { let Opcode = 0x28; }
+def LDQg : AlphaInst<(outs GPRC:$Ra), (ins symbol:$sym, GPRC:$base),
+                     "ldq $Ra, $sym($base)\t\t!gprellow", []> { let Opcode = 0x29; }
+def LDTg : AlphaInst<(outs FPRC:$Ra), (ins symbol:$sym, GPRC:$base),
+                     "ldt $Ra, $sym($base)\t\t!gprellow", []> { let Opcode = 0x23; }
+def LDSg : AlphaInst<(outs FPRC:$Ra), (ins symbol:$sym, GPRC:$base),
+                     "lds $Ra, $sym($base)\t\t!gprellow", []> { let Opcode = 0x22; }
+}
+let AddedComplexity = 20 in {
+def : Pat<(i64 (sextloadi32 (AlphaGprelLo tconstpool:$s, GPRC:$b))),
+          (LDLg tconstpool:$s, GPRC:$b)>;
+def : Pat<(i64 (load (AlphaGprelLo tconstpool:$s, GPRC:$b))),
+          (LDQg tconstpool:$s, GPRC:$b)>;
+def : Pat<(f64 (load (AlphaGprelLo tconstpool:$s, GPRC:$b))),
+          (LDTg tconstpool:$s, GPRC:$b)>;
+def : Pat<(f32 (load (AlphaGprelLo tconstpool:$s, GPRC:$b))),
+          (LDSg tconstpool:$s, GPRC:$b)>;
+def : Pat<(f64 (extloadf32 (AlphaGprelLo tconstpool:$s, GPRC:$b))),
+          (CVTST (LDSg tconstpool:$s, GPRC:$b))>;
+}
+
 // Call through the procedure value in $27.  jsr leaves the return address in
 // $26; the following ldgp reloads the caller's global pointer, which the callee
 // may have changed.  $29 is redefined with the caller's gp.
