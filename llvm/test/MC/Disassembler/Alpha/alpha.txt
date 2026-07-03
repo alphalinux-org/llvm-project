@@ -1,0 +1,22 @@
+# RUN: llvm-mc --disassemble -triple=alpha-unknown-linux-gnu %s | FileCheck %s
+
+# CHECK: addq $16, $17, $0
+0x00 0x04 0x11 0x42
+
+# CHECK: sll $16, 3, $0
+0x20 0x77 0x00 0x4a
+
+# CHECK: ldq $0, 0($16)
+0x00 0x00 0x10 0xa4
+
+# CHECK: addt $f16, $f0, $f0
+0x00 0x14 0x00 0x5a
+
+# A branch, whose displacement is measured in instructions from the one after
+# it: -1 lands on the branch itself.  llvm-mc prints the raw
+# displacement; only a disassembly with an address symbolizes it.
+# CHECK: br $31, -1
+0xff 0xff 0xff 0xc3
+
+# CHECK: ret $31, ($26), 1
+0x01 0x80 0xfa 0x6b

@@ -86,12 +86,16 @@ def memri : Operand<i64> {
   let MIOperandInfo = (ops GPRC, s16imm);
   let PrintMethod = "printMemOperand";
   let EncoderMethod = "getMemEncoding";
+  let DecoderMethod = "decodeMemri";
 }
 
 // Symbol operands whose 16-bit displacement is filled by a relocation.  The
 // operand type selects the relocation: literal (GOT, R_ALPHA_LITERAL), gprel
 // high and gprel low (R_ALPHA_GPRELHIGH / R_ALPHA_GPRELLOW).
-class SymOperand<string enc> : Operand<i64> { let EncoderMethod = enc; }
+class SymOperand<string enc> : Operand<i64> {
+  let EncoderMethod = enc;
+  let DecoderMethod = "decodeImm";
+}
 def literal_sym : SymOperand<"getLiteralEncoding">;
 def gprelhigh_sym : SymOperand<"getGprelHighEncoding">;
 def gprellow_sym : SymOperand<"getGprelLowEncoding">;
@@ -265,6 +269,8 @@ def EQV   : OForm<0x11, 0x48, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
 // floating-point register.
 def CPYS : FForm<0x17, 0x020, (outs FPRC:$Rc), (ins FPRC:$Ra, FPRC:$Rb),
                  "cpys $Ra, $Rb, $Rc", []>;
+def CPYSN : FForm<0x17, 0x021, (outs FPRC:$Rc), (ins FPRC:$Ra, FPRC:$Rb),
+                  "cpysn $Ra, $Rb, $Rc", []>;
 
 // Sign manipulation, built from cpys/cpysn.  Each is defined per floating-point
 // type so the result type is unambiguous.  fabs uses the (positive) sign of
@@ -289,8 +295,8 @@ class FAbs<list<dag> pat> : FSign<0x020, (ins FPRC:$Rb), "cpys $$f31, $Rb, $Rc",
   let fa = 31;
   let fb = Rb;
 }
-def FABSS : FAbs<[(set f32:$Rc, (fabs f32:$Rb))]>;
-def FABST : FAbs<[(set f64:$Rc, (fabs f64:$Rb))]>;
+let isCodeGenOnly = 1 in def FABSS : FAbs<[(set f32:$Rc, (fabs f32:$Rb))]>;
+let isCodeGenOnly = 1 in def FABST : FAbs<[(set f64:$Rc, (fabs f64:$Rb))]>;
 // fneg: cpysn Rb, Rb, Rc.
 class FNeg<list<dag> pat> : FSign<0x021, (ins FPRC:$Rb), "cpysn $Rb, $Rb, $Rc",
                                   pat> {
@@ -298,8 +304,8 @@ class FNeg<list<dag> pat> : FSign<0x021, (ins FPRC:$Rb), "cpysn $Rb, $Rb, $Rc",
   let fa = Rb;
   let fb = Rb;
 }
-def FNEGS : FNeg<[(set f32:$Rc, (fneg f32:$Rb))]>;
-def FNEGT : FNeg<[(set f64:$Rc, (fneg f64:$Rb))]>;
+let isCodeGenOnly = 1 in def FNEGS : FNeg<[(set f32:$Rc, (fneg f32:$Rb))]>;
+let isCodeGenOnly = 1 in def FNEGT : FNeg<[(set f64:$Rc, (fneg f64:$Rb))]>;
 // fcopysign: cpys Rb, Ra, Rc (sign of Rb, magnitude of Ra).
 class FCpys<list<dag> pat>
     : FSign<0x020, (ins FPRC:$Ra, FPRC:$Rb), "cpys $Rb, $Ra, $Rc", pat> {
@@ -308,8 +314,8 @@ class FCpys<list<dag> pat>
   let fa = Rb;
   let fb = Ra;
 }
-def FCPYSS : FCpys<[(set f32:$Rc, (fcopysign f32:$Ra, f32:$Rb))]>;
-def FCPYST : FCpys<[(set f64:$Rc, (fcopysign f64:$Ra, f64:$Rb))]>;
+let isCodeGenOnly = 1 in def FCPYSS : FCpys<[(set f32:$Rc, (fcopysign f32:$Ra, f32:$Rb))]>;
+let isCodeGenOnly = 1 in def FCPYST : FCpys<[(set f64:$Rc, (fcopysign f64:$Ra, f64:$Rb))]>;
 
 // IEEE floating-point operate instruction: `<mnem> $Ra, $Rb, $Rc`.  The `s`
 // forms operate on S_floating (f32), the `t` forms on T_floating (f64).
@@ -374,6 +380,7 @@ def LDA : MFormD<0x08, (outs GPRC:$Ra), (ins s16imm:$disp, GPRC:$Rb),
 // Load effective address, with a base+displacement operand so a frame index can
 // be materialized (and rewritten by eliminateFrameIndex).
 let hasSideEffects = 0 in
+let isCodeGenOnly = 1 in
 def LEA : MForm<0x08, (outs GPRC:$Ra), (ins memri:$addr), "lda $Ra, $addr", []>;
 
 // Load address high: `ldah $Rc, $disp($Rb)` computes
@@ -401,6 +408,7 @@ def LDGP : AlphaInst<(outs), (ins), "ldgp $$29, 0($$27)", []>;
 
 // Load a global's address from its GOT slot via an R_ALPHA_LITERAL relocation.
 let mayLoad = 1, hasSideEffects = 0, Uses = [R29] in
+let isCodeGenOnly = 1 in
 def LDQl : MFormD<0x29, (outs GPRC:$Ra), (ins literal_sym:$disp),
                   "ldq $Ra, $disp($$29)\t\t!literal", []> {
   let Rb = 29;
@@ -410,7 +418,7 @@ def : Pat<(AlphaLiteral texternalsym:$sym), (LDQl texternalsym:$sym)>;
 
 // GP-relative high/low address parts.  The relocation suffix distinguishes the
 // two; the same symbol operand feeds both.
-let hasSideEffects = 0 in {
+let hasSideEffects = 0, isCodeGenOnly = 1 in {
 def LDAHg : MFormD<0x09, (outs GPRC:$Ra), (ins gprelhigh_sym:$disp, GPRC:$Rb),
                    "ldah $Ra, $disp($Rb)\t\t!gprelhigh", []>;
 def LDAg : MFormD<0x08, (outs GPRC:$Ra), (ins gprellow_sym:$disp, GPRC:$Rb),
@@ -431,7 +439,7 @@ def : Pat<(AlphaGprelLo tglobaladdr:$sym, GPRC:$base),
 
 // A load of a GP-relative address folds the !gprellow low part into the load
 // displacement, so only the ldah !gprelhigh is needed to form the address.
-let mayLoad = 1, hasSideEffects = 0 in {
+let mayLoad = 1, hasSideEffects = 0, isCodeGenOnly = 1 in {
 def LDLg : MFormD<0x28, (outs GPRC:$Ra), (ins gprellow_sym:$disp, GPRC:$Rb),
                   "ldl $Ra, $disp($Rb)\t\t!gprellow", []>;
 def LDQg : MFormD<0x29, (outs GPRC:$Ra), (ins gprellow_sym:$disp, GPRC:$Rb),
@@ -442,7 +450,7 @@ def LDSg : MFormD<0x22, (outs FPRC:$Ra), (ins gprellow_sym:$disp, GPRC:$Rb),
                   "lds $Ra, $disp($Rb)\t\t!gprellow", []>;
 }
 // The corresponding stores, used for small-data globals.
-let mayStore = 1, hasSideEffects = 0 in {
+let mayStore = 1, hasSideEffects = 0, isCodeGenOnly = 1 in {
 def STLg : MFormD<0x2c, (outs), (ins GPRC:$Ra, gprellow_sym:$disp, GPRC:$Rb),
                   "stl $Ra, $disp($Rb)\t\t!gprellow", []>;
 def STQg : MFormD<0x2d, (outs), (ins GPRC:$Ra, gprellow_sym:$disp, GPRC:$Rb),
@@ -490,7 +498,8 @@ defm : GprelFold<tglobaladdr>;
 // Call through the procedure value in $27.  jsr leaves the return address in
 // $26; the following ldgp reloads the caller's global pointer, which the callee
 // may have changed.  $29 is redefined with the caller's gp.
-let isCall = 1, Uses = [R27], Defs = [R26, R29], Size = 12 in
+let isCall = 1, Uses = [R27], Defs = [R26, R29], Size = 12,
+    isCodeGenOnly = 1 in
 def JSR : MbrForm<0b01, (outs), (ins), "jsr $$26, ($$27)\n\tldgp $$29, 0($$26)",
                   [(AlphaCall)]> {
   let Ra = 26;
@@ -903,6 +912,7 @@ def RET : MbrForm<0b10, (outs), (ins), "ret $$31, ($$26), 1", [(AlphaRet)]> {
 
 def brtarget : Operand<OtherVT> {
   let EncoderMethod = "getBranchTargetEncoding";
+  let DecoderMethod = "decodeBranchTarget";
 }
 
 // Unconditional branch: `br $31, target` ($31 discards the saved PC).
