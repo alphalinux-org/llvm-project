@@ -400,26 +400,59 @@ def : Pat<(AlphaGprelLo tglobaladdr:$sym, GPRC:$base),
 // A load of a GP-relative address folds the !gprellow low part into the load
 // displacement, so only the ldah !gprelhigh is needed to form the address.
 let mayLoad = 1, hasSideEffects = 0 in {
-def LDLg : AlphaInst<(outs GPRC:$Ra), (ins symbol:$sym, GPRC:$base),
-                     "ldl $Ra, $sym($base)\t\t!gprellow", []> { let Opcode = 0x28; }
-def LDQg : AlphaInst<(outs GPRC:$Ra), (ins symbol:$sym, GPRC:$base),
-                     "ldq $Ra, $sym($base)\t\t!gprellow", []> { let Opcode = 0x29; }
-def LDTg : AlphaInst<(outs FPRC:$Ra), (ins symbol:$sym, GPRC:$base),
-                     "ldt $Ra, $sym($base)\t\t!gprellow", []> { let Opcode = 0x23; }
-def LDSg : AlphaInst<(outs FPRC:$Ra), (ins symbol:$sym, GPRC:$base),
-                     "lds $Ra, $sym($base)\t\t!gprellow", []> { let Opcode = 0x22; }
+def LDLg : MFormD<0x28, (outs GPRC:$Ra), (ins gprellow_sym:$disp, GPRC:$Rb),
+                  "ldl $Ra, $disp($Rb)\t\t!gprellow", []>;
+def LDQg : MFormD<0x29, (outs GPRC:$Ra), (ins gprellow_sym:$disp, GPRC:$Rb),
+                  "ldq $Ra, $disp($Rb)\t\t!gprellow", []>;
+def LDTg : MFormD<0x23, (outs FPRC:$Ra), (ins gprellow_sym:$disp, GPRC:$Rb),
+                  "ldt $Ra, $disp($Rb)\t\t!gprellow", []>;
+def LDSg : MFormD<0x22, (outs FPRC:$Ra), (ins gprellow_sym:$disp, GPRC:$Rb),
+                  "lds $Ra, $disp($Rb)\t\t!gprellow", []>;
+}
+// The corresponding stores, used for small-data globals.
+let mayStore = 1, hasSideEffects = 0 in {
+def STLg : MFormD<0x2c, (outs), (ins GPRC:$Ra, gprellow_sym:$disp, GPRC:$Rb),
+                  "stl $Ra, $disp($Rb)\t\t!gprellow", []>;
+def STQg : MFormD<0x2d, (outs), (ins GPRC:$Ra, gprellow_sym:$disp, GPRC:$Rb),
+                  "stq $Ra, $disp($Rb)\t\t!gprellow", []>;
+def STTg : MFormD<0x27, (outs), (ins FPRC:$Ra, gprellow_sym:$disp, GPRC:$Rb),
+                  "stt $Ra, $disp($Rb)\t\t!gprellow", []>;
+def STSg : MFormD<0x26, (outs), (ins FPRC:$Ra, gprellow_sym:$disp, GPRC:$Rb),
+                  "sts $Ra, $disp($Rb)\t\t!gprellow", []>;
+}
+// Fold the !gprellow low part into the load/store for constant pools and (with
+// small-data) globals.
+multiclass GprelFold<SDNode sym> {
+def : Pat<(i64 (sextloadi32 (AlphaGprelLo sym:$s, GPRC:$b))),
+          (LDLg sym:$s, GPRC:$b)>;
+// A longword load that is not sign-extending needs the same fold: an extending
+// load of don't-care high bits is the sign-extending instruction all the same,
+// and a zero-extending one is that instruction with the high bits cleared
+// afterwards.
+def : Pat<(i64 (extloadi32 (AlphaGprelLo sym:$s, GPRC:$b))),
+          (LDLg sym:$s, GPRC:$b)>;
+def : Pat<(i64 (zextloadi32 (AlphaGprelLo sym:$s, GPRC:$b))),
+          (ZAPNOTi (LDLg sym:$s, GPRC:$b), 15)>;
+def : Pat<(i64 (load (AlphaGprelLo sym:$s, GPRC:$b))),
+          (LDQg sym:$s, GPRC:$b)>;
+def : Pat<(f64 (load (AlphaGprelLo sym:$s, GPRC:$b))),
+          (LDTg sym:$s, GPRC:$b)>;
+def : Pat<(f32 (load (AlphaGprelLo sym:$s, GPRC:$b))),
+          (LDSg sym:$s, GPRC:$b)>;
+def : Pat<(f64 (extloadf32 (AlphaGprelLo sym:$s, GPRC:$b))),
+          (CVTST (LDSg sym:$s, GPRC:$b))>;
+def : Pat<(truncstorei32 GPRC:$v, (AlphaGprelLo sym:$s, GPRC:$b)),
+          (STLg GPRC:$v, sym:$s, GPRC:$b)>;
+def : Pat<(store GPRC:$v, (AlphaGprelLo sym:$s, GPRC:$b)),
+          (STQg GPRC:$v, sym:$s, GPRC:$b)>;
+def : Pat<(store f64:$v, (AlphaGprelLo sym:$s, GPRC:$b)),
+          (STTg FPRC:$v, sym:$s, GPRC:$b)>;
+def : Pat<(store f32:$v, (AlphaGprelLo sym:$s, GPRC:$b)),
+          (STSg FPRC:$v, sym:$s, GPRC:$b)>;
 }
 let AddedComplexity = 20 in {
-def : Pat<(i64 (sextloadi32 (AlphaGprelLo tconstpool:$s, GPRC:$b))),
-          (LDLg tconstpool:$s, GPRC:$b)>;
-def : Pat<(i64 (load (AlphaGprelLo tconstpool:$s, GPRC:$b))),
-          (LDQg tconstpool:$s, GPRC:$b)>;
-def : Pat<(f64 (load (AlphaGprelLo tconstpool:$s, GPRC:$b))),
-          (LDTg tconstpool:$s, GPRC:$b)>;
-def : Pat<(f32 (load (AlphaGprelLo tconstpool:$s, GPRC:$b))),
-          (LDSg tconstpool:$s, GPRC:$b)>;
-def : Pat<(f64 (extloadf32 (AlphaGprelLo tconstpool:$s, GPRC:$b))),
-          (CVTST (LDSg tconstpool:$s, GPRC:$b))>;
+defm : GprelFold<tconstpool>;
+defm : GprelFold<tglobaladdr>;
 }
 
 // Call through the procedure value in $27.  jsr leaves the return address in
