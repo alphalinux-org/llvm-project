@@ -22,6 +22,9 @@ enum Fixups {
   // The high/low 16-bit GP-relative displacements (R_ALPHA_GPRELHIGH/LOW).
   fixup_alpha_gprelhigh,
   fixup_alpha_gprellow,
+  // The ldah of an ldgp pair (R_ALPHA_GPDISP); its addend is the byte distance
+  // to the matching lda.
+  fixup_alpha_gpdisp,
 
   fixup_alpha_invalid,
   NumTargetFixupKinds = fixup_alpha_invalid - FirstTargetFixupKind

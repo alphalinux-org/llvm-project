@@ -14,6 +14,7 @@
 #include "AlphaMCTargetDesc.h"
 #include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCContext.h"
+#include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
@@ -79,6 +80,10 @@ public:
   unsigned getBranchTargetEncoding(const MCInst &MI, unsigned OpNo,
                                    SmallVectorImpl<MCFixup> &Fixups,
                                    const MCSubtargetInfo &STI) const;
+
+  void emitLdgp(unsigned Base, SmallVectorImpl<char> &CB,
+                SmallVectorImpl<MCFixup> &Fixups,
+                const MCSubtargetInfo &STI) const;
 };
 } // end anonymous namespace
 
@@ -132,10 +137,51 @@ AlphaMCCodeEmitter::getBranchTargetEncoding(const MCInst &MI, unsigned OpNo,
   return 0;
 }
 
+// Emit an ldgp expansion: ldah $29, 0(Base) with a GPDISP relocation whose
+// addend is the distance to the following lda $29, 0($29).  Only the ldah
+// carries the relocation.
+void AlphaMCCodeEmitter::emitLdgp(unsigned Base, SmallVectorImpl<char> &CB,
+                                  SmallVectorImpl<MCFixup> &Fixups,
+                                  const MCSubtargetInfo &STI) const {
+  // The relocation sits on the ldah, whose offset within this instruction's
+  // encoding is the current buffer size (0 for ldgp, 4 for the jsr reload).
+  unsigned LdahOffset = CB.size();
+  MCInst Ldah;
+  Ldah.setOpcode(Alpha::LDAH);
+  Ldah.addOperand(MCOperand::createReg(Alpha::R29));
+  Ldah.addOperand(MCOperand::createImm(0));
+  Ldah.addOperand(MCOperand::createReg(Base));
+  uint32_t Hi = getBinaryCodeForInstr(Ldah, Fixups, STI);
+  Fixups.push_back(MCFixup::create(LdahOffset, MCConstantExpr::create(4, Ctx),
+                                   MCFixupKind(Alpha::fixup_alpha_gpdisp)));
+  support::endian::write(CB, Hi, llvm::endianness::little);
+
+  MCInst Lda;
+  Lda.setOpcode(Alpha::LDA);
+  Lda.addOperand(MCOperand::createReg(Alpha::R29));
+  Lda.addOperand(MCOperand::createImm(0));
+  Lda.addOperand(MCOperand::createReg(Alpha::R29));
+  uint32_t Lo = getBinaryCodeForInstr(Lda, Fixups, STI);
+  support::endian::write(CB, Lo, llvm::endianness::little);
+}
+
 void AlphaMCCodeEmitter::encodeInstruction(const MCInst &MI,
                                            SmallVectorImpl<char> &CB,
                                            SmallVectorImpl<MCFixup> &Fixups,
                                            const MCSubtargetInfo &STI) const {
+  switch (MI.getOpcode()) {
+  case Alpha::LDGP:
+    // ldgp $29, 0($27): establish the GP from the procedure value.
+    return emitLdgp(Alpha::R27, CB, Fixups, STI);
+  case Alpha::JSR: {
+    // jsr $26, ($27) followed by an ldgp reload from the return address.
+    uint32_t Bits = getBinaryCodeForInstr(MI, Fixups, STI);
+    support::endian::write(CB, Bits, llvm::endianness::little);
+    return emitLdgp(Alpha::R26, CB, Fixups, STI);
+  }
+  default:
+    break;
+  }
   uint32_t Bits = getBinaryCodeForInstr(MI, Fixups, STI);
   support::endian::write(CB, Bits, llvm::endianness::little);
 }
