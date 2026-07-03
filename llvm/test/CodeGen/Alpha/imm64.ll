@@ -6,8 +6,7 @@
 ; CHECK-LABEL: big:
 ; CHECK:       ldgp $29, 0($27)
 ; CHECK:       ldah $0, .LCPI0_0($29){{.*}}!gprelhigh
-; CHECK:       lda $0, .LCPI0_0($0){{.*}}!gprellow
-; CHECK:       ldq $0, 0($0)
+; CHECK:       ldq $0, .LCPI0_0($0){{.*}}!gprellow
 ; CHECK:       ret
 define i64 @big() {
   ret i64 1234605616436508552
