@@ -396,7 +396,7 @@ def : Pat<(not GPRC:$x), (ORNOT R31, GPRC:$x)>;
 
 // Establish the global pointer from the procedure value on entry.  `ldgp` is a
 // gas macro that expands to an ldah/lda pair with matching !gpdisp relocations.
-let Uses = [R27], Defs = [R29], hasSideEffects = 1, isPseudo = 1 in
+let Uses = [R27], Defs = [R29], hasSideEffects = 1, isPseudo = 1, Size = 8 in
 def LDGP : AlphaInst<(outs), (ins), "ldgp $$29, 0($$27)", []>;
 
 // Load a global's address from its GOT slot via an R_ALPHA_LITERAL relocation.
@@ -490,7 +490,7 @@ defm : GprelFold<tglobaladdr>;
 // Call through the procedure value in $27.  jsr leaves the return address in
 // $26; the following ldgp reloads the caller's global pointer, which the callee
 // may have changed.  $29 is redefined with the caller's gp.
-let isCall = 1, Uses = [R27], Defs = [R26, R29] in
+let isCall = 1, Uses = [R27], Defs = [R26, R29], Size = 12 in
 def JSR : MbrForm<0b01, (outs), (ins), "jsr $$26, ($$27)\n\tldgp $$29, 0($$26)",
                   [(AlphaCall)]> {
   let Ra = 26;
