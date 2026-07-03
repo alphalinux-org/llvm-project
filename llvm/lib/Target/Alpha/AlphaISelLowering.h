@@ -14,6 +14,7 @@
 #ifndef LLVM_LIB_TARGET_ALPHA_ALPHAISELLOWERING_H
 #define LLVM_LIB_TARGET_ALPHA_ALPHAISELLOWERING_H
 
+#include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/CodeGen/TargetLowering.h"
 
 namespace llvm {
@@ -50,6 +51,11 @@ public:
   AlphaTargetLowering(const AlphaTargetMachine &TM, const AlphaSubtarget &STI);
 
   const char *getTargetNodeName(unsigned Opcode) const override;
+
+  // Jump-table entries are absolute 64-bit block addresses.
+  unsigned getJumpTableEncoding() const override {
+    return MachineJumpTableInfo::EK_BlockAddress;
+  }
 
   // Comparisons produce a 0/1 result in a 64-bit integer register.
   EVT getSetCCResultType(const DataLayout &DL, LLVMContext &Context,
@@ -151,6 +157,8 @@ public:
 private:
   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerJumpTable(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerBR_JT(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerDivRem(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerVASTART(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerVAARG(SDValue Op, SelectionDAG &DAG) const;

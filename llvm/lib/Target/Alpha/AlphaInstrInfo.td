@@ -388,6 +388,10 @@ def : Pat<(AlphaGprelHi tconstpool:$sym, GPRC:$base),
           (LDAHg tconstpool:$sym, GPRC:$base)>;
 def : Pat<(AlphaGprelLo tconstpool:$sym, GPRC:$base),
           (LDAg tconstpool:$sym, GPRC:$base)>;
+def : Pat<(AlphaGprelHi tjumptable:$sym, GPRC:$base),
+          (LDAHg tjumptable:$sym, GPRC:$base)>;
+def : Pat<(AlphaGprelLo tjumptable:$sym, GPRC:$base),
+          (LDAg tjumptable:$sym, GPRC:$base)>;
 
 // A load of a GP-relative address folds the !gprellow low part into the load
 // displacement, so only the ldah !gprelhigh is needed to form the address.
@@ -820,20 +824,20 @@ def brtarget : Operand<OtherVT> {
 }
 
 // Unconditional branch: `br $31, target` ($31 discards the saved PC).
-let isBranch = 1, isTerminator = 1, isBarrier = 1 in
-def BR : AlphaInst<(outs), (ins brtarget:$target), "br $$31, $target",
-                   [(br bb:$target)]> {
-  let Opcode = 0x30;
-}
+let isBranch = 1, isTerminator = 1, isBarrier = 1, Ra = 31 in
+def BR : BForm<0x30, (outs), (ins brtarget:$target), "br $$31, $target",
+               [(br bb:$target)]>;
 
 // Conditional branches test a register against zero.
 let isBranch = 1, isTerminator = 1 in {
-def BEQ : AlphaInst<(outs), (ins GPRC:$Ra, brtarget:$target),
-                    "beq $Ra, $target", []> {
-  let Opcode = 0x39;
+def BEQ : BForm<0x39, (outs), (ins GPRC:$Ra, brtarget:$target),
+                "beq $Ra, $target", []>;
+def BNE : BForm<0x3d, (outs), (ins GPRC:$Ra, brtarget:$target),
+                "bne $Ra, $target", [(brcond GPRC:$Ra, bb:$target)]>;
 }
-def BNE : AlphaInst<(outs), (ins GPRC:$Ra, brtarget:$target),
-                    "bne $Ra, $target", [(brcond GPRC:$Ra, bb:$target)]> {
-  let Opcode = 0x3d;
-}
-}
+
+// Indirect branch through a register (used for jump tables).
+let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1,
+    Ra = 31 in
+def JMP : MbrForm<0b00, (outs), (ins GPRC:$Rb), "jmp $$31, ($Rb), 0",
+                  [(brind GPRC:$Rb)]>;
