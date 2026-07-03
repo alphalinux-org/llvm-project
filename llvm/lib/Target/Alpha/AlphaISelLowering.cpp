@@ -18,6 +18,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/Support/ErrorHandling.h"
 
 using namespace llvm;
@@ -50,6 +51,10 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   setOperationAction(ISD::BR_CC, MVT::f32, Expand);
   setOperationAction(ISD::BR_CC, MVT::f64, Expand);
   setOperationAction(ISD::BR_JT, MVT::Other, Expand);
+
+  // Aligned integer loads and stores are atomic; barriers are inserted around
+  // stronger orderings.  Wider atomic read-modify-writes are not handled yet.
+  setMaxAtomicSizeInBitsSupported(64);
 
   // Global addresses are loaded from the GOT; constant pools are GP-relative.
   setOperationAction(ISD::GlobalAddress, MVT::i64, Custom);
@@ -261,6 +266,31 @@ SDValue AlphaTargetLowering::LowerFormalArguments(
   }
 
   return Chain;
+}
+
+Instruction *AlphaTargetLowering::emitLeadingFence(IRBuilderBase &Builder,
+                                                   Instruction *Inst,
+                                                   AtomicOrdering Ord) const {
+  // A sequentially consistent access needs the barrier ahead of it whether or
+  // not it stores, so that an earlier SC store cannot be reordered past a
+  // later SC load.  The generic implementation asks for hasAtomicStore() here,
+  // which is enough for release semantics but not for SC.
+  if (Ord == AtomicOrdering::SequentiallyConsistent)
+    return Builder.CreateFence(Ord);
+  if (isReleaseOrStronger(Ord) && Inst->hasAtomicStore())
+    return Builder.CreateFence(AtomicOrdering::Release);
+  return nullptr;
+}
+
+Instruction *AlphaTargetLowering::emitTrailingFence(IRBuilderBase &Builder,
+                                                    Instruction *Inst,
+                                                    AtomicOrdering Ord) const {
+  // Alpha has one barrier, so an acquire fence after the access is both what
+  // orders the following accesses and what breaks the dependent-load problem
+  // shouldInsertFencesForAtomic describes.
+  if (isAcquireOrStronger(Ord))
+    return Builder.CreateFence(AtomicOrdering::Acquire);
+  return nullptr;
 }
 
 SDValue

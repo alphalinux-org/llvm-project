@@ -96,6 +96,12 @@ let hasSideEffects = 0, mayLoad = 0, mayStore = 0 in {
 // NOP is the canonical `bis $31, $31, $31`.
 def NOP : OForm<0x11, 0x20, (outs), (ins), "nop", []>;
 
+// Memory barrier.
+let hasSideEffects = 1 in
+def MB : AlphaInst<(outs), (ins), "mb", [(atomic_fence timm, timm)]> {
+  let Opcode = 0x18;
+}
+
 // Register-register integer operate instruction: `<mnem> $Ra, $Rb, $Rc`
 // computes $Rc = $Ra <op> $Rb.
 class ALU_rr<bits<6> opc, bits<7> func, string mnem, SDPatternOperator node>
@@ -467,6 +473,15 @@ def STT : AlphaInst<(outs), (ins FPRC:$Ra, memri:$addr), "stt $Ra, $addr",
 def STS : AlphaInst<(outs), (ins FPRC:$Ra, memri:$addr), "sts $Ra, $addr",
                     [(store f32:$Ra, ADDRri:$addr)]> { let Opcode = 0x26; }
 }
+
+// Naturally aligned integer loads and stores are atomic; stronger orderings get
+// an explicit memory barrier inserted around them (shouldInsertFencesForAtomic).
+def : Pat<(i64 (atomic_load_64 ADDRri:$addr)), (LDQ memri:$addr)>;
+def : Pat<(i64 (atomic_load_32 ADDRri:$addr)), (LDL memri:$addr)>;
+def : Pat<(atomic_store_64 GPRC:$val, ADDRri:$addr),
+          (STQ GPRC:$val, memri:$addr)>;
+def : Pat<(atomic_store_32 GPRC:$val, ADDRri:$addr),
+          (STL GPRC:$val, memri:$addr)>;
 
 // Subroutine return: `ret $31, ($26), 1`.
 let isReturn = 1, isTerminator = 1, isBarrier = 1, Uses = [R26] in
