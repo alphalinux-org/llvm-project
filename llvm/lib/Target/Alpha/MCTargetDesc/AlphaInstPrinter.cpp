@@ -46,6 +46,18 @@ void AlphaInstPrinter::printOperand(const MCInst *MI, int OpNum,
     llvm_unreachable("Invalid operand");
 }
 
+void AlphaInstPrinter::printParenReg(const MCInst *MI, int OpNum,
+                                     raw_ostream &O) {
+  O << '(' << getRegisterName(MI->getOperand(OpNum).getReg()) << ')';
+}
+
+void AlphaInstPrinter::printZeroDispReg(const MCInst *MI, int OpNum,
+                                        raw_ostream &O) {
+  // The unaligned ldq_u/stq_u take a memory operand; the assembler requires an
+  // explicit zero displacement, so print `0($base)`.
+  O << "0(" << getRegisterName(MI->getOperand(OpNum).getReg()) << ')';
+}
+
 void AlphaInstPrinter::printMemOperand(const MCInst *MI, int OpNum,
                                        raw_ostream &O) {
   // memri operands are (base register, displacement), printed as disp(base).
