@@ -122,6 +122,11 @@ def SRAi : ALU_ri<0x12, 0x3c, "sra", sra>;
 def ZAPNOTi : OFormL<0x12, 0x31, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
                         "zapnot $Ra, $lit, $Rc", []>;
 
+// `addl $Ra, $Rb, $Rc` is a 32-bit add whose result is sign-extended to 64
+// bits.  With $Rb = $31 it sign-extends the low 32 bits of $Ra.
+def ADDL : OForm<0x10, 0x00, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                     "addl $Ra, $Rb, $Rc", []>;
+
 // Comparisons write 0 or 1 into $Rc (Alpha has no condition-code register).
 class CMP_rr<bits<7> func, string mnem>
     : OForm<0x10, func, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
@@ -218,6 +223,15 @@ def : Pat<(i64 immSExt16:$imm), (LDA immSExt16:$imm, R31)>;
 def : Pat<(and GPRC:$x, 0xff),       (ZAPNOTi GPRC:$x, 1)>;
 def : Pat<(and GPRC:$x, 0xffff),     (ZAPNOTi GPRC:$x, 3)>;
 def : Pat<(and GPRC:$x, 0xffffffff), (ZAPNOTi GPRC:$x, 15)>;
+
+// Sign-extend the low 32 bits with `addl $x, $31, $dst`.
+def : Pat<(sext_inreg GPRC:$x, i32), (ADDL GPRC:$x, R31)>;
+
+// Sign-extend the low 8/16 bits by shifting the field to the top of the
+// register and back with an arithmetic shift.  (BWX has sextb/sextw, which can
+// replace these when +bwx is enabled.)
+def : Pat<(sext_inreg GPRC:$x, i8),  (SRAi (SLLi GPRC:$x, 56), 56)>;
+def : Pat<(sext_inreg GPRC:$x, i16), (SRAi (SLLi GPRC:$x, 48), 48)>;
 
 // setcc.  Conditions without a direct instruction are formed by swapping the
 // operands (gt/ge) or inverting equality (ne).
