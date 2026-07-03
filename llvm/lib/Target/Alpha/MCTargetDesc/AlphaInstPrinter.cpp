@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "AlphaInstPrinter.h"
+#include "AlphaFixupKinds.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
@@ -48,10 +49,21 @@ void AlphaInstPrinter::printOperand(const MCInst *MI, int OpNum,
 void AlphaInstPrinter::printMemOperand(const MCInst *MI, int OpNum,
                                        raw_ostream &O) {
   // memri operands are (base register, displacement), printed as disp(base).
+  // A relocation-specifier displacement prints its suffix after the base, so
+  // `disp(base) !specifier` round-trips through the assembler.
   const MCOperand &Disp = MI->getOperand(OpNum + 1);
+  const MCSpecifierExpr *Spec =
+      Disp.isExpr() ? dyn_cast<MCSpecifierExpr>(Disp.getExpr()) : nullptr;
   if (Disp.isImm())
     O << Disp.getImm();
+  else if (Spec)
+    MAI.printExpr(O, *Spec->getSubExpr());
   else
     printOperand(MI, OpNum + 1, O);
   O << '(' << getRegisterName(MI->getOperand(OpNum).getReg()) << ')';
+  if (Spec) {
+    StringRef Name = Alpha::getSpecifierName(Spec->getSpecifier());
+    if (!Name.empty())
+      O << " !" << Name;
+  }
 }
