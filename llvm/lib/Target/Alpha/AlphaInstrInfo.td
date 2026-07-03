@@ -123,6 +123,22 @@ def CPYS : AlphaInst<(outs FPRC:$Rc), (ins FPRC:$Ra, FPRC:$Rb),
   let Opcode = 0x17;
 }
 
+// IEEE floating-point operate instruction: `<mnem> $Ra, $Rb, $Rc`.  The `s`
+// forms operate on S_floating (f32), the `t` forms on T_floating (f64).
+class FP_rr<bits<11> func, string mnem, ValueType vt, SDPatternOperator node>
+    : FForm<0x16, func, (outs FPRC:$Rc), (ins FPRC:$Ra, FPRC:$Rb),
+            mnem # " $Ra, $Rb, $Rc",
+            [(set vt:$Rc, (node vt:$Ra, vt:$Rb))]>;
+
+def ADDS : FP_rr<0x080,"adds", f32, fadd>;
+def ADDT : FP_rr<0x0a0,"addt", f64, fadd>;
+def SUBS : FP_rr<0x081,"subs", f32, fsub>;
+def SUBT : FP_rr<0x0a1,"subt", f64, fsub>;
+def MULS : FP_rr<0x082,"muls", f32, fmul>;
+def MULT : FP_rr<0x0a2,"mult", f64, fmul>;
+def DIVS : FP_rr<0x083,"divs", f32, fdiv>;
+def DIVT : FP_rr<0x0a3,"divt", f64, fdiv>;
+
 // Load address: `lda $Rc, $disp($Rb)` computes $Rc = $Rb + sign_ext($disp).
 // With $Rb = $31 (zero) this materializes a 16-bit signed constant.
 def LDA : MFormD<0x08, (outs GPRC:$Ra), (ins s16imm:$disp, GPRC:$Rb),
