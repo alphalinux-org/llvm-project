@@ -11,10 +11,12 @@
 //===----------------------------------------------------------------------===//
 
 #include "Alpha.h"
+#include "AlphaMachineFunctionInfo.h"
 #include "AlphaSubtarget.h"
 #include "AlphaTargetMachine.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
+#include "llvm/IR/Constants.h"
 
 using namespace llvm;
 
@@ -86,8 +88,8 @@ void AlphaDAGToDAGISel::Select(SDNode *Node) {
     int64_t V = cast<ConstantSDNode>(Node)->getSExtValue();
     int64_t Lo = static_cast<int16_t>(V);
     int64_t Hi = (V - Lo) >> 16;
+    SDLoc DL(Node);
     if (!isInt<16>(V) && isInt<16>(Hi)) {
-      SDLoc DL(Node);
       SDValue Zero = CurDAG->getRegister(Alpha::R31, MVT::i64);
       SDNode *High = CurDAG->getMachineNode(
           Alpha::LDAH, DL, MVT::i64,
@@ -96,6 +98,28 @@ void AlphaDAGToDAGISel::Select(SDNode *Node) {
           Alpha::LDA, DL, MVT::i64, CurDAG->getTargetConstant(Lo, DL, MVT::i64),
           SDValue(High, 0));
       ReplaceNode(Node, Low);
+      return;
+    }
+    if (!isInt<16>(Hi)) {
+      // Anything the ldah/lda pair cannot build goes in the constant pool and
+      // is loaded GP-relative.  That is every constant wider than 32 bits, and
+      // also those whose high half is 0x8000, which the signed field of ldah
+      // cannot hold.
+      CurDAG->getMachineFunction()
+          .getInfo<AlphaMachineFunctionInfo>()
+          ->setUsesGP();
+      const Constant *CV =
+          ConstantInt::get(Type::getInt64Ty(*CurDAG->getContext()), V);
+      SDValue CPI = CurDAG->getTargetConstantPool(CV, MVT::i64, Align(8));
+      SDValue GP = CurDAG->getRegister(Alpha::R29, MVT::i64);
+      SDNode *High =
+          CurDAG->getMachineNode(Alpha::LDAHg, DL, MVT::i64, CPI, GP);
+      SDNode *Addr = CurDAG->getMachineNode(Alpha::LDAg, DL, MVT::i64, CPI,
+                                            SDValue(High, 0));
+      SDNode *Load =
+          CurDAG->getMachineNode(Alpha::LDQ, DL, MVT::i64, SDValue(Addr, 0),
+                                 CurDAG->getTargetConstant(0, DL, MVT::i64));
+      ReplaceNode(Node, Load);
       return;
     }
   }
