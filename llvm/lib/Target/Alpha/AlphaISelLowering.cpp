@@ -152,15 +152,27 @@ SDValue AlphaTargetLowering::LowerCall(CallLoweringInfo &CLI,
 
   SDValue Chain = DAG.getCALLSEQ_START(CLI.Chain, NumBytes, 0, DL);
 
-  // Copy each argument into its assigned register.  The callee address goes in
-  // $27 (the procedure value).
+  // Copy each argument into its assigned register or store it to the outgoing
+  // argument area.  The callee address goes in $27 (the procedure value).
   SmallVector<std::pair<Register, SDValue>, 8> RegsToPass;
+  SmallVector<SDValue, 8> MemOps;
+  SDValue StackPtr;
   for (unsigned I = 0, E = ArgLocs.size(); I != E; ++I) {
     const CCValAssign &VA = ArgLocs[I];
-    if (!VA.isRegLoc())
-      report_fatal_error("Alpha stack call arguments are not yet implemented");
-    RegsToPass.emplace_back(VA.getLocReg(), CLI.OutVals[I]);
+    if (VA.isRegLoc()) {
+      RegsToPass.emplace_back(VA.getLocReg(), CLI.OutVals[I]);
+      continue;
+    }
+    if (!StackPtr.getNode())
+      StackPtr = DAG.getRegister(Alpha::R30, MVT::i64);
+    SDValue Off = DAG.getNode(ISD::ADD, DL, MVT::i64, StackPtr,
+                              DAG.getIntPtrConstant(VA.getLocMemOffset(), DL));
+    MemOps.push_back(
+        DAG.getStore(Chain, DL, CLI.OutVals[I], Off,
+                     MachinePointerInfo::getStack(MF, VA.getLocMemOffset())));
   }
+  if (!MemOps.empty())
+    Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other, MemOps);
 
   SDValue Callee = CLI.Callee;
   if (auto *G = dyn_cast<GlobalAddressSDNode>(Callee))
@@ -229,14 +241,23 @@ SDValue AlphaTargetLowering::LowerFormalArguments(
   CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
   CCInfo.AnalyzeFormalArguments(Ins, CC_Alpha);
 
+  MachineFrameInfo &MFI = MF.getFrameInfo();
   for (const CCValAssign &VA : ArgLocs) {
-    if (!VA.isRegLoc())
-      report_fatal_error("Alpha stack arguments are not yet implemented");
-
-    const TargetRegisterClass *RC = getRegClassForVT(VA.getLocVT());
-    Register VReg = MF.addLiveIn(VA.getLocReg(), RC);
-    SDValue Val = DAG.getCopyFromReg(Chain, DL, VReg, VA.getLocVT());
-    InVals.push_back(Val);
+    if (VA.isRegLoc()) {
+      const TargetRegisterClass *RC = getRegClassForVT(VA.getLocVT());
+      Register VReg = MF.addLiveIn(VA.getLocReg(), RC);
+      SDValue Val = DAG.getCopyFromReg(Chain, DL, VReg, VA.getLocVT());
+      InVals.push_back(Val);
+    } else {
+      // The argument was passed on the stack, in the caller's outgoing area.
+      unsigned Size = VA.getLocVT().getStoreSize();
+      int FI = MFI.CreateFixedObject(Size, VA.getLocMemOffset(),
+                                     /*IsImmutable=*/true);
+      SDValue FIN = DAG.getFrameIndex(FI, MVT::i64);
+      SDValue Val = DAG.getLoad(VA.getLocVT(), DL, Chain, FIN,
+                                MachinePointerInfo::getFixedStack(MF, FI));
+      InVals.push_back(Val);
+    }
   }
 
   // Keep the hidden result pointer of a function returning in memory: it is
