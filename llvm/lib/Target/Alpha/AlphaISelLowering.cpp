@@ -38,9 +38,11 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   // Comparison instructions leave 0 or 1 in the destination register.
   setBooleanContents(ZeroOrOneBooleanContent);
 
-  // i64 select maps to a conditional move; expand SELECT_CC into SETCC+SELECT.
-  setOperationAction(ISD::SELECT, MVT::i64, Legal);
-  setOperationAction(ISD::SELECT_CC, MVT::i64, Expand);
+  // select maps to a conditional move; expand SELECT_CC into SETCC + SELECT.
+  for (MVT VT : {MVT::i64, MVT::f32, MVT::f64}) {
+    setOperationAction(ISD::SELECT, VT, Legal);
+    setOperationAction(ISD::SELECT_CC, VT, Expand);
+  }
 
   // Only BRCOND (branch on a 0/1 register) is supported; expand BR_CC into
   // SETCC + BRCOND, and there are no jump tables yet.

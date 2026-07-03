@@ -234,6 +234,15 @@ def CMPTEQ : CMPT_rr<0x0a5,"cmpteq">;
 def CMPTLT : CMPT_rr<0x0a6,"cmptlt">;
 def CMPTLE : CMPT_rr<0x0a7,"cmptle">;
 
+// Floating-point conditional move: `fcmovne $Fa, $Fb, $Fc` sets $Fc = $Fb when
+// $Fa != 0.0.  With $Fc preset to the false value this implements an FP select.
+let Constraints = "$Ffalse = $Fc" in
+def FCMOVNE : AlphaInst<(outs FPRC:$Fc),
+                        (ins FPRC:$Ffalse, FPRC:$Fa, FPRC:$Fb),
+                        "fcmovne $Fa, $Fb, $Fc", []> {
+  let Opcode = 0x17;
+}
+
 // Precision conversions between S_floating (f32) and T_floating (f64).  Both
 // stay in floating-point registers.
 def CVTST : AlphaInst<(outs FPRC:$Fc), (ins FPRC:$Fb), "cvtst $Fb, $Fc",
@@ -384,6 +393,13 @@ def : FCmpPat<SETOLE, vt, CMPTLE, (vt $x), (vt $y)>;
 def : FCmpPat<SETOGT, vt, CMPTLT, (vt $y), (vt $x)>;
 def : FCmpPat<SETOGE, vt, CMPTLE, (vt $y), (vt $x)>;
 }
+
+// Floating-point select: move the 0/1 condition into an FP register (its bits
+// are zero or non-zero) and use fcmovne to pick the true value.
+def : Pat<(f32 (select GPRC:$c, FPRC:$t, FPRC:$f)),
+          (FCMOVNE FPRC:$f, (MOVi2f GPRC:$c), FPRC:$t)>;
+def : Pat<(f64 (select GPRC:$c, FPRC:$t, FPRC:$f)),
+          (FCMOVNE FPRC:$f, (MOVi2f GPRC:$c), FPRC:$t)>;
 
 //===----------------------------------------------------------------------===//
 // Aligned loads and stores (base + 16-bit displacement).
