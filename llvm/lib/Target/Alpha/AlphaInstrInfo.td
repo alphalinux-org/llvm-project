@@ -52,6 +52,15 @@ def s16imm : Operand<i64>;
 // An immediate that fits in the 16-bit signed displacement of `lda`.
 def immSExt16 : ImmLeaf<i64, [{ return isInt<16>(Imm); }]>;
 
+// A memory address: base register plus 16-bit signed displacement, printed as
+// `disp($base)`.
+def memri : Operand<i64> {
+  let MIOperandInfo = (ops GPRC, s16imm);
+  let PrintMethod = "printMemOperand";
+}
+
+def ADDRri : ComplexPattern<i64, 2, "SelectADDRri", [frameindex]>;
+
 //===----------------------------------------------------------------------===//
 // Instructions.
 //===----------------------------------------------------------------------===//
@@ -98,6 +107,28 @@ def LDA : MFormD<0x08, (outs GPRC:$Ra), (ins s16imm:$disp, GPRC:$Rb),
 
 // Materialize a small signed constant with `lda $Rc, imm($31)`.
 def : Pat<(i64 immSExt16:$imm), (LDA immSExt16:$imm, R31)>;
+
+//===----------------------------------------------------------------------===//
+// Aligned loads and stores (base + 16-bit displacement).
+//===----------------------------------------------------------------------===//
+
+let mayLoad = 1, hasSideEffects = 0 in {
+def LDQ : AlphaInst<(outs GPRC:$Ra), (ins memri:$addr), "ldq $Ra, $addr",
+                    [(set i64:$Ra, (load ADDRri:$addr))]> { let Opcode = 0x29; }
+def LDT : AlphaInst<(outs FPRC:$Ra), (ins memri:$addr), "ldt $Ra, $addr",
+                    [(set f64:$Ra, (load ADDRri:$addr))]> { let Opcode = 0x23; }
+def LDS : AlphaInst<(outs FPRC:$Ra), (ins memri:$addr), "lds $Ra, $addr",
+                    [(set f32:$Ra, (load ADDRri:$addr))]> { let Opcode = 0x22; }
+}
+
+let mayStore = 1, hasSideEffects = 0 in {
+def STQ : AlphaInst<(outs), (ins GPRC:$Ra, memri:$addr), "stq $Ra, $addr",
+                    [(store i64:$Ra, ADDRri:$addr)]> { let Opcode = 0x2d; }
+def STT : AlphaInst<(outs), (ins FPRC:$Ra, memri:$addr), "stt $Ra, $addr",
+                    [(store f64:$Ra, ADDRri:$addr)]> { let Opcode = 0x27; }
+def STS : AlphaInst<(outs), (ins FPRC:$Ra, memri:$addr), "sts $Ra, $addr",
+                    [(store f32:$Ra, ADDRri:$addr)]> { let Opcode = 0x26; }
+}
 
 // Subroutine return: `ret $31, ($26), 1`.
 // $26 is not listed as a use: the epilogue reloads it as a frame-destroy
