@@ -796,6 +796,88 @@ static MachineBasicBlock *emitAtomicCmpXchg(MachineInstr &MI,
   return ExitBB;
 }
 
+// Expand a sub-word (byte or word) compare-and-swap into an ldq_l/stq_c loop:
+// extract the field, compare it against the expected value and, on a match,
+// splice the new value back into the quadword.
+static MachineBasicBlock *
+emitSubwordCmpXchg(MachineInstr &MI, MachineBasicBlock *BB, bool IsWord) {
+  MachineFunction &MF = *BB->getParent();
+  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
+  MachineRegisterInfo &MRI = MF.getRegInfo();
+  const DebugLoc &DL = MI.getDebugLoc();
+
+  Register Dst = MI.getOperand(0).getReg();
+  Register Addr = MI.getOperand(1).getReg();
+  Register Cmp = MI.getOperand(2).getReg();
+  Register New = MI.getOperand(3).getReg();
+  unsigned ExtOpc = IsWord ? Alpha::EXTWL : Alpha::EXTBL;
+  unsigned MskOpc = IsWord ? Alpha::MSKWL : Alpha::MSKBL;
+  unsigned InsOpc = IsWord ? Alpha::INSWL : Alpha::INSBL;
+  unsigned ZapMask = IsWord ? 0x3 : 0x1;
+
+  Register Aligned = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  BuildMI(*BB, MI, DL, TII.get(Alpha::BICi), Aligned).addReg(Addr).addImm(7);
+  // Zero-extend the expected value to the field width for the comparison.
+  Register CmpField = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  BuildMI(*BB, MI, DL, TII.get(Alpha::ZAPNOTi), CmpField)
+      .addReg(Cmp)
+      .addImm(ZapMask);
+
+  const BasicBlock *LLVMBB = BB->getBasicBlock();
+  MachineFunction::iterator It = ++BB->getIterator();
+  MachineBasicBlock *LoopBB = MF.CreateMachineBasicBlock(LLVMBB);
+  MachineBasicBlock *StoreBB = MF.CreateMachineBasicBlock(LLVMBB);
+  MachineBasicBlock *ExitBB = MF.CreateMachineBasicBlock(LLVMBB);
+  MF.insert(It, LoopBB);
+  MF.insert(It, StoreBB);
+  MF.insert(It, ExitBB);
+  ExitBB->splice(ExitBB->begin(), BB, std::next(MI.getIterator()), BB->end());
+  ExitBB->transferSuccessorsAndUpdatePHIs(BB);
+  BB->addSuccessor(LoopBB);
+  LoopBB->addSuccessor(StoreBB);
+  LoopBB->addSuccessor(ExitBB);
+  StoreBB->addSuccessor(LoopBB);
+  StoreBB->addSuccessor(ExitBB);
+
+  //   ldq_l  Quad, 0(Aligned)
+  //   ext    Quad, Addr, Dst        ; current field (zero-extended)
+  //   cmpeq  Dst, CmpField, Eq
+  //   beq    Eq, ExitBB             ; mismatch: leave Dst, no store
+  Register Quad = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  addNarrowedMemOperands(BuildMI(LoopBB, DL, TII.get(Alpha::LDQ_L), Quad)
+                             .addReg(Aligned)
+                             .addImm(0),
+                         MI, MachineMemOperand::MOLoad);
+  BuildMI(LoopBB, DL, TII.get(ExtOpc), Dst).addReg(Quad).addReg(Addr);
+  Register Eq = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  BuildMI(LoopBB, DL, TII.get(Alpha::CMPEQ), Eq).addReg(Dst).addReg(CmpField);
+  BuildMI(LoopBB, DL, TII.get(Alpha::BEQ)).addReg(Eq).addMBB(ExitBB);
+
+  //   msk    Quad, Addr, Cleared
+  //   ins    New, Addr, Positioned
+  //   bis    Cleared, Positioned, Merged
+  //   stq_c  Merged, 0(Aligned)
+  //   beq    Merged, LoopBB
+  Register Cleared = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  BuildMI(StoreBB, DL, TII.get(MskOpc), Cleared).addReg(Quad).addReg(Addr);
+  Register Positioned = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  BuildMI(StoreBB, DL, TII.get(InsOpc), Positioned).addReg(New).addReg(Addr);
+  Register Merged = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  BuildMI(StoreBB, DL, TII.get(Alpha::BIS), Merged)
+      .addReg(Cleared)
+      .addReg(Positioned);
+  Register Success = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  addNarrowedMemOperands(BuildMI(StoreBB, DL, TII.get(Alpha::STQ_C), Success)
+                             .addReg(Merged)
+                             .addReg(Aligned)
+                             .addImm(0),
+                         MI, MachineMemOperand::MOStore);
+  BuildMI(StoreBB, DL, TII.get(Alpha::BEQ)).addReg(Success).addMBB(LoopBB);
+
+  MI.eraseFromParent();
+  return ExitBB;
+}
+
 // Expand a lock-based pre-BWX byte/word store into an ldq_l/stq_c loop that
 // reads the containing quadword, splices in the new field and stores it back.
 static MachineBasicBlock *emitSafeStore(MachineInstr &MI, MachineBasicBlock *BB,
@@ -978,6 +1060,10 @@ AlphaTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
     return emitAtomicRMW(MI, MBB);
   case Alpha::ATOMIC_CMPXCHG_I64:
     return emitAtomicCmpXchg(MI, MBB);
+  case Alpha::ATOMIC_CMPXCHG_I8:
+    return emitSubwordCmpXchg(MI, MBB, /*IsWord=*/false);
+  case Alpha::ATOMIC_CMPXCHG_I16:
+    return emitSubwordCmpXchg(MI, MBB, /*IsWord=*/true);
   default:
     break;
   }

@@ -780,22 +780,26 @@ def ATOMIC_XCHG_I8 : AtomicRMW<AtomicI8<atomic_swap>>;
 // Compare-and-swap, also expanded to an ldq_l/stq_c loop.  $dst receives the
 // value read; the caller compares it against $cmp to determine success.
 //
-// The fragment is constrained to a 64-bit access.  An unconstrained
-// atomic_cmp_swap would match a cmpxchg of any width and give an i8, i16 or
-// i32 one this ldq_l/stq_c loop -- the wrong access width and the wrong
-// comparison.  The narrower widths get their own pseudos in later commits.
+// Each fragment is constrained to its access width.  An unconstrained
+// atomic_cmp_swap would match a cmpxchg of any width and give a narrower one
+// the 64-bit ldq_l/stq_c loop -- the wrong access width and the wrong
+// comparison.
+class AtomicCAS<PatFrag node>
+    : AlphaPseudo<(outs GPRC:$dst), (ins GPRC:$addr, GPRC:$cmp, GPRC:$new), "",
+                  [(set i64:$dst, (node iPTR:$addr, i64:$cmp, i64:$new))]> {
+  let usesCustomInserter = 1;
+  let mayLoad = 1;
+  let mayStore = 1;
+}
 class AtomicCASvt<ValueType vt>
     : PatFrag<(ops node:$ptr, node:$cmp, node:$new),
               (atomic_cmp_swap node:$ptr, node:$cmp, node:$new)> {
   let IsAtomic = 1;
   let MemoryVT = vt;
 }
-let usesCustomInserter = 1, mayLoad = 1, mayStore = 1 in
-def ATOMIC_CMPXCHG_I64
-    : AlphaPseudo<(outs GPRC:$dst),
-                  (ins GPRC:$addr, GPRC:$cmp, GPRC:$new), "",
-                  [(set i64:$dst,
-                        (AtomicCASvt<i64> iPTR:$addr, i64:$cmp, i64:$new))]>;
+def ATOMIC_CMPXCHG_I64 : AtomicCAS<AtomicCASvt<i64>>;
+def ATOMIC_CMPXCHG_I16 : AtomicCAS<AtomicCASvt<i16>>;
+def ATOMIC_CMPXCHG_I8  : AtomicCAS<AtomicCASvt<i8>>;
 
 // Subroutine return: `ret $31, ($26), 1`.
 // $26 is not listed as a use: the epilogue reloads it as a frame-destroy
