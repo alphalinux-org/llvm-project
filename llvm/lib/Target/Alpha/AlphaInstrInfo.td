@@ -761,12 +761,22 @@ def ATOMIC_XCHG_I8 : AtomicRMW<AtomicI8<atomic_swap>>;
 
 // Compare-and-swap, also expanded to an ldq_l/stq_c loop.  $dst receives the
 // value read; the caller compares it against $cmp to determine success.
-let usesCustomInserter = 1, mayLoad = 1, mayStore = 1 in
-def ATOMIC_CMPXCHG_I64
-    : AlphaPseudo<(outs GPRC:$dst),
-                  (ins GPRC:$addr, GPRC:$cmp, GPRC:$new), "",
-                  [(set i64:$dst,
-                        (atomic_cmp_swap iPTR:$addr, i64:$cmp, i64:$new))]>;
+class AtomicCAS<PatFrag node>
+    : AlphaPseudo<(outs GPRC:$dst), (ins GPRC:$addr, GPRC:$cmp, GPRC:$new), "",
+                  [(set i64:$dst, (node iPTR:$addr, i64:$cmp, i64:$new))]> {
+  let usesCustomInserter = 1;
+  let mayLoad = 1;
+  let mayStore = 1;
+}
+class AtomicCASvt<ValueType vt>
+    : PatFrag<(ops node:$ptr, node:$cmp, node:$new),
+              (atomic_cmp_swap node:$ptr, node:$cmp, node:$new)> {
+  let IsAtomic = 1;
+  let MemoryVT = vt;
+}
+def ATOMIC_CMPXCHG_I64 : AtomicCAS<AtomicCASvt<i64>>;
+def ATOMIC_CMPXCHG_I16 : AtomicCAS<AtomicCASvt<i16>>;
+def ATOMIC_CMPXCHG_I8  : AtomicCAS<AtomicCASvt<i8>>;
 
 // Subroutine return: `ret $31, ($26), 1`.
 let isReturn = 1, isTerminator = 1, isBarrier = 1, Uses = [R26] in
