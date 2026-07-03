@@ -42,6 +42,12 @@ public:
   // frame index) into (Base, Offset).
   bool SelectADDRri(SDValue Addr, SDValue &Base, SDValue &Offset);
 
+  // Match any address as a single register operand.
+  bool SelectAddrReg(SDValue Addr, SDValue &Reg) {
+    Reg = Addr;
+    return true;
+  }
+
 #include "AlphaGenDAGISel.inc"
 };
 
