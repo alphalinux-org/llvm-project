@@ -55,6 +55,9 @@ def immSExt16 : ImmLeaf<i64, [{ return isInt<16>(Imm); }]>;
 // An 8-bit unsigned literal, as used by operate instructions in literal form.
 def u8imm : Operand<i64>;
 
+// An immediate that fits in the 8-bit operate literal field.
+def immUExt8 : ImmLeaf<i64, [{ return isUInt<8>(Imm); }]>;
+
 // A memory address: base register plus 16-bit signed displacement, printed as
 // `disp($base)`.
 def memri : Operand<i64> {
@@ -86,10 +89,29 @@ def MULQ : ALU_rr<0x13, 0x20, "mulq", mul>;
 def AND  : ALU_rr<0x11, 0x00, "and",  and>;
 def XOR  : ALU_rr<0x11, 0x40, "xor",  xor>;
 
+// Literal (8-bit immediate) form of an operate instruction:
+// `<mnem> $Ra, lit, $Rc` computes $Rc = $Ra <op> zext(lit).
+class ALU_ri<bits<6> opc, bits<7> func, string mnem, SDPatternOperator node>
+    : OFormL<opc, func, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
+             mnem # " $Ra, $lit, $Rc",
+             [(set i64:$Rc, (node i64:$Ra, immUExt8:$lit))]>;
+
+def ADDQi : ALU_ri<0x10, 0x20, "addq", add>;
+def SUBQi : ALU_ri<0x10, 0x29, "subq", sub>;
+def MULQi : ALU_ri<0x13, 0x20, "mulq", mul>;
+def ANDi  : ALU_ri<0x11, 0x00, "and",  and>;
+def BISi  : ALU_ri<0x11, 0x20, "bis",  or>;
+def XORi  : ALU_ri<0x11, 0x40, "xor",  xor>;
+
 // Shifts use the low 6 bits of $Rb as the shift amount.
 def SLL : ALU_rr<0x12, 0x39, "sll", shl>;
 def SRL : ALU_rr<0x12, 0x34, "srl", srl>;
 def SRA : ALU_rr<0x12, 0x3c, "sra", sra>;
+
+// Immediate shift amount.
+def SLLi : ALU_ri<0x12, 0x39, "sll", shl>;
+def SRLi : ALU_ri<0x12, 0x34, "srl", srl>;
+def SRAi : ALU_ri<0x12, 0x3c, "sra", sra>;
 
 // `zapnot $Ra, lit, $Rc` keeps the bytes of $Ra selected by the 8-bit mask and
 // zeroes the rest.  It provides byte-granular zero-extension.
