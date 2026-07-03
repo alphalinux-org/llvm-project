@@ -357,6 +357,10 @@ def : Pat<(AlphaGprelHi tconstpool:$sym, GPRC:$base),
           (LDAHg tconstpool:$sym, GPRC:$base)>;
 def : Pat<(AlphaGprelLo tconstpool:$sym, GPRC:$base),
           (LDAg tconstpool:$sym, GPRC:$base)>;
+def : Pat<(AlphaGprelHi tjumptable:$sym, GPRC:$base),
+          (LDAHg tjumptable:$sym, GPRC:$base)>;
+def : Pat<(AlphaGprelLo tjumptable:$sym, GPRC:$base),
+          (LDAg tjumptable:$sym, GPRC:$base)>;
 
 // A load of a GP-relative address folds the !gprellow low part into the load
 // displacement, so only the ldah !gprelhigh is needed to form the address.
@@ -769,4 +773,11 @@ def BNE : AlphaInst<(outs), (ins GPRC:$Ra, brtarget:$target),
                     "bne $Ra, $target", [(brcond GPRC:$Ra, bb:$target)]> {
   let Opcode = 0x3d;
 }
+}
+
+// Indirect branch through a register (used for jump tables).
+let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1 in
+def JMP : AlphaInst<(outs), (ins GPRC:$target), "jmp $$31, ($target), 0",
+                    [(brind GPRC:$target)]> {
+  let Opcode = 0x1a;
 }

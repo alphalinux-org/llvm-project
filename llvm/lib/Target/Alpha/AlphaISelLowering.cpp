@@ -50,7 +50,10 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   setOperationAction(ISD::BR_CC, MVT::i64, Expand);
   setOperationAction(ISD::BR_CC, MVT::f32, Expand);
   setOperationAction(ISD::BR_CC, MVT::f64, Expand);
-  setOperationAction(ISD::BR_JT, MVT::Other, Expand);
+  // Jump tables are emitted as GP-relative offset tables and dispatched with a
+  // load and an indirect jump.
+  setOperationAction(ISD::JumpTable, MVT::i64, Custom);
+  setOperationAction(ISD::BR_JT, MVT::Other, Custom);
 
   // Aligned integer loads and stores are atomic; barriers are inserted around
   // stronger orderings.  Wider atomic read-modify-writes are not handled yet.
@@ -131,6 +134,10 @@ SDValue AlphaTargetLowering::LowerOperation(SDValue Op,
     return LowerGlobalAddress(Op, DAG);
   case ISD::ConstantPool:
     return LowerConstantPool(Op, DAG);
+  case ISD::JumpTable:
+    return LowerJumpTable(Op, DAG);
+  case ISD::BR_JT:
+    return LowerBR_JT(Op, DAG);
   case ISD::VASTART:
     return LowerVASTART(Op, DAG);
   case ISD::VAARG:
@@ -217,6 +224,45 @@ SDValue AlphaTargetLowering::LowerConstantPool(SDValue Op,
   SDValue GP = DAG.getRegister(Alpha::R29, MVT::i64);
   SDValue Hi = DAG.getNode(AlphaISD::GPREL_HI, DL, MVT::i64, TCP, GP);
   return DAG.getNode(AlphaISD::GPREL_LO, DL, MVT::i64, TCP, Hi);
+}
+
+SDValue AlphaTargetLowering::LowerJumpTable(SDValue Op,
+                                            SelectionDAG &DAG) const {
+  // Like a constant pool, the jump table is addressed GP-relative.
+  DAG.getMachineFunction().getInfo<AlphaMachineFunctionInfo>()->setUsesGP();
+
+  auto *JT = cast<JumpTableSDNode>(Op);
+  SDLoc DL(Op);
+  SDValue TJT = DAG.getTargetJumpTable(JT->getIndex(), MVT::i64);
+  SDValue GP = DAG.getRegister(Alpha::R29, MVT::i64);
+  SDValue Hi = DAG.getNode(AlphaISD::GPREL_HI, DL, MVT::i64, TJT, GP);
+  return DAG.getNode(AlphaISD::GPREL_LO, DL, MVT::i64, TJT, Hi);
+}
+
+SDValue AlphaTargetLowering::LowerBR_JT(SDValue Op, SelectionDAG &DAG) const {
+  // br_jt: chain, jump-table address, index.
+  SDValue Chain = Op.getOperand(0);
+  SDValue Index = Op.getOperand(2);
+  SDLoc DL(Op);
+  DAG.getMachineFunction().getInfo<AlphaMachineFunctionInfo>()->setUsesGP();
+
+  // Form the GP-relative address of the table.
+  auto *JT = cast<JumpTableSDNode>(Op.getOperand(1));
+  SDValue TJT = DAG.getTargetJumpTable(JT->getIndex(), MVT::i64);
+  SDValue GPReg = DAG.getRegister(Alpha::R29, MVT::i64);
+  SDValue Hi = DAG.getNode(AlphaISD::GPREL_HI, DL, MVT::i64, TJT, GPReg);
+  SDValue Table = DAG.getNode(AlphaISD::GPREL_LO, DL, MVT::i64, TJT, Hi);
+
+  // Each entry is an absolute 64-bit block address; load it and jump.
+  SDValue EntryAddr =
+      DAG.getNode(ISD::ADD, DL, MVT::i64, Table,
+                  DAG.getNode(ISD::SHL, DL, MVT::i64, Index,
+                              DAG.getConstant(3, DL, MVT::i64)));
+  SDValue Target =
+      DAG.getLoad(MVT::i64, DL, Chain, EntryAddr,
+                  MachinePointerInfo::getJumpTable(DAG.getMachineFunction()));
+  Chain = Target.getValue(1);
+  return DAG.getNode(ISD::BRIND, DL, MVT::Other, Chain, Target);
 }
 
 SDValue AlphaTargetLowering::LowerCall(CallLoweringInfo &CLI,
