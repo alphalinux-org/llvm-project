@@ -442,6 +442,30 @@ AlphaTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
     return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_RMW_LOOP,
                           /*NumScratch=*/1, /*NumDefs=*/1,
                           {0, 0});
+  case Alpha::ATOMIC_ADD_I32:
+    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_RMW_LOOP,
+                          /*NumScratch=*/1, /*NumDefs=*/1,
+                          {Alpha::ADDQ, 1});
+  case Alpha::ATOMIC_SUB_I32:
+    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_RMW_LOOP,
+                          /*NumScratch=*/1, /*NumDefs=*/1,
+                          {Alpha::SUBQ, 1});
+  case Alpha::ATOMIC_AND_I32:
+    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_RMW_LOOP,
+                          /*NumScratch=*/1, /*NumDefs=*/1,
+                          {Alpha::AND, 1});
+  case Alpha::ATOMIC_OR_I32:
+    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_RMW_LOOP,
+                          /*NumScratch=*/1, /*NumDefs=*/1,
+                          {Alpha::BIS, 1});
+  case Alpha::ATOMIC_XOR_I32:
+    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_RMW_LOOP,
+                          /*NumScratch=*/1, /*NumDefs=*/1,
+                          {Alpha::XOR, 1});
+  case Alpha::ATOMIC_XCHG_I32:
+    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_RMW_LOOP,
+                          /*NumScratch=*/1, /*NumDefs=*/1,
+                          {0, 1});
   case Alpha::ATOMIC_CMPXCHG_I64:
     return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_CAS_LOOP,
                           /*NumScratch=*/2, /*NumDefs=*/1,

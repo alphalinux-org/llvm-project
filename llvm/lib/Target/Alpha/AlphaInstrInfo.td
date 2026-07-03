@@ -597,18 +597,35 @@ def : Pat<(atomic_store_32 GPRC:$val, ADDRri:$addr),
 
 // Load-locked / store-conditional, the primitives for atomic read-modify-write.
 // stq_c overwrites its source register with 1 on success or 0 on failure.
-let mayLoad = 1, hasSideEffects = 0 in
+let mayLoad = 1, hasSideEffects = 0 in {
+def LDL_L : AlphaInst<(outs GPRC:$Ra), (ins memri:$addr), "ldl_l $Ra, $addr",
+                      []> {
+  let Opcode = 0x2a;
+}
 def LDQ_L : AlphaInst<(outs GPRC:$Ra), (ins memri:$addr), "ldq_l $Ra, $addr",
                       []> {
   let Opcode = 0x2b;
 }
-let mayStore = 1, Constraints = "$Ra = $out", hasSideEffects = 0 in
+}
+let mayStore = 1, Constraints = "$Ra = $out", hasSideEffects = 0 in {
+def STL_C : AlphaInst<(outs GPRC:$out), (ins GPRC:$Ra, memri:$addr),
+                      "stl_c $Ra, $addr", []> {
+  let Opcode = 0x2e;
+}
 def STQ_C : AlphaInst<(outs GPRC:$out), (ins GPRC:$Ra, memri:$addr),
                       "stq_c $Ra, $addr", []> {
   let Opcode = 0x2f;
 }
+}
 
-// Atomic read-modify-write pseudos, expanded to an ldq_l/stq_c retry loop by a
+// An atomic read-modify-write whose memory operand is 32 bits wide.
+class AtomicI32<SDPatternOperator op>
+    : PatFrag<(ops node:$ptr, node:$val), (op node:$ptr, node:$val)> {
+  let IsAtomic = 1;
+  let MemoryVT = i32;
+}
+
+// Atomic read-modify-write pseudos, expanded to an ldl_l/ldq_l retry loop by a
 // custom inserter.  $dst receives the value read before the operation.
 class AtomicRMW<PatFrag node>
     : AlphaPseudo<(outs GPRC:$dst), (ins GPRC:$addr, GPRC:$val), "",
@@ -617,6 +634,7 @@ class AtomicRMW<PatFrag node>
   let mayLoad = 1;
   let mayStore = 1;
 }
+
 // 64-bit memory operand.
 class AtomicI64<SDPatternOperator op>
     : PatFrag<(ops node:$ptr, node:$val), (op node:$ptr, node:$val)> {
@@ -630,6 +648,13 @@ def ATOMIC_AND_I64  : AtomicRMW<AtomicI64<atomic_load_and>>;
 def ATOMIC_OR_I64   : AtomicRMW<AtomicI64<atomic_load_or>>;
 def ATOMIC_XOR_I64  : AtomicRMW<AtomicI64<atomic_load_xor>>;
 def ATOMIC_XCHG_I64 : AtomicRMW<AtomicI64<atomic_swap>>;
+
+def ATOMIC_ADD_I32  : AtomicRMW<AtomicI32<atomic_load_add>>;
+def ATOMIC_SUB_I32  : AtomicRMW<AtomicI32<atomic_load_sub>>;
+def ATOMIC_AND_I32  : AtomicRMW<AtomicI32<atomic_load_and>>;
+def ATOMIC_OR_I32   : AtomicRMW<AtomicI32<atomic_load_or>>;
+def ATOMIC_XOR_I32  : AtomicRMW<AtomicI32<atomic_load_xor>>;
+def ATOMIC_XCHG_I32 : AtomicRMW<AtomicI32<atomic_swap>>;
 
 // Compare-and-swap, also expanded to an ldq_l/stq_c loop.  $dst receives the
 // value read; the caller compares it against $cmp to determine success.
