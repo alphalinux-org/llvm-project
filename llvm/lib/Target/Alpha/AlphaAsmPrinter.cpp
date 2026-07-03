@@ -78,14 +78,23 @@ MCOperand AlphaAsmPrinter::lowerOperand(const MachineOperand &MO) const {
 }
 
 void AlphaAsmPrinter::emitInstruction(const MachineInstr *MI) {
-  MCInst OutMI;
-  OutMI.setOpcode(MI->getOpcode());
-  for (const MachineOperand &MO : MI->operands()) {
-    MCOperand MCOp = lowerOperand(MO);
-    if (MCOp.isValid())
-      OutMI.addOperand(MCOp);
-  }
-  EmitToStreamer(*OutStreamer, OutMI);
+  // A bundle assembles to the instructions inside it, one after another; the
+  // header carries nothing of its own.  Alpha uses one to hold the
+  // read-modify-write a pre-BWX byte or misaligned store expands into.
+  MachineBasicBlock::const_instr_iterator I = MI->getIterator();
+  MachineBasicBlock::const_instr_iterator E = MI->getParent()->instr_end();
+  do {
+    if (I->isBundle())
+      continue;
+    MCInst OutMI;
+    OutMI.setOpcode(I->getOpcode());
+    for (const MachineOperand &MO : I->operands()) {
+      MCOperand MCOp = lowerOperand(MO);
+      if (MCOp.isValid())
+        OutMI.addOperand(MCOp);
+    }
+    EmitToStreamer(*OutStreamer, OutMI);
+  } while (++I != E && I->isInsideBundle());
 }
 
 extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeAlphaAsmPrinter() {

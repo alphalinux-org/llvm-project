@@ -55,6 +55,11 @@ public:
       Register DestReg, int FrameIndex, const TargetRegisterClass *RC,
       Register VReg, unsigned SubReg = 0,
       MachineInstr::MIFlag Flags = MachineInstr::NoFlags) const override;
+
+  // Expands the pre-BWX byte/word store, which is held together as one
+  // instruction until here so that no other update of the same quadword can be
+  // scheduled between its load and its store.
+  bool expandPostRAPseudo(MachineInstr &MI) const override;
 };
 
 } // end namespace llvm

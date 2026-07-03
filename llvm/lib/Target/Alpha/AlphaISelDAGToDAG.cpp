@@ -74,6 +74,36 @@ void AlphaDAGToDAGISel::Select(SDNode *Node) {
     return;
   }
 
+  // Without BWX a byte or word store is a read-modify-write of the quadword
+  // holding the field.  Select it to a single instruction that is expanded
+  // after register allocation: stores of different bytes of one quadword do not
+  // alias, so they are unordered in the DAG, and a read-modify-write built here
+  // out of separate instructions could have another byte's write scheduled
+  // between its load and its store, which would then be lost.
+  if (auto *ST = dyn_cast<StoreSDNode>(Node)) {
+    EVT MemVT = ST->getMemoryVT();
+    bool IsByte = MemVT == MVT::i8;
+    if (ST->isTruncatingStore() && (IsByte || MemVT == MVT::i16) &&
+        ST->getAlign() >= MemVT.getStoreSize() && !Subtarget->hasBWX()) {
+      SDLoc DL(Node);
+      MachineSDNode *Store = CurDAG->getMachineNode(
+          IsByte ? Alpha::RMW_STOREI8 : Alpha::RMW_STOREI16, DL,
+          {MVT::i64, MVT::i64, MVT::Other},
+          {ST->getValue(), ST->getBasePtr(), ST->getChain()});
+      MachineFunction &MF = CurDAG->getMachineFunction();
+      auto Flags = ST->isVolatile() ? MachineMemOperand::MOVolatile
+                                    : MachineMemOperand::MONone;
+      CurDAG->setNodeMemRefs(
+          Store, {MF.getMachineMemOperand(MachinePointerInfo(),
+                                          Flags | MachineMemOperand::MOLoad |
+                                              MachineMemOperand::MOStore,
+                                          8, Align(8))});
+      ReplaceUses(SDValue(Node, 0), SDValue(Store, 2));
+      CurDAG->RemoveDeadNode(Node);
+      return;
+    }
+  }
+
   // Materialize a frame-index address with lda; the displacement (0) follows
   // the base so eliminateFrameIndex can rewrite it.
   if (Node->getOpcode() == ISD::FrameIndex) {

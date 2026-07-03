@@ -105,3 +105,42 @@ void AlphaInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
       .addMemOperand(getStackSlotMMO(MF, FrameIndex, MachineMemOperand::MOLoad))
       .setMIFlag(Flags);
 }
+
+bool AlphaInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
+  unsigned Opc = MI.getOpcode();
+  if (Opc != Alpha::RMW_STOREI8 && Opc != Alpha::RMW_STOREI16)
+    return false;
+
+  // Update one field of the quadword holding it, in place.  Nothing may land
+  // between the load and the store -- an update of another field of the same
+  // quadword would be read before this one wrote it and then write the stale
+  // copy back -- so the expansion goes into a bundle.  This pass runs before
+  // the post-RA scheduler, not after it, so being a single instruction until
+  // now is not by itself enough.
+  bool IsByte = Opc == Alpha::RMW_STOREI8;
+  MachineBasicBlock &MBB = *MI.getParent();
+  MachineBasicBlock::iterator End = std::next(MI.getIterator());
+  DebugLoc DL = MI.getDebugLoc();
+  Register Tmp = MI.getOperand(0).getReg();
+  Register Ins = MI.getOperand(1).getReg();
+  Register Val = MI.getOperand(2).getReg();
+  Register Addr = MI.getOperand(3).getReg();
+
+  MachineInstrBuilder First =
+      BuildMI(MBB, MI, DL, get(Alpha::LDQ_U), Tmp).addReg(Addr);
+  addNarrowedMemOperands(First, MI, MachineMemOperand::MOLoad);
+  BuildMI(MBB, MI, DL, get(IsByte ? Alpha::MSKBL : Alpha::MSKWL), Tmp)
+      .addReg(Tmp)
+      .addReg(Addr);
+  BuildMI(MBB, MI, DL, get(IsByte ? Alpha::INSBL : Alpha::INSWL), Ins)
+      .addReg(Val)
+      .addReg(Addr);
+  BuildMI(MBB, MI, DL, get(Alpha::BIS), Tmp).addReg(Tmp).addReg(Ins);
+  addNarrowedMemOperands(
+      BuildMI(MBB, MI, DL, get(Alpha::STQ_U)).addReg(Tmp).addReg(Addr), MI,
+      MachineMemOperand::MOStore);
+
+  MBB.erase(MI);
+  finalizeBundle(MBB, First->getIterator(), End.getInstrIterator());
+  return true;
+}
