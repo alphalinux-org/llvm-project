@@ -392,6 +392,12 @@ def : FCmpPat<SETOLT, vt, CMPTLT, (vt $x), (vt $y)>;
 def : FCmpPat<SETOLE, vt, CMPTLE, (vt $x), (vt $y)>;
 def : FCmpPat<SETOGT, vt, CMPTLT, (vt $y), (vt $x)>;
 def : FCmpPat<SETOGE, vt, CMPTLE, (vt $y), (vt $x)>;
+// The NaN-don't-care conditions map to the same ordered instructions.
+def : FCmpPat<SETEQ, vt, CMPTEQ, (vt $x), (vt $y)>;
+def : FCmpPat<SETLT, vt, CMPTLT, (vt $x), (vt $y)>;
+def : FCmpPat<SETLE, vt, CMPTLE, (vt $x), (vt $y)>;
+def : FCmpPat<SETGT, vt, CMPTLT, (vt $y), (vt $x)>;
+def : FCmpPat<SETGE, vt, CMPTLE, (vt $y), (vt $x)>;
 }
 
 // Floating-point select: move the 0/1 condition into an FP register (its bits
