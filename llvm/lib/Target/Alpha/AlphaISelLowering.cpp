@@ -35,6 +35,10 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   // Comparison instructions leave 0 or 1 in the destination register.
   setBooleanContents(ZeroOrOneBooleanContent);
 
+  // i64 select maps to a conditional move; expand SELECT_CC into SETCC+SELECT.
+  setOperationAction(ISD::SELECT, MVT::i64, Legal);
+  setOperationAction(ISD::SELECT_CC, MVT::i64, Expand);
+
   computeRegisterProperties(STI.getRegisterInfo());
 }
 

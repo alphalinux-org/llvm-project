@@ -102,6 +102,16 @@ def CMPLE  : CMP_rr<0x6d, "cmple">;
 def CMPULT : CMP_rr<0x1d, "cmpult">;
 def CMPULE : CMP_rr<0x3d, "cmpule">;
 
+// Conditional move: `cmovne $Ra, $Rb, $Rc` sets $Rc = $Rb when $Ra != 0,
+// leaving $Rc unchanged otherwise.  With $Rc preset to the false value this
+// implements `select`.
+let Constraints = "$Rfalse = $Rc" in
+def CMOVNE : OForm<0x11, 0x26, (outs GPRC:$Rc),
+                       (ins GPRC:$Rfalse, GPRC:$Ra, GPRC:$Rb),
+                       "cmovne $Ra, $Rb, $Rc",
+                       [(set i64:$Rc,
+                             (select i64:$Ra, i64:$Rb, i64:$Rfalse))]>;
+
 // `bis $Ra, $Rb, $Rc` computes $Rc = $Ra OR $Rb.  copyPhysReg emits it as
 // `bis $31, $Rb, $Rc` to move an integer register.
 def BIS : ALU_rr<0x11, 0x20, "bis", or>;
