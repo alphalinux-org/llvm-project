@@ -21,9 +21,20 @@ namespace llvm {
 class AlphaSubtarget;
 class AlphaTargetMachine;
 
+namespace AlphaISD {
+enum NodeType : unsigned {
+  FIRST_NUMBER = ISD::BUILTIN_OP_END,
+
+  // Return with a glue-connected chain of copies into the return registers.
+  RET_GLUE,
+};
+} // namespace AlphaISD
+
 class AlphaTargetLowering : public TargetLowering {
 public:
   AlphaTargetLowering(const AlphaTargetMachine &TM, const AlphaSubtarget &STI);
+
+  const char *getTargetNodeName(unsigned Opcode) const override;
 
   SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
                                bool IsVarArg,
@@ -35,6 +46,21 @@ public:
                       const SmallVectorImpl<ISD::OutputArg> &Outs,
                       const SmallVectorImpl<SDValue> &OutVals, const SDLoc &DL,
                       SelectionDAG &DAG) const override;
+
+  // Whether the return value fits the registers the convention gives it: one
+  // integer register and two floating ones.  What does not is returned in
+  // memory through a hidden pointer, and returning false here is what makes
+  // the caller allocate the buffer and pass it in $16.
+  //
+  // This is not "wider than a register": GCC's alpha_return_in_memory judges a
+  // complex float by the size of one part rather than of the pair, so a 16-byte
+  // _Complex double comes back in $f0/$f1, and RetCC_Alpha does the same.  What
+  // it does send to memory is every aggregate, every float vector, and anything
+  // else whose one part is wider than a word.
+  bool CanLowerReturn(CallingConv::ID CallConv, MachineFunction &MF,
+                      bool IsVarArg,
+                      const SmallVectorImpl<ISD::OutputArg> &Outs,
+                      LLVMContext &Context, const Type *RetTy) const override;
 
 private:
   const AlphaSubtarget &Subtarget;

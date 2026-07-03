@@ -8,6 +8,7 @@
 
 #include "AlphaTargetMachine.h"
 #include "Alpha.h"
+#include "AlphaMachineFunctionInfo.h"
 #include "TargetInfo/AlphaTargetInfo.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
@@ -37,6 +38,13 @@ AlphaTargetMachine::AlphaTargetMachine(const Target &T, const Triple &TT,
                                getEffectiveCodeModel(CM, CodeModel::Small), OL),
       TLOF(std::make_unique<TargetLoweringObjectFileELF>()) {
   initAsmInfo();
+}
+
+MachineFunctionInfo *AlphaTargetMachine::createMachineFunctionInfo(
+    BumpPtrAllocator &Allocator, const Function &F,
+    const TargetSubtargetInfo *STI) const {
+  return AlphaMachineFunctionInfo::create<AlphaMachineFunctionInfo>(Allocator,
+                                                                    F, STI);
 }
 
 const AlphaSubtarget *
