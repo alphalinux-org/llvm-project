@@ -39,3 +39,95 @@ class AlphaPseudo<dag outs, dag ins, string asmstr, list<dag> pattern>
   let isPseudo = 1;
   let isCodeGenOnly = 1;
 }
+
+// Register-register operate: Ra (25-21), Rb (20-16), 0 (15-12), func (11-5),
+// Rc (4-0).
+class OForm<bits<6> opc, bits<7> func, dag outs, dag ins, string asmstr,
+            list<dag> pattern> : AlphaInst<outs, ins, asmstr, pattern> {
+  bits<5> Ra;
+  bits<5> Rb;
+  bits<5> Rc;
+  let Opcode = opc;
+  let Inst{25-21} = Ra;
+  let Inst{20-16} = Rb;
+  let Inst{15-13} = 0;
+  let Inst{12} = 0;
+  let Inst{11-5} = func;
+  let Inst{4-0} = Rc;
+}
+
+// Literal operate: Ra (25-21), 8-bit literal (20-13), 1 (12), func (11-5),
+// Rc (4-0).
+class OFormL<bits<6> opc, bits<7> func, dag outs, dag ins, string asmstr,
+             list<dag> pattern> : AlphaInst<outs, ins, asmstr, pattern> {
+  bits<5> Ra;
+  bits<8> lit;
+  bits<5> Rc;
+  let Opcode = opc;
+  let Inst{25-21} = Ra;
+  let Inst{20-13} = lit;
+  let Inst{12} = 1;
+  let Inst{11-5} = func;
+  let Inst{4-0} = Rc;
+}
+
+// Floating-point operate: Fa (25-21), Fb (20-16), func (15-5), Fc (4-0).
+class FForm<bits<6> opc, bits<11> func, dag outs, dag ins, string asmstr,
+            list<dag> pattern> : AlphaInst<outs, ins, asmstr, pattern> {
+  bits<5> Ra;
+  bits<5> Rb;
+  bits<5> Rc;
+  let Opcode = opc;
+  let Inst{25-21} = Ra;
+  let Inst{20-16} = Rb;
+  let Inst{15-5} = func;
+  let Inst{4-0} = Rc;
+}
+
+// Memory: Ra (25-21), then a 21-bit base+displacement field encoded by
+// getMemEncoding (Rb << 16 | disp16).
+class MForm<bits<6> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
+    : AlphaInst<outs, ins, asmstr, pattern> {
+  bits<5> Ra;
+  bits<21> addr;
+  let Opcode = opc;
+  let Inst{25-21} = Ra;
+  let Inst{20-0} = addr;
+}
+
+// Memory format with the destination/source in the Ra field and a base register
+// plus displacement written separately (lda/ldah and the relocated variants).
+class MFormD<bits<6> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
+    : AlphaInst<outs, ins, asmstr, pattern> {
+  bits<5> Rc;
+  bits<5> Rb;
+  bits<16> disp;
+  let Opcode = opc;
+  let Inst{25-21} = Rc;
+  let Inst{20-16} = Rb;
+  let Inst{15-0} = disp;
+}
+
+// Branch: Ra (25-21), 21-bit PC-relative displacement (20-0), encoded by a
+// fixup from the branch target.
+class BForm<bits<6> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
+    : AlphaInst<outs, ins, asmstr, pattern> {
+  bits<5> Ra;
+  bits<21> target;
+  let Opcode = opc;
+  let Inst{25-21} = Ra;
+  let Inst{20-0} = target;
+}
+
+// Memory-format branch (jsr/ret/jmp), opcode 0x1a: Ra (25-21, return address),
+// Rb (20-16, target), 2-bit sub-opcode (15-14), 14-bit hint (13-0).
+class MbrForm<bits<2> sub, dag outs, dag ins, string asmstr, list<dag> pattern>
+    : AlphaInst<outs, ins, asmstr, pattern> {
+  bits<5> Ra;
+  bits<5> Rb;
+  let Opcode = 0x1a;
+  let Inst{25-21} = Ra;
+  let Inst{20-16} = Rb;
+  let Inst{15-14} = sub;
+  let Inst{13-0} = 0;
+}
