@@ -31,6 +31,9 @@ enum NodeType : unsigned {
   // Wraps a global address whose value is loaded from its GOT slot with an
   // R_ALPHA_LITERAL relocation.
   LITERAL,
+
+  // A function call through the procedure value in $27.
+  CALL,
 };
 } // namespace AlphaISD
 
@@ -77,6 +80,9 @@ public:
                               MachineBasicBlock *MBB) const override;
 
   SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
+
+  SDValue LowerCall(CallLoweringInfo &CLI,
+                    SmallVectorImpl<SDValue> &InVals) const override;
 
 private:
   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;

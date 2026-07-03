@@ -30,7 +30,7 @@ AlphaRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
 const uint32_t *
 AlphaRegisterInfo::getCallPreservedMask(const MachineFunction &MF,
                                         CallingConv::ID) const {
-  return CSR_Alpha_RegMask;
+  return CSR_Alpha_Call_RegMask;
 }
 
 BitVector AlphaRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
