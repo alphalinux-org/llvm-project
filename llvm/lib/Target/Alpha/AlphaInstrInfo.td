@@ -513,6 +513,12 @@ def JSR : MbrForm<0b01, (outs), (ins), "jsr $$26, ($$27)\n\tldgp $$29, 0($$26)",
   let Rb = 27;
 }
 
+// A bare jsr word (no ldgp reload); emitted by the assembler when it parses
+// `jsr $Ra, ($Rb)`.  Kept out of the matcher (the parser handles it specially).
+let isCall = 1, isCodeGenOnly = 1 in
+def JSRasm : MbrForm<0b01, (outs), (ins GPRC:$Ra, GPRC:$Rb),
+                     "jsr $Ra, ($Rb)", []>;
+
 // Division millicode call: enter __divq etc. through $23; the routine preserves
 // all but a handful of registers, so no ldgp reload is needed afterwards.
 let isCall = 1, Uses = [R24, R25, R27],
