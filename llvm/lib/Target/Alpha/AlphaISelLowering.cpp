@@ -335,7 +335,9 @@ static MachineBasicBlock *emitAtomicRMW(MachineInstr &MI,
   Register Val = MI.getOperand(2).getReg();
 
   // ALU opcode applied to (old value, operand); XCHG just takes the operand.
+  // Is32 selects the 32-bit ldl_l/stl_c primitives.
   unsigned Opc = 0;
+  bool Is32 = false;
   switch (MI.getOpcode()) {
   case Alpha::ATOMIC_ADD_I64:
     Opc = Alpha::ADDQ;
@@ -355,9 +357,35 @@ static MachineBasicBlock *emitAtomicRMW(MachineInstr &MI,
   case Alpha::ATOMIC_XCHG_I64:
     Opc = 0;
     break;
+  case Alpha::ATOMIC_ADD_I32:
+    Opc = Alpha::ADDQ;
+    Is32 = true;
+    break;
+  case Alpha::ATOMIC_SUB_I32:
+    Opc = Alpha::SUBQ;
+    Is32 = true;
+    break;
+  case Alpha::ATOMIC_AND_I32:
+    Opc = Alpha::AND;
+    Is32 = true;
+    break;
+  case Alpha::ATOMIC_OR_I32:
+    Opc = Alpha::BIS;
+    Is32 = true;
+    break;
+  case Alpha::ATOMIC_XOR_I32:
+    Opc = Alpha::XOR;
+    Is32 = true;
+    break;
+  case Alpha::ATOMIC_XCHG_I32:
+    Opc = 0;
+    Is32 = true;
+    break;
   default:
     llvm_unreachable("unexpected atomic pseudo");
   }
+  unsigned LLOpc = Is32 ? Alpha::LDL_L : Alpha::LDQ_L;
+  unsigned SCOpc = Is32 ? Alpha::STL_C : Alpha::STQ_C;
 
   const BasicBlock *LLVMBB = BB->getBasicBlock();
   MachineFunction::iterator It = ++BB->getIterator();
@@ -377,7 +405,7 @@ static MachineBasicBlock *emitAtomicRMW(MachineInstr &MI,
   //   <op>    New, Dst, Val   (or a copy of Val for xchg)
   //   stq_c   Success<-New, 0(Addr)
   //   beq     Success, LoopBB
-  BuildMI(LoopBB, DL, TII.get(Alpha::LDQ_L), Dst).addReg(Addr).addImm(0);
+  BuildMI(LoopBB, DL, TII.get(LLOpc), Dst).addReg(Addr).addImm(0);
 
   Register New = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
   if (Opc)
@@ -388,7 +416,7 @@ static MachineBasicBlock *emitAtomicRMW(MachineInstr &MI,
         .addReg(Val);
 
   Register Success = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
-  BuildMI(LoopBB, DL, TII.get(Alpha::STQ_C), Success)
+  BuildMI(LoopBB, DL, TII.get(SCOpc), Success)
       .addReg(New)
       .addReg(Addr)
       .addImm(0);
@@ -526,6 +554,12 @@ AlphaTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
   case Alpha::ATOMIC_OR_I64:
   case Alpha::ATOMIC_XOR_I64:
   case Alpha::ATOMIC_XCHG_I64:
+  case Alpha::ATOMIC_ADD_I32:
+  case Alpha::ATOMIC_SUB_I32:
+  case Alpha::ATOMIC_AND_I32:
+  case Alpha::ATOMIC_OR_I32:
+  case Alpha::ATOMIC_XOR_I32:
+  case Alpha::ATOMIC_XCHG_I32:
     return emitAtomicRMW(MI, MBB);
   case Alpha::ATOMIC_CMPXCHG_I64:
     return emitAtomicCmpXchg(MI, MBB);
