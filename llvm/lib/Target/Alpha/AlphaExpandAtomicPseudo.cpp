@@ -154,9 +154,8 @@ bool AlphaExpandAtomicPseudo::expandAtomicRMW(
   // Zero for an exchange, which just writes the operand back.
   unsigned Opc = MI.getOperand(4).getImm();
   bool Is32 = MI.getOperand(5).getImm() != 0;
-  assert(!Is32 && "no longword load locked/store conditional yet");
-  unsigned LLOpc = Alpha::LDQ_L;
-  unsigned SCOpc = Alpha::STQ_C;
+  unsigned LLOpc = Is32 ? Alpha::LDL_L : Alpha::LDQ_L;
+  unsigned SCOpc = Is32 ? Alpha::STL_C : Alpha::STQ_C;
 
   SmallVector<MachineBasicBlock *, 2> Blocks;
   splitBlock(MBB, MI, Blocks, 2);
