@@ -85,10 +85,18 @@ def immUExt8 : ImmLeaf<i64, [{ return isUInt<8>(Imm); }]>;
 def memri : Operand<i64> {
   let MIOperandInfo = (ops GPRC, s16imm);
   let PrintMethod = "printMemOperand";
+  let EncoderMethod = "getMemEncoding";
 }
 
-// A symbol operand (e.g. a global address), printed as its bare name.
-def symbol : Operand<i64>;
+// Symbol operands whose 16-bit displacement is filled by a relocation.  The
+// operand type selects the relocation: literal (GOT, R_ALPHA_LITERAL), gprel
+// high and gprel low (R_ALPHA_GPRELHIGH / R_ALPHA_GPRELLOW).
+class SymOperand<string enc> : Operand<i64> { let EncoderMethod = enc; }
+def literal_sym : SymOperand<"getLiteralEncoding">;
+def gprelhigh_sym : SymOperand<"getGprelHighEncoding">;
+def gprellow_sym : SymOperand<"getGprelLowEncoding">;
+// Retained alias so existing definitions read naturally.
+def symbol : SymOperand<"getGprelLowEncoding">;
 
 def ADDRri : ComplexPattern<i64, 2, "SelectADDRri", [frameindex]>;
 
@@ -103,7 +111,11 @@ def ADDRr : ComplexPattern<i64, 1, "SelectAddrReg", []>;
 let hasSideEffects = 0, mayLoad = 0, mayStore = 0 in {
 
 // NOP is the canonical `bis $31, $31, $31`.
-def NOP : OForm<0x11, 0x20, (outs), (ins), "nop", []>;
+def NOP : OForm<0x11, 0x20, (outs), (ins), "nop", []> {
+  let Ra = 31;
+  let Rb = 31;
+  let Rc = 31;
+}
 
 // Memory barrier.
 let hasSideEffects = 1 in
@@ -129,17 +141,17 @@ def XOR   : ALU_rr<0x11, 0x40, "xor",   xor>;
 // scales by 8); useful for array-index address arithmetic.
 let hasSideEffects = 0 in {
 def S4ADDQ : OForm<0x10, 0x22, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
-                       "s4addq $Ra, $Rb, $Rc",
-                       [(set i64:$Rc, (add (shl i64:$Ra, (i64 2)), i64:$Rb))]>;
+                   "s4addq $Ra, $Rb, $Rc",
+                   [(set i64:$Rc, (add (shl i64:$Ra, (i64 2)), i64:$Rb))]>;
 def S8ADDQ : OForm<0x10, 0x32, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
-                       "s8addq $Ra, $Rb, $Rc",
-                       [(set i64:$Rc, (add (shl i64:$Ra, (i64 3)), i64:$Rb))]>;
+                   "s8addq $Ra, $Rb, $Rc",
+                   [(set i64:$Rc, (add (shl i64:$Ra, (i64 3)), i64:$Rb))]>;
 def S4SUBQ : OForm<0x10, 0x2b, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
-                       "s4subq $Ra, $Rb, $Rc",
-                       [(set i64:$Rc, (sub (shl i64:$Ra, (i64 2)), i64:$Rb))]>;
+                   "s4subq $Ra, $Rb, $Rc",
+                   [(set i64:$Rc, (sub (shl i64:$Ra, (i64 2)), i64:$Rb))]>;
 def S8SUBQ : OForm<0x10, 0x3b, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
-                       "s8subq $Ra, $Rb, $Rc",
-                       [(set i64:$Rc, (sub (shl i64:$Ra, (i64 3)), i64:$Rb))]>;
+                   "s8subq $Ra, $Rb, $Rc",
+                   [(set i64:$Rc, (sub (shl i64:$Ra, (i64 3)), i64:$Rb))]>;
 }
 
 // Literal (8-bit immediate) form of an operate instruction:
@@ -169,32 +181,32 @@ def SRAi : ALU_ri<0x12, 0x3c, "sra", sra>;
 // `zapnot $Ra, lit, $Rc` keeps the bytes of $Ra selected by the 8-bit mask and
 // zeroes the rest.  It provides byte-granular zero-extension.
 def ZAPNOTi : OFormL<0x12, 0x31, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
-                        "zapnot $Ra, $lit, $Rc", []>;
+                     "zapnot $Ra, $lit, $Rc", []>;
 
 // Byte/word sign-extend from the BWX extension: one instruction in place of the
 // sll/sra pair.  The single source is $Rb (with $Ra = $31).
-let Predicates = [HasBWX], hasSideEffects = 0 in {
+let Predicates = [HasBWX], hasSideEffects = 0, Ra = 31 in {
 def SEXTB : OForm<0x1c, 0x00, (outs GPRC:$Rc), (ins GPRC:$Rb), "sextb $Rb, $Rc",
-                      [(set i64:$Rc, (sext_inreg i64:$Rb, i8))]>;
+                  [(set i64:$Rc, (sext_inreg i64:$Rb, i8))]>;
 def SEXTW : OForm<0x1c, 0x01, (outs GPRC:$Rc), (ins GPRC:$Rb), "sextw $Rb, $Rc",
-                      [(set i64:$Rc, (sext_inreg i64:$Rb, i16))]>;
+                  [(set i64:$Rc, (sext_inreg i64:$Rb, i16))]>;
 }
 
 // Count instructions from the CIX extension (ev67).  The single source is $Rb
 // (with $Ra = $31); ctlz/cttz of zero produce 64, matching ISD semantics.
-let Predicates = [HasCIX], hasSideEffects = 0 in {
+let Predicates = [HasCIX], hasSideEffects = 0, Ra = 31 in {
 def CTPOP : OForm<0x1c, 0x30, (outs GPRC:$Rc), (ins GPRC:$Rb), "ctpop $Rb, $Rc",
-                      [(set i64:$Rc, (ctpop i64:$Rb))]> { let Opcode = 0x1c; }
+                  [(set i64:$Rc, (ctpop i64:$Rb))]>;
 def CTLZ : OForm<0x1c, 0x32, (outs GPRC:$Rc), (ins GPRC:$Rb), "ctlz $Rb, $Rc",
-                     [(set i64:$Rc, (ctlz i64:$Rb))]> { let Opcode = 0x1c; }
+                 [(set i64:$Rc, (ctlz i64:$Rb))]>;
 def CTTZ : OForm<0x1c, 0x33, (outs GPRC:$Rc), (ins GPRC:$Rb), "cttz $Rb, $Rc",
-                     [(set i64:$Rc, (cttz i64:$Rb))]> { let Opcode = 0x1c; }
+                 [(set i64:$Rc, (cttz i64:$Rb))]>;
 }
 
 // `addl $Ra, $Rb, $Rc` is a 32-bit add whose result is sign-extended to 64
 // bits.  With $Rb = $31 it sign-extends the low 32 bits of $Ra.
 def ADDL : OForm<0x10, 0x00, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
-                     "addl $Ra, $Rb, $Rc", []>;
+                 "addl $Ra, $Rb, $Rc", []>;
 
 // Comparisons write 0 or 1 into $Rc (Alpha has no condition-code register).
 class CMP_rr<bits<7> func, string mnem>
@@ -211,19 +223,18 @@ def CMPULE : CMP_rr<0x3d, "cmpule">;
 // implements `select`.
 let Constraints = "$Rfalse = $Rc" in
 def CMOVNE : OForm<0x11, 0x26, (outs GPRC:$Rc),
-                       (ins GPRC:$Rfalse, GPRC:$Ra, GPRC:$Rb),
-                       "cmovne $Ra, $Rb, $Rc",
-                       [(set i64:$Rc,
-                             (select i64:$Ra, i64:$Rb, i64:$Rfalse))]>;
+                   (ins GPRC:$Rfalse, GPRC:$Ra, GPRC:$Rb),
+                   "cmovne $Ra, $Rb, $Rc",
+                   [(set i64:$Rc,
+                         (select i64:$Ra, i64:$Rb, i64:$Rfalse))]>;
 
 // Conditional moves testing $Ra against zero with a specific condition, which
 // fold a compare-against-zero into the select instead of a separate cmpXX.
 class CMOV_cc<bits<7> func, string mnem, CondCode cc>
-    : AlphaInst<(outs GPRC:$Rc), (ins GPRC:$Rfalse, GPRC:$Ra, GPRC:$Rb),
-                mnem # " $Ra, $Rb, $Rc",
-                [(set i64:$Rc, (select (i64 (setcc i64:$Ra, 0, cc)),
-                                       i64:$Rb, i64:$Rfalse))]> {
-  let Opcode = 0x11;
+    : OForm<0x11, func, (outs GPRC:$Rc), (ins GPRC:$Rfalse, GPRC:$Ra, GPRC:$Rb),
+            mnem # " $Ra, $Rb, $Rc",
+            [(set i64:$Rc, (select (i64 (setcc i64:$Ra, 0, cc)),
+                                   i64:$Rb, i64:$Rfalse))]> {
   let Constraints = "$Rfalse = $Rc";
 }
 // Only the conditions that survive DAG canonicalization against zero are given
@@ -239,43 +250,65 @@ def BIS : ALU_rr<0x11, 0x20, "bis", or>;
 // Logical operations with a complemented second operand.  These fold a `not`
 // (xor with -1) into a single instruction.
 def BIC   : OForm<0x11, 0x08, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
-                      "bic $Ra, $Rb, $Rc",
-                      [(set i64:$Rc, (and i64:$Ra, (not i64:$Rb)))]>;
+                  "bic $Ra, $Rb, $Rc",
+                  [(set i64:$Rc, (and i64:$Ra, (not i64:$Rb)))]>;
 def ORNOT : OForm<0x11, 0x28, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
-                      "ornot $Ra, $Rb, $Rc",
-                      [(set i64:$Rc, (or i64:$Ra, (not i64:$Rb)))]>;
+                  "ornot $Ra, $Rb, $Rc",
+                  [(set i64:$Rc, (or i64:$Ra, (not i64:$Rb)))]>;
 def EQV   : OForm<0x11, 0x48, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
-                      "eqv $Ra, $Rb, $Rc",
-                      [(set i64:$Rc, (xor i64:$Ra, (not i64:$Rb)))]>;
+                  "eqv $Ra, $Rb, $Rc",
+                  [(set i64:$Rc, (xor i64:$Ra, (not i64:$Rb)))]>;
 
 // Floating-point copy-sign: `cpys $Ra, $Rb, $Rc` builds the sign of $Ra with
 // the magnitude of $Rb.  Used by copyPhysReg as `cpys $Rb, $Rb, $Rc` to move a
 // floating-point register.
-def CPYS : AlphaInst<(outs FPRC:$Rc), (ins FPRC:$Ra, FPRC:$Rb),
-                     "cpys $Ra, $Rb, $Rc", []> {
-  let Opcode = 0x17;
-}
+def CPYS : FForm<0x17, 0x020, (outs FPRC:$Rc), (ins FPRC:$Ra, FPRC:$Rb),
+                 "cpys $Ra, $Rb, $Rc", []>;
 
 // Sign manipulation, built from cpys/cpysn.  Each is defined per floating-point
 // type so the result type is unambiguous.  fabs uses the (positive) sign of
 // $f31; fneg uses the negated sign of the source; fcopysign takes the magnitude
-// of $Ra and the sign of $Rb.
-let Opcode = 0x17 in {
-def FABSS : AlphaInst<(outs FPRC:$Rc), (ins FPRC:$Rb), "cpys $$f31, $Rb, $Rc",
-                      [(set f32:$Rc, (fabs f32:$Rb))]>;
-def FABST : AlphaInst<(outs FPRC:$Rc), (ins FPRC:$Rb), "cpys $$f31, $Rb, $Rc",
-                      [(set f64:$Rc, (fabs f64:$Rb))]>;
-def FNEGS : AlphaInst<(outs FPRC:$Rc), (ins FPRC:$Rb), "cpysn $Rb, $Rb, $Rc",
-                      [(set f32:$Rc, (fneg f32:$Rb))]>;
-def FNEGT : AlphaInst<(outs FPRC:$Rc), (ins FPRC:$Rb), "cpysn $Rb, $Rb, $Rc",
-                      [(set f64:$Rc, (fneg f64:$Rb))]>;
-def FCPYSS : AlphaInst<(outs FPRC:$Rc), (ins FPRC:$Ra, FPRC:$Rb),
-                       "cpys $Rb, $Ra, $Rc",
-                       [(set f32:$Rc, (fcopysign f32:$Ra, f32:$Rb))]>;
-def FCPYST : AlphaInst<(outs FPRC:$Rc), (ins FPRC:$Ra, FPRC:$Rb),
-                       "cpys $Rb, $Ra, $Rc",
-                       [(set f64:$Rc, (fcopysign f64:$Ra, f64:$Rb))]>;
+// of $Ra and the sign of $Rb.  The encodings are written out because Fa/Fb are
+// hardcoded ($f31), duplicated or swapped relative to the operand list.
+class FSign<bits<11> func, dag ins, string asmstr, list<dag> pattern>
+    : AlphaInst<(outs FPRC:$Rc), ins, asmstr, pattern> {
+  bits<5> fa;
+  bits<5> fb;
+  bits<5> Rc;
+  let Opcode = 0x17;
+  let Inst{25-21} = fa;
+  let Inst{20-16} = fb;
+  let Inst{15-5} = func;
+  let Inst{4-0} = Rc;
 }
+// fabs: cpys $f31, Rb, Rc.
+class FAbs<list<dag> pat> : FSign<0x020, (ins FPRC:$Rb), "cpys $$f31, $Rb, $Rc",
+                                  pat> {
+  bits<5> Rb;
+  let fa = 31;
+  let fb = Rb;
+}
+def FABSS : FAbs<[(set f32:$Rc, (fabs f32:$Rb))]>;
+def FABST : FAbs<[(set f64:$Rc, (fabs f64:$Rb))]>;
+// fneg: cpysn Rb, Rb, Rc.
+class FNeg<list<dag> pat> : FSign<0x021, (ins FPRC:$Rb), "cpysn $Rb, $Rb, $Rc",
+                                  pat> {
+  bits<5> Rb;
+  let fa = Rb;
+  let fb = Rb;
+}
+def FNEGS : FNeg<[(set f32:$Rc, (fneg f32:$Rb))]>;
+def FNEGT : FNeg<[(set f64:$Rc, (fneg f64:$Rb))]>;
+// fcopysign: cpys Rb, Ra, Rc (sign of Rb, magnitude of Ra).
+class FCpys<list<dag> pat>
+    : FSign<0x020, (ins FPRC:$Ra, FPRC:$Rb), "cpys $Rb, $Ra, $Rc", pat> {
+  bits<5> Ra;
+  bits<5> Rb;
+  let fa = Rb;
+  let fb = Ra;
+}
+def FCPYSS : FCpys<[(set f32:$Rc, (fcopysign f32:$Ra, f32:$Rb))]>;
+def FCPYST : FCpys<[(set f64:$Rc, (fcopysign f64:$Ra, f64:$Rb))]>;
 
 // IEEE floating-point operate instruction: `<mnem> $Ra, $Rb, $Rc`.  The `s`
 // forms operate on S_floating (f32), the `t` forms on T_floating (f64).
@@ -284,14 +317,14 @@ class FP_rr<bits<11> func, string mnem, ValueType vt, SDPatternOperator node>
             mnem # " $Ra, $Rb, $Rc",
             [(set vt:$Rc, (node vt:$Ra, vt:$Rb))]>;
 
-def ADDS : FP_rr<0x080,"adds", f32, fadd>;
-def ADDT : FP_rr<0x0a0,"addt", f64, fadd>;
-def SUBS : FP_rr<0x081,"subs", f32, fsub>;
-def SUBT : FP_rr<0x0a1,"subt", f64, fsub>;
-def MULS : FP_rr<0x082,"muls", f32, fmul>;
-def MULT : FP_rr<0x0a2,"mult", f64, fmul>;
-def DIVS : FP_rr<0x083,"divs", f32, fdiv>;
-def DIVT : FP_rr<0x0a3,"divt", f64, fdiv>;
+def ADDS : FP_rr<0x080, "adds", f32, fadd>;
+def ADDT : FP_rr<0x0a0, "addt", f64, fadd>;
+def SUBS : FP_rr<0x081, "subs", f32, fsub>;
+def SUBT : FP_rr<0x0a1, "subt", f64, fsub>;
+def MULS : FP_rr<0x082, "muls", f32, fmul>;
+def MULT : FP_rr<0x0a2, "mult", f64, fmul>;
+def DIVS : FP_rr<0x083, "divs", f32, fdiv>;
+def DIVT : FP_rr<0x0a3, "divt", f64, fdiv>;
 
 // Floating-point comparisons write 2.0 (true) or 0.0 (false) into an FP
 // register.  They operate on the T_floating register format, which both f32 and
@@ -299,67 +332,54 @@ def DIVT : FP_rr<0x0a3,"divt", f64, fdiv>;
 class CMPT_rr<bits<11> func, string mnem>
     : FForm<0x16, func, (outs FPRC:$Rc), (ins FPRC:$Ra, FPRC:$Rb),
             mnem # " $Ra, $Rb, $Rc", []>;
-def CMPTEQ : CMPT_rr<0x0a5,"cmpteq">;
-def CMPTLT : CMPT_rr<0x0a6,"cmptlt">;
-def CMPTLE : CMPT_rr<0x0a7,"cmptle">;
+def CMPTEQ : CMPT_rr<0x0a5, "cmpteq">;
+def CMPTLT : CMPT_rr<0x0a6, "cmptlt">;
+def CMPTLE : CMPT_rr<0x0a7, "cmptle">;
 
 // Floating-point conditional move: `fcmovne $Fa, $Fb, $Fc` sets $Fc = $Fb when
 // $Fa != 0.0.  With $Fc preset to the false value this implements an FP select.
-let Constraints = "$Ffalse = $Fc" in
-def FCMOVNE : AlphaInst<(outs FPRC:$Fc),
-                        (ins FPRC:$Ffalse, FPRC:$Fa, FPRC:$Fb),
-                        "fcmovne $Fa, $Fb, $Fc", []> {
-  let Opcode = 0x17;
-}
+let Constraints = "$Ffalse = $Rc" in
+def FCMOVNE : FForm<0x17, 0x02b, (outs FPRC:$Rc),
+                    (ins FPRC:$Ffalse, FPRC:$Ra, FPRC:$Rb),
+                    "fcmovne $Ra, $Rb, $Rc", []>;
 
-// Precision conversions between S_floating (f32) and T_floating (f64).  Both
-// stay in floating-point registers.
-def CVTST : AlphaInst<(outs FPRC:$Fc), (ins FPRC:$Fb), "cvtst $Fb, $Fc",
-                      [(set f64:$Fc, (fpextend f32:$Fb))]> {
-  let Opcode = 0x16;
+// Unary floating-point operate: single source $Rb (with Fa = $f31), result $Rc.
+class FP_r<bits<6> opc, bits<11> func, string mnem, list<dag> pat>
+    : FForm<opc, func, (outs FPRC:$Rc), (ins FPRC:$Rb), mnem # " $Rb, $Rc", pat> {
+  let Ra = 31;
 }
-def CVTTS : AlphaInst<(outs FPRC:$Fc), (ins FPRC:$Fb), "cvtts $Fb, $Fc",
-                      [(set f32:$Fc, (fpround f64:$Fb))]> {
-  let Opcode = 0x16;
-}
+// Precision conversions between S_floating (f32) and T_floating (f64).
+def CVTST : FP_r<0x16, 0x2ac, "cvtst", [(set f64:$Rc, (fpextend f32:$Rb))]>;
+def CVTTS : FP_r<0x16, 0x0ac, "cvtts", [(set f32:$Rc, (fpround f64:$Rb))]>;
 
-// Square root, from the FIX extension (ev6).  The single source is $Fb (with
-// $Fa = $31).  sqrts is single precision, sqrtt double.
+// Square root, from the FIX extension (ev6).
 let Predicates = [HasFIX], hasSideEffects = 0 in {
-def SQRTS : AlphaInst<(outs FPRC:$Fc), (ins FPRC:$Fb), "sqrts $Fb, $Fc",
-                      [(set f32:$Fc, (fsqrt f32:$Fb))]> { let Opcode = 0x14; }
-def SQRTT : AlphaInst<(outs FPRC:$Fc), (ins FPRC:$Fb), "sqrtt $Fb, $Fc",
-                      [(set f64:$Fc, (fsqrt f64:$Fb))]> { let Opcode = 0x14; }
+def SQRTS : FP_r<0x14, 0x08b, "sqrts", [(set f32:$Rc, (fsqrt f32:$Rb))]>;
+def SQRTT : FP_r<0x14, 0x0ab, "sqrtt", [(set f64:$Rc, (fsqrt f64:$Rb))]>;
 }
 
 // Integer/floating conversions on values held in floating-point registers.
-def CVTQT : AlphaInst<(outs FPRC:$Fc), (ins FPRC:$Fb), "cvtqt $Fb, $Fc", []> {
-  let Opcode = 0x16;
-}
-def CVTQS : AlphaInst<(outs FPRC:$Fc), (ins FPRC:$Fb), "cvtqs $Fb, $Fc", []> {
-  let Opcode = 0x16;
-}
+def CVTQT : FP_r<0x16, 0x0be, "cvtqt", []>;
+def CVTQS : FP_r<0x16, 0x0bc, "cvtqs", []>;
 // cvttq/c: convert T-floating to quadword with chopped (round-toward-zero)
 // rounding, matching C's fp-to-integer truncation semantics.
-def CVTTQ : AlphaInst<(outs FPRC:$Fc), (ins FPRC:$Fb), "cvttq/c $Fb, $Fc", []> {
-  let Opcode = 0x16;
-}
+def CVTTQ : FP_r<0x16, 0x02f, "cvttq/c", []>;
 
 // Load address: `lda $Rc, $disp($Rb)` computes $Rc = $Rb + sign_ext($disp).
 // With $Rb = $31 (zero) this materializes a 16-bit signed constant.
 def LDA : MFormD<0x08, (outs GPRC:$Rc), (ins s16imm:$disp, GPRC:$Rb),
-                    "lda $Rc, $disp($Rb)", []>;
+                 "lda $Rc, $disp($Rb)", []>;
 
 // Load effective address, with a base+displacement operand so a frame index can
 // be materialized (and rewritten by eliminateFrameIndex).
 let hasSideEffects = 0 in
-def LEA : MForm<0x08, (outs GPRC:$Rc), (ins memri:$addr), "lda $Rc, $addr", []>;
+def LEA : MForm<0x08, (outs GPRC:$Ra), (ins memri:$addr), "lda $Ra, $addr", []>;
 
 // Load address high: `ldah $Rc, $disp($Rb)` computes
 // $Rc = $Rb + (sign_ext($disp) << 16).  Paired with lda it materializes a
 // 32-bit signed constant.
 def LDAH : MFormD<0x09, (outs GPRC:$Rc), (ins s16imm:$disp, GPRC:$Rb),
-                     "ldah $Rc, $disp($Rb)", []>;
+                  "ldah $Rc, $disp($Rb)", []>;
 
 } // hasSideEffects = 0, mayLoad = 0, mayStore = 0
 
@@ -841,7 +861,9 @@ def RET : AlphaInst<(outs), (ins), "ret $$31, ($$26), 1", [(AlphaRet)]> {
 // Branches.
 //===----------------------------------------------------------------------===//
 
-def brtarget : Operand<OtherVT>;
+def brtarget : Operand<OtherVT> {
+  let EncoderMethod = "getBranchTargetEncoding";
+}
 
 // Unconditional branch: `br $31, target` ($31 discards the saved PC).
 let isBranch = 1, isTerminator = 1, isBarrier = 1 in
