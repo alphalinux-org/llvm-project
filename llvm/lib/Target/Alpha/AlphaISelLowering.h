@@ -35,6 +35,9 @@ enum NodeType : unsigned {
   // A function call through the procedure value in $27.
   CALL,
 
+  // A call to a division millicode routine (entered through $23).
+  DIVCALL,
+
   // GP-relative address parts, materialized with ldah !gprelhigh and
   // lda !gprellow.
   GPREL_HI,
@@ -148,6 +151,7 @@ public:
 private:
   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerDivRem(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerVASTART(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerVAARG(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerVACOPY(SDValue Op, SelectionDAG &DAG) const;
