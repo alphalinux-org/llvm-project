@@ -87,8 +87,13 @@ char AlphaExpandAtomicPseudo::ID = 0;
 // an arithmetic shift back down, which is what the sext_inreg patterns do.
 // Dst doubles as the intermediate, so this needs no scratch of its own.
 static void emitSignExtendField(MachineBasicBlock *MBB, const DebugLoc &DL,
-                                const AlphaInstrInfo *TII, bool IsWord,
-                                Register Dst, Register Src) {
+                                const AlphaInstrInfo *TII, bool HasBWX,
+                                bool IsWord, Register Dst, Register Src) {
+  if (HasBWX) {
+    BuildMI(MBB, DL, TII->get(IsWord ? Alpha::SEXTW : Alpha::SEXTB), Dst)
+        .addReg(Src);
+    return;
+  }
   unsigned Shift = IsWord ? 48 : 56;
   BuildMI(MBB, DL, TII->get(Alpha::SLLi), Dst).addReg(Src).addImm(Shift);
   BuildMI(MBB, DL, TII->get(Alpha::SRAi), Dst).addReg(Dst).addImm(Shift);
@@ -327,7 +332,7 @@ bool AlphaExpandAtomicPseudo::expandSubwordRMW(
           .addImm(0);
   addNarrowedMemOperands(MIB, MI, MachineMemOperand::MOLoad);
   BuildMI(LoopBB, DL, TII->get(ExtOpc), Field).addReg(Quad).addReg(Addr);
-  emitSignExtendField(LoopBB, DL, TII, IsWord, Dst, Field);
+  emitSignExtendField(LoopBB, DL, TII, STI->hasBWX(), IsWord, Dst, Field);
   if (Opc)
     BuildMI(LoopBB, DL, TII->get(Opc), Tmp).addReg(Field).addReg(Val);
 
@@ -407,7 +412,7 @@ bool AlphaExpandAtomicPseudo::expandSubwordCmpXchg(
           .addImm(0);
   addNarrowedMemOperands(MIB, MI, MachineMemOperand::MOLoad);
   BuildMI(LoopBB, DL, TII->get(ExtOpc), Field).addReg(Quad).addReg(Addr);
-  emitSignExtendField(LoopBB, DL, TII, IsWord, Dst, Field);
+  emitSignExtendField(LoopBB, DL, TII, STI->hasBWX(), IsWord, Dst, Field);
   BuildMI(LoopBB, DL, TII->get(Alpha::CMPEQ), Field)
       .addReg(Field)
       .addReg(CmpField);

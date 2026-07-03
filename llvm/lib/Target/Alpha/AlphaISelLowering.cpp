@@ -92,6 +92,12 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
     setTruncStoreAction(VT, MVT::f16, Expand);
   }
 
+  // With BWX, sextb/sextw sign-extend a byte/word in one instruction; otherwise
+  // sign-extend-in-register expands to an sll/sra pair.
+  for (auto VT : {MVT::i8, MVT::i16})
+    setOperationAction(ISD::SIGN_EXTEND_INREG, VT,
+                       STI.hasBWX() ? Legal : Expand);
+
   // No byte-swap or rotate instructions; expand to shift/mask sequences.
   setOperationAction(ISD::BSWAP, MVT::i64, Expand);
   setOperationAction(ISD::ROTL, MVT::i64, Expand);
