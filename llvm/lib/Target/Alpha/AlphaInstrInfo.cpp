@@ -72,3 +72,33 @@ void AlphaInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
       .addImm(0)
       .setMIFlag(Flags);
 }
+
+bool AlphaInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
+  unsigned Opc = MI.getOpcode();
+  if (Opc != Alpha::RMW_STOREI8 && Opc != Alpha::RMW_STOREI16)
+    return false;
+
+  // Update one field of the quadword holding it, in place.  This is expanded
+  // here, after scheduling, so that nothing lands between the load and the
+  // store: an update of another field of the same quadword would be lost.
+  bool IsByte = Opc == Alpha::RMW_STOREI8;
+  MachineBasicBlock &MBB = *MI.getParent();
+  DebugLoc DL = MI.getDebugLoc();
+  Register Tmp = MI.getOperand(0).getReg();
+  Register Ins = MI.getOperand(1).getReg();
+  Register Val = MI.getOperand(2).getReg();
+  Register Addr = MI.getOperand(3).getReg();
+
+  BuildMI(MBB, MI, DL, get(Alpha::LDQ_U), Tmp).addReg(Addr);
+  BuildMI(MBB, MI, DL, get(IsByte ? Alpha::MSKBL : Alpha::MSKWL), Tmp)
+      .addReg(Tmp)
+      .addReg(Addr);
+  BuildMI(MBB, MI, DL, get(IsByte ? Alpha::INSBL : Alpha::INSWL), Ins)
+      .addReg(Val)
+      .addReg(Addr);
+  BuildMI(MBB, MI, DL, get(Alpha::BIS), Tmp).addReg(Tmp).addReg(Ins);
+  BuildMI(MBB, MI, DL, get(Alpha::STQ_U)).addReg(Tmp).addReg(Addr);
+
+  MBB.erase(MI);
+  return true;
+}

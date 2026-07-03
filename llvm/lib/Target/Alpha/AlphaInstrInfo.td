@@ -488,6 +488,46 @@ def : Pat<(i64 (zextloadi16 ADDRr:$a)), (EXTWL (LDQ_U GPRC:$a), GPRC:$a)>;
 def : Pat<(i64 (extloadi16 ADDRr:$a)),  (EXTWL (LDQ_U GPRC:$a), GPRC:$a)>;
 }
 
+// Pre-BWX byte/word store: read the aligned quadword (ldq_u), clear the target
+// field (mskbl/mskwl), splice in the positioned datum (insbl/inswl) and write
+// the quadword back (stq_u).  This read-modify-write is not atomic with respect
+// to other accesses in the same quadword (see -msafe-bwa); a lock-based variant
+// is a later addition.
+let hasSideEffects = 0 in {
+def INSBL : AlphaInst<(outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                      "insbl $Ra, $Rb, $Rc", []> { let Opcode = 0x12; }
+def INSWL : AlphaInst<(outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                      "inswl $Ra, $Rb, $Rc", []> { let Opcode = 0x12; }
+def MSKBL : AlphaInst<(outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                      "mskbl $Ra, $Rb, $Rc", []> { let Opcode = 0x12; }
+def MSKWL : AlphaInst<(outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                      "mskwl $Ra, $Rb, $Rc", []> { let Opcode = 0x12; }
+}
+let mayStore = 1, hasSideEffects = 0 in
+def STQ_U : AlphaInst<(outs), (ins GPRC:$Ra, GPRC:$base), "stq_u $Ra, 0($base)",
+                      []> {
+  let Opcode = 0x0f;
+}
+// bic with an 8-bit literal, used to align an address down to a quadword.
+let hasSideEffects = 0 in
+def BICi : AlphaInst<(outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
+                     "bic $Ra, $lit, $Rc", []> { let Opcode = 0x11; }
+
+// The default (non-atomic) byte/word store read-modify-writes the quadword
+// holding the field.  It stays one instruction until after register allocation
+// (the two scratch registers are outputs so the allocator provides them):
+// stores of different bytes of one quadword are independent in the DAG, so if
+// the read and the write were separate instructions another byte's write could
+// land between them and be lost.  Selected by AlphaDAGToDAGISel::Select and
+// expanded by AlphaInstrInfo::expandPostRAPseudo.
+let mayLoad = 1, mayStore = 1, hasSideEffects = 0, Predicates = [NotBWX],
+    Constraints = "@earlyclobber $t1,@earlyclobber $t2" in {
+def RMW_STOREI8 : AlphaPseudo<(outs GPRC:$t1, GPRC:$t2),
+                              (ins GPRC:$val, GPRC:$addr), "", []>;
+def RMW_STOREI16 : AlphaPseudo<(outs GPRC:$t1, GPRC:$t2),
+                               (ins GPRC:$val, GPRC:$addr), "", []>;
+}
+
 let mayStore = 1, hasSideEffects = 0 in {
 def STL : AlphaInst<(outs), (ins GPRC:$Ra, memri:$addr), "stl $Ra, $addr",
                     [(truncstorei32 i64:$Ra, ADDRri:$addr)]> { let Opcode = 0x2c; }
