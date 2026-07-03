@@ -81,6 +81,17 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   for (auto Op : {ISD::SDIV, ISD::UDIV, ISD::SREM, ISD::UREM})
     setOperationAction(Op, MVT::i64, Custom);
 
+  // There is no half-precision support; convert to/from f16 with libcalls and
+  // split f16 loads/stores into an i16 access plus a conversion.
+  setOperationAction(ISD::FP16_TO_FP, MVT::f32, Expand);
+  setOperationAction(ISD::FP_TO_FP16, MVT::f32, Expand);
+  setOperationAction(ISD::FP16_TO_FP, MVT::f64, Expand);
+  setOperationAction(ISD::FP_TO_FP16, MVT::f64, Expand);
+  for (auto VT : {MVT::f32, MVT::f64}) {
+    setLoadExtAction(ISD::EXTLOAD, VT, MVT::f16, Expand);
+    setTruncStoreAction(VT, MVT::f16, Expand);
+  }
+
   // No byte-swap or rotate instructions; expand to shift/mask sequences.
   setOperationAction(ISD::BSWAP, MVT::i64, Expand);
   setOperationAction(ISD::ROTL, MVT::i64, Expand);
