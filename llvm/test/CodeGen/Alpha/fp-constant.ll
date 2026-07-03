@@ -4,11 +4,12 @@
 ; GP-relative: ldah !gprelhigh forms the high part of the offset from $gp, lda
 ; !gprellow the low part.  A double encoded as f32 is widened with cvtst.
 
+; The !gprellow low part is folded into the load, so only the ldah !gprelhigh is
+; needed to form the address.
 ; CHECK-LABEL: add1:
 ; CHECK:       ldgp $29, 0($27)
 ; CHECK:       ldah $0, .LCPI0_0($29){{.*}}!gprelhigh
-; CHECK:       lda $0, .LCPI0_0($0){{.*}}!gprellow
-; CHECK:       lds $f0, 0($0)
+; CHECK:       lds $f0, .LCPI0_0($0){{.*}}!gprellow
 ; CHECK:       cvtst $f0, $f0
 ; CHECK:       addt $f16, $f0, $f0
 ; CHECK:       ret
@@ -21,8 +22,7 @@ define double @add1(double %x) {
 ; loaded with ldt.
 ; CHECK-LABEL: addpi:
 ; CHECK:       ldah {{.*}}!gprelhigh
-; CHECK:       lda {{.*}}!gprellow
-; CHECK:       ldt $f0, 0($0)
+; CHECK:       ldt $f0, {{.*}}!gprellow
 ; CHECK:       addt $f16, $f0, $f0
 ; CHECK:       ret
 define double @addpi(double %x) {
