@@ -516,6 +516,92 @@ def : Pat<(atomic_store_64 GPRC:$val, ADDRri:$addr),
 def : Pat<(atomic_store_32 GPRC:$val, ADDRri:$addr),
           (STL GPRC:$val, memri:$addr)>;
 
+// Load-locked / store-conditional, the primitives for atomic read-modify-write.
+// stq_c overwrites its source register with 1 on success or 0 on failure.
+let mayLoad = 1, hasSideEffects = 0 in
+def LDQ_L : AlphaInst<(outs GPRC:$Ra), (ins memri:$addr), "ldq_l $Ra, $addr",
+                      []> {
+  let Opcode = 0x2b;
+}
+let mayStore = 1, Constraints = "$Ra = $out", hasSideEffects = 0 in
+def STQ_C : AlphaInst<(outs GPRC:$out), (ins GPRC:$Ra, memri:$addr),
+                      "stq_c $Ra, $addr", []> {
+  let Opcode = 0x2f;
+}
+
+// Atomic read-modify-write pseudos, expanded to an ldq_l/stq_c retry loop by a
+// custom inserter.  $dst receives the value read before the operation.
+class AtomicRMW<PatFrag node>
+    : AlphaPseudo<(outs GPRC:$dst), (ins GPRC:$addr, GPRC:$val), "",
+                  [(set i64:$dst, (node iPTR:$addr, i64:$val))]> {
+  let usesCustomInserter = 1;
+  let mayLoad = 1;
+  let mayStore = 1;
+}
+// 64-bit memory operand.
+class AtomicI64<SDPatternOperator op>
+    : PatFrag<(ops node:$ptr, node:$val), (op node:$ptr, node:$val)> {
+  let IsAtomic = 1;
+  let MemoryVT = i64;
+}
+
+def ATOMIC_ADD_I64  : AtomicRMW<AtomicI64<atomic_load_add>>;
+def ATOMIC_SUB_I64  : AtomicRMW<AtomicI64<atomic_load_sub>>;
+def ATOMIC_AND_I64  : AtomicRMW<AtomicI64<atomic_load_and>>;
+def ATOMIC_OR_I64   : AtomicRMW<AtomicI64<atomic_load_or>>;
+def ATOMIC_XOR_I64  : AtomicRMW<AtomicI64<atomic_load_xor>>;
+def ATOMIC_XCHG_I64 : AtomicRMW<AtomicI64<atomic_swap>>;
+
+// Compare-and-swap, also expanded to an ldq_l/stq_c loop.  $dst receives the
+// value read; the caller compares it against $cmp to determine success.
+//
+// The fragment is constrained to a 64-bit access.  An unconstrained
+// atomic_cmp_swap would match a cmpxchg of any width and give an i8, i16 or
+// i32 one this ldq_l/stq_c loop -- the wrong access width and the wrong
+// comparison.  The narrower widths get their own pseudos in later commits.
+class AtomicCASvt<ValueType vt>
+    : PatFrag<(ops node:$ptr, node:$cmp, node:$new),
+              (atomic_cmp_swap node:$ptr, node:$cmp, node:$new)> {
+  let IsAtomic = 1;
+  let MemoryVT = vt;
+}
+let usesCustomInserter = 1, mayLoad = 1, mayStore = 1 in
+def ATOMIC_CMPXCHG_I64
+    : AlphaPseudo<(outs GPRC:$dst),
+                  (ins GPRC:$addr, GPRC:$cmp, GPRC:$new), "",
+                  [(set i64:$dst,
+                        (AtomicCASvt<i64> iPTR:$addr, i64:$cmp, i64:$new))]>;
+
+// The ldq_l/stq_c loops themselves.  The pseudos above are what the patterns
+// match; EmitInstrWithCustomInserter rewrites each into one of these, which
+// carries the scratch registers the loop needs as extra outputs so that the
+// register allocator, and not the expansion, is what picks them.  The loop is
+// built from these by AlphaExpandAtomicPseudo, after allocation and after the
+// post-RA scheduler: the Alpha architecture requires that no memory access
+// appear between the load locked and the store conditional, and a spill or a
+// reload placed there makes the store conditional fail every time round.
+//
+// Size is the expansion's, not the one word a pseudo defaults to: the same
+// reason RMW_STOREI8 gives above, that determineCalleeSaves adds these up
+// before the expansion happens.
+let mayLoad = 1, mayStore = 1, hasSideEffects = 0, hasNoSchedulingInfo = 1 in {
+
+// ldq_l, the operation, stq_c, beq.  $alu is the operate-format opcode applied
+// to (old value, operand), or zero for an exchange; $is32 selects ldl_l/stl_c.
+let Size = 16, Constraints = "@earlyclobber $dst,@earlyclobber $t0" in
+def ATOMIC_RMW_LOOP : AlphaPseudo<(outs GPRC:$dst, GPRC:$t0),
+                                  (ins GPRC:$addr, GPRC:$val, i64imm:$alu,
+                                       i64imm:$is32), "", []>;
+
+// ldq_l, sign-extend the comparand for the longword form, cmpeq, beq, bis,
+// stq_c, beq.
+let Size = 28,
+    Constraints = "@earlyclobber $dst,@earlyclobber $t0,@earlyclobber $t1" in
+def ATOMIC_CAS_LOOP : AlphaPseudo<(outs GPRC:$dst, GPRC:$t0, GPRC:$t1),
+                                  (ins GPRC:$addr, GPRC:$cmp, GPRC:$new,
+                                       i64imm:$is32), "", []>;
+}
+
 // Subroutine return: `ret $31, ($26), 1`.
 // $26 is not listed as a use: the epilogue reloads it as a frame-destroy
 // instruction (so it survives), and leaving it off keeps the return address,

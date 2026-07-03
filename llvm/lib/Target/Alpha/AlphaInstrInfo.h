@@ -25,6 +25,13 @@ namespace llvm {
 
 class AlphaSubtarget;
 
+// Give an instruction built out of MI's expansion the memory operands MI
+// carried, narrowed to the half of the access it performs.  A read-modify-write
+// pseudo claims both a load and a store; the verifier rejects a load handed an
+// operand that claims a store, and the other way round.
+void addNarrowedMemOperands(MachineInstrBuilder MIB, const MachineInstr &MI,
+                            MachineMemOperand::Flags Half);
+
 class AlphaInstrInfo : public AlphaGenInstrInfo {
   const AlphaRegisterInfo RI;
 

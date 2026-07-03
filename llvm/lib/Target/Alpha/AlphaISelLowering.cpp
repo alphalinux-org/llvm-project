@@ -373,9 +373,75 @@ AlphaTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
   return DAG.getNode(AlphaISD::RET_GLUE, DL, MVT::Other, RetOps);
 }
 
+// Rewrite an atomic pseudo into the ldq_l/stq_c loop pseudo that stands for its
+// expansion, giving it a fresh virtual register for each scratch register that
+// expansion needs.  The loop itself is not built here: the Alpha architecture
+// requires that no memory access appear between the load locked and the store
+// conditional, and anything built before register allocation can have a spill
+// or a reload placed inside that window, which makes the store conditional fail
+// every time round the loop.  AlphaExpandAtomicPseudo builds it after
+// allocation instead.
+static MachineBasicBlock *emitAtomicLoop(MachineInstr &MI,
+                                         MachineBasicBlock *BB, unsigned LoopOpc,
+                                         unsigned NumScratch, unsigned NumDefs,
+                                         ArrayRef<int64_t> Modes) {
+  MachineFunction &MF = *BB->getParent();
+  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
+  MachineRegisterInfo &MRI = MF.getRegInfo();
+
+  MachineInstrBuilder MIB = BuildMI(*BB, MI, MI.getDebugLoc(), TII.get(LoopOpc));
+  // The pseudo's own results come first and keep the registers they were given.
+  for (unsigned I = 0; I != NumDefs; ++I)
+    MIB.addReg(MI.getOperand(I).getReg(), RegState::Define);
+  for (unsigned I = 0; I != NumScratch; ++I)
+    MIB.addReg(MRI.createVirtualRegister(&Alpha::GPRCRegClass),
+               RegState::Define | RegState::Dead);
+  for (unsigned I = NumDefs, E = MI.getNumOperands(); I != E; ++I)
+    MIB.add(MI.getOperand(I));
+  for (int64_t M : Modes)
+    MIB.addImm(M);
+  MIB.setMemRefs(MI.memoperands());
+
+  MI.eraseFromParent();
+  return BB;
+}
+
 MachineBasicBlock *
 AlphaTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
                                                  MachineBasicBlock *MBB) const {
+  switch (MI.getOpcode()) {
+  case Alpha::ATOMIC_ADD_I64:
+    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_RMW_LOOP,
+                          /*NumScratch=*/1, /*NumDefs=*/1,
+                          {Alpha::ADDQ, 0});
+  case Alpha::ATOMIC_SUB_I64:
+    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_RMW_LOOP,
+                          /*NumScratch=*/1, /*NumDefs=*/1,
+                          {Alpha::SUBQ, 0});
+  case Alpha::ATOMIC_AND_I64:
+    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_RMW_LOOP,
+                          /*NumScratch=*/1, /*NumDefs=*/1,
+                          {Alpha::AND, 0});
+  case Alpha::ATOMIC_OR_I64:
+    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_RMW_LOOP,
+                          /*NumScratch=*/1, /*NumDefs=*/1,
+                          {Alpha::BIS, 0});
+  case Alpha::ATOMIC_XOR_I64:
+    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_RMW_LOOP,
+                          /*NumScratch=*/1, /*NumDefs=*/1,
+                          {Alpha::XOR, 0});
+  case Alpha::ATOMIC_XCHG_I64:
+    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_RMW_LOOP,
+                          /*NumScratch=*/1, /*NumDefs=*/1,
+                          {0, 0});
+  case Alpha::ATOMIC_CMPXCHG_I64:
+    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_CAS_LOOP,
+                          /*NumScratch=*/2, /*NumDefs=*/1,
+                          {0});
+  default:
+    break;
+  }
+
   // MOVi2f/MOVf2i reinterpret the 64 bits of a value by bouncing them through
   // an 8-byte stack slot, since Alpha has no direct integer/FP register move.
   MachineFunction &MF = *MBB->getParent();

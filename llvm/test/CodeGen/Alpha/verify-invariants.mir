@@ -1,0 +1,111 @@
+# RUN: split-file %s %t
+#
+# RUN: not llc -mtriple=alpha-unknown-linux-gnu -mcpu=ev67 \
+# RUN:     -run-pass=alpha-verify-invariants %t/llsc.mir -o /dev/null 2>&1 \
+# RUN:   | FileCheck %s --check-prefix=B1
+#
+# The input is accepted with the check turned off, so what the run above proves
+# is that the check fired -- not that the input is broken in some other way the
+# pipeline would have rejected anyway.
+# RUN: llc -mtriple=alpha-unknown-linux-gnu -mcpu=ev67 \
+# RUN:     -alpha-check-invariants=false \
+# RUN:     -run-pass=alpha-verify-invariants %t/llsc.mir -o /dev/null
+
+# The properties AlphaVerifyInvariants checks.  Nothing the backend generates
+# violates any of them, so each input here is written by hand -- that is the
+# point of the pass: these are the failures no test can otherwise produce.
+
+# First: a plain load between the load locked and the store conditional.  On
+# real hardware that clears the lock flag and the loop never terminates; qemu
+# does not model the lock flag, so no executing test can see it.
+# B1: LLVM ERROR: Alpha invariant B1 violated in function 'llsc': a memory access appears between a load locked and its store conditional
+
+#--- llsc.mir
+--- |
+  target datalayout = "e-m:e-p:64:64-i64:64-i128:128-n64-S128"
+  target triple = "alpha-unknown-linux-gnu"
+  
+  define i64 @llsc(ptr %p) #0 {
+    %r = atomicrmw add ptr %p, i64 1 monotonic, align 8
+    ret i64 %r
+  }
+  
+  attributes #0 = { "target-cpu"="ev67" }
+...
+---
+name:            llsc
+alignment:       1
+exposesReturnsTwice: false
+legalized:       false
+regBankSelected: false
+selected:        false
+failedISel:      false
+tracksRegLiveness: true
+hasWinCFI:       false
+noPhis:          true
+isSSA:           false
+noVRegs:         true
+hasFakeUses:     false
+callsEHReturn:   false
+callsUnwindInit: false
+hasEHContTarget: false
+hasEHScopes:     false
+hasEHFunclets:   false
+isOutlined:      false
+debugInstrRef:   false
+failsVerification: false
+tracksDebugUserValues: true
+registers:       []
+liveins:
+  - { reg: '$r16', virtual-reg: '' }
+  - { reg: '$r26', virtual-reg: '' }
+frameInfo:
+  isFrameAddressTaken: false
+  isReturnAddressTaken: false
+  hasStackMap:     false
+  hasPatchPoint:   false
+  stackSize:       0
+  offsetAdjustment: 0
+  maxAlignment:    1
+  adjustsStack:    false
+  hasCalls:        false
+  framePointerPolicy: none
+  stackProtector:  ''
+  functionContext: ''
+  maxCallFrameSize: 0
+  cvBytesOfCalleeSavedRegisters: 0
+  hasOpaqueSPAdjustment: false
+  hasVAStart:      false
+  hasMustTailInVarArgFunc: false
+  hasTailCall:     false
+  isCalleeSavedInfoValid: true
+  localFrameSize:  0
+fixedStack:      []
+stack:           []
+entry_values:    []
+callSites:       []
+debugValueSubstitutions: []
+constants:       []
+machineFunctionInfo: {}
+body:             |
+  bb.0 (%ir-block.0):
+    successors: %bb.1(0x80000000)
+    liveins: $r16, $r26
+  
+    $r1 = LDA 1, $r31
+  
+  bb.1 (%ir-block.0):
+    successors: %bb.1(0x40000000), %bb.2(0x40000000)
+    liveins: $r16, $r1
+  
+    $r0 = LDQ_L $r16, 0 :: (load monotonic (s64) from %ir.p)
+    $r3 = LDQ $r16, 8 :: (load (s64))
+    $r2 = ADDQ $r0, $r1
+    $r2 = STQ_C $r2, $r16, 0 :: (store monotonic (s64) into %ir.p)
+    BEQ $r2, %bb.1
+  
+  bb.2 (%ir-block.0):
+    liveins: $r0
+  
+    RET implicit $r0
+...

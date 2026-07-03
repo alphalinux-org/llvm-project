@@ -47,6 +47,21 @@ void AlphaInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   llvm_unreachable("Alpha copyPhysReg: unsupported register class");
 }
 
+void llvm::addNarrowedMemOperands(MachineInstrBuilder MIB,
+                                  const MachineInstr &MI,
+                                  MachineMemOperand::Flags Half) {
+  MachineFunction &MF = *MIB->getMF();
+  for (MachineMemOperand *MMO : MI.memoperands()) {
+    auto Flags = (MMO->getFlags() &
+                  ~(MachineMemOperand::MOLoad | MachineMemOperand::MOStore)) |
+                 Half;
+    MIB.addMemOperand(MF.getMachineMemOperand(
+        MMO->getPointerInfo(), Flags, MMO->getSize(), MMO->getBaseAlign(),
+        MMO->getAAInfo(), MMO->getRanges(), MMO->getSyncScopeID(),
+        MMO->getSuccessOrdering(), MMO->getFailureOrdering()));
+  }
+}
+
 // Describe an access to the whole of a stack slot, so that what follows knows
 // which object is touched and can tell one slot's traffic from another's.
 static MachineMemOperand *getStackSlotMMO(MachineFunction &MF, int FrameIndex,
