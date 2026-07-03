@@ -131,11 +131,12 @@ class ALU_rr<bits<6> opc, bits<7> func, string mnem, SDPatternOperator node>
             mnem # " $Ra, $Rb, $Rc",
             [(set i64:$Rc, (node i64:$Ra, i64:$Rb))]>;
 
-def ADDQ : ALU_rr<0x10, 0x20, "addq", add>;
-def SUBQ : ALU_rr<0x10, 0x29, "subq", sub>;
-def MULQ : ALU_rr<0x13, 0x20, "mulq", mul>;
-def AND  : ALU_rr<0x11, 0x00, "and",  and>;
-def XOR  : ALU_rr<0x11, 0x40, "xor",  xor>;
+def ADDQ  : ALU_rr<0x10, 0x20, "addq",  add>;
+def SUBQ  : ALU_rr<0x10, 0x29, "subq",  sub>;
+def MULQ  : ALU_rr<0x13, 0x20, "mulq",  mul>;
+def UMULH : ALU_rr<0x13, 0x30, "umulh", mulhu>;
+def AND   : ALU_rr<0x11, 0x00, "and",   and>;
+def XOR   : ALU_rr<0x11, 0x40, "xor",   xor>;
 
 // Scaled add/subtract: `s4addq $Ra, $Rb, $Rc` computes $Rc = $Ra*4 + $Rb (s8
 // scales by 8); useful for array-index address arithmetic.
