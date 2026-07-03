@@ -183,6 +183,17 @@ def SRAi : ALU_ri<0x12, 0x3c, "sra", sra>;
 def ZAPNOTi : OFormL<0x12, 0x31, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
                         "zapnot $Ra, $lit, $Rc", []>;
 
+// Count instructions from the CIX extension (ev67).  The single source is $Rb
+// (with $Ra = $31); ctlz/cttz of zero produce 64, matching ISD semantics.
+let Predicates = [HasCIX], hasSideEffects = 0, Ra = 31 in {
+def CTPOP : OForm<0x1c, 0x30, (outs GPRC:$Rc), (ins GPRC:$Rb), "ctpop $Rb, $Rc",
+                  [(set i64:$Rc, (ctpop i64:$Rb))]>;
+def CTLZ : OForm<0x1c, 0x32, (outs GPRC:$Rc), (ins GPRC:$Rb), "ctlz $Rb, $Rc",
+                 [(set i64:$Rc, (ctlz i64:$Rb))]>;
+def CTTZ : OForm<0x1c, 0x33, (outs GPRC:$Rc), (ins GPRC:$Rb), "cttz $Rb, $Rc",
+                 [(set i64:$Rc, (cttz i64:$Rb))]>;
+}
+
 // `addl $Ra, $Rb, $Rc` is a 32-bit add whose result is sign-extended to 64
 // bits.  With $Rb = $31 it sign-extends the low 32 bits of $Ra.
 def ADDL : OForm<0x10, 0x00, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
