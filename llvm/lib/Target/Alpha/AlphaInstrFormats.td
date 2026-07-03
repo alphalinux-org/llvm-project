@@ -39,3 +39,34 @@ class AlphaPseudo<dag outs, dag ins, string asmstr, list<dag> pattern>
   let isPseudo = 1;
   let isCodeGenOnly = 1;
 }
+
+// Register-register operate: Ra (25-21), Rb (20-16), 0 (15-12), func (11-5),
+// Rc (4-0).
+class OForm<bits<6> opc, bits<7> func, dag outs, dag ins, string asmstr,
+            list<dag> pattern> : AlphaInst<outs, ins, asmstr, pattern> {
+  bits<5> Ra;
+  bits<5> Rb;
+  bits<5> Rc;
+  let Opcode = opc;
+  let Inst{25-21} = Ra;
+  let Inst{20-16} = Rb;
+  let Inst{15-13} = 0;
+  let Inst{12} = 0;
+  let Inst{11-5} = func;
+  let Inst{4-0} = Rc;
+}
+
+// Literal operate: Ra (25-21), 8-bit literal (20-13), 1 (12), func (11-5),
+// Rc (4-0).
+class OFormL<bits<6> opc, bits<7> func, dag outs, dag ins, string asmstr,
+             list<dag> pattern> : AlphaInst<outs, ins, asmstr, pattern> {
+  bits<5> Ra;
+  bits<8> lit;
+  bits<5> Rc;
+  let Opcode = opc;
+  let Inst{25-21} = Ra;
+  let Inst{20-13} = lit;
+  let Inst{12} = 1;
+  let Inst{11-5} = func;
+  let Inst{4-0} = Rc;
+}
