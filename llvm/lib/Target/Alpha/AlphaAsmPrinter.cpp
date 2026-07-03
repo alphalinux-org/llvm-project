@@ -125,9 +125,11 @@ bool AlphaAsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI,
                                             raw_ostream &O) {
   if (ExtraCode && ExtraCode[0])
     return true;
-  // A memory operand is a base register; print it as an address `0($base)`.
-  O << "0(" << AlphaInstPrinter::getRegisterName(MI->getOperand(OpNo).getReg())
-    << ')';
+  // An inline-asm memory operand is (base register, displacement), printed as
+  // the usual `disp($base)`.
+  const MachineOperand &Disp = MI->getOperand(OpNo + 1);
+  O << (Disp.isImm() ? Disp.getImm() : 0) << '('
+    << AlphaInstPrinter::getRegisterName(MI->getOperand(OpNo).getReg()) << ')';
   return false;
 }
 

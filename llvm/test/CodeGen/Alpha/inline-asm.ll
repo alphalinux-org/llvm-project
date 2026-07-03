@@ -19,3 +19,11 @@ define void @barrier() {
   call void asm "mb", ""()
   ret void
 }
+
+; A memory-operand constraint is lowered to a base+displacement address.
+; CHECK-LABEL: mem:
+; CHECK:       ldq $0, 0($16)
+define i64 @mem(ptr %p) {
+  %r = call i64 asm "ldq $0, $1", "=r,*m"(ptr elementtype(i64) %p)
+  ret i64 %r
+}

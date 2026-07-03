@@ -17,6 +17,7 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/InlineAsm.h"
 
 using namespace llvm;
 
@@ -46,6 +47,29 @@ public:
   bool SelectAddrReg(SDValue Addr, SDValue &Reg) {
     Reg = Addr;
     return true;
+  }
+
+  // Addressing-mode selection for inline-asm memory ("m"/"o") operands.
+  bool SelectInlineAsmMemoryOperand(const SDValue &Op,
+                                    InlineAsm::ConstraintCode ConstraintID,
+                                    std::vector<SDValue> &OutOps) override {
+    switch (ConstraintID) {
+    default:
+      return true;
+    case InlineAsm::ConstraintCode::o:
+    case InlineAsm::ConstraintCode::m: {
+      SDValue Base, Offset;
+      if (!SelectADDRri(Op, Base, Offset)) {
+        // Fall back to using the address directly as the base with a zero
+        // displacement.
+        Base = Op;
+        Offset = CurDAG->getTargetConstant(0, SDLoc(Op), MVT::i64);
+      }
+      OutOps.push_back(Base);
+      OutOps.push_back(Offset);
+      return false;
+    }
+    }
   }
 
 #include "AlphaGenDAGISel.inc"
