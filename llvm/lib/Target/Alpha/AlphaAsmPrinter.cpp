@@ -69,6 +69,9 @@ MCOperand AlphaAsmPrinter::lowerOperand(const MachineOperand &MO) const {
           Expr, MCConstantExpr::create(MO.getOffset(), OutContext), OutContext);
     return MCOperand::createExpr(Expr);
   }
+  case MachineOperand::MO_ConstantPoolIndex:
+    return MCOperand::createExpr(
+        MCSymbolRefExpr::create(GetCPISymbol(MO.getIndex()), OutContext));
   default:
     llvm_unreachable("unknown operand type");
   }

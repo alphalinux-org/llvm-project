@@ -34,6 +34,11 @@ enum NodeType : unsigned {
 
   // A function call through the procedure value in $27.
   CALL,
+
+  // GP-relative address parts, materialized with ldah !gprelhigh and
+  // lda !gprellow.
+  GPREL_HI,
+  GPREL_LO,
 };
 } // namespace AlphaISD
 
@@ -86,6 +91,7 @@ public:
 
 private:
   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
 
   const AlphaSubtarget &Subtarget;
 };
