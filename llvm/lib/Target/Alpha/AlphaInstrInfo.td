@@ -196,6 +196,17 @@ def MULT : FP_rr<0x0a2,"mult", f64, fmul>;
 def DIVS : FP_rr<0x083,"divs", f32, fdiv>;
 def DIVT : FP_rr<0x0a3,"divt", f64, fdiv>;
 
+// Precision conversions between S_floating (f32) and T_floating (f64).  Both
+// stay in floating-point registers.
+def CVTST : AlphaInst<(outs FPRC:$Fc), (ins FPRC:$Fb), "cvtst $Fb, $Fc",
+                      [(set f64:$Fc, (fpextend f32:$Fb))]> {
+  let Opcode = 0x16;
+}
+def CVTTS : AlphaInst<(outs FPRC:$Fc), (ins FPRC:$Fb), "cvtts $Fb, $Fc",
+                      [(set f32:$Fc, (fpround f64:$Fb))]> {
+  let Opcode = 0x16;
+}
+
 // Load address: `lda $Rc, $disp($Rb)` computes $Rc = $Rb + sign_ext($disp).
 // With $Rb = $31 (zero) this materializes a 16-bit signed constant.
 def LDA : MFormD<0x08, (outs GPRC:$Ra), (ins s16imm:$disp, GPRC:$Rb),
