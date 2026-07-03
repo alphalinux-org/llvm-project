@@ -86,6 +86,31 @@ TEST(TripleTest, ParsedIDs) {
   EXPECT_EQ(Triple::Darwin, T.getOS());
   EXPECT_EQ(Triple::UnknownEnvironment, T.getEnvironment());
 
+  T = Triple("alpha-unknown-linux-gnu");
+  EXPECT_EQ(Triple::alpha, T.getArch());
+  EXPECT_EQ(Triple::UnknownVendor, T.getVendor());
+  EXPECT_EQ(Triple::Linux, T.getOS());
+  EXPECT_EQ(Triple::GNU, T.getEnvironment());
+  EXPECT_TRUE(T.isAlpha());
+  EXPECT_TRUE(T.isArch64Bit());
+  EXPECT_TRUE(T.isLittleEndian());
+
+  // GNU config, and therefore Debian and every autoconf build, names the
+  // processor in the architecture: alphaev56, alphaev67 and friends.  There is
+  // one Alpha instruction set as far as the triple is concerned, so they all
+  // parse to it; -mcpu is what distinguishes them.
+  for (const char *Name : {"alphaev4-unknown-linux-gnu",
+                           "alphaev56-unknown-linux-gnu",
+                           "alphapca56-unknown-linux-gnu",
+                           "alphaev6-unknown-linux-gnu",
+                           "alphaev67-unknown-linux-gnu",
+                           "alphaev68-unknown-linux-gnu"}) {
+    T = Triple(Name);
+    EXPECT_EQ(Triple::alpha, T.getArch()) << Name;
+    EXPECT_EQ(Triple::Linux, T.getOS()) << Name;
+    EXPECT_TRUE(T.isAlpha()) << Name;
+  }
+
   T = Triple("i386-pc-elfiamcu");
   EXPECT_EQ(Triple::x86, T.getArch());
   EXPECT_EQ(Triple::PC, T.getVendor());
