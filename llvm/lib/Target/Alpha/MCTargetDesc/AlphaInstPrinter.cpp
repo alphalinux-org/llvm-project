@@ -44,3 +44,14 @@ void AlphaInstPrinter::printOperand(const MCInst *MI, int OpNum,
   else
     llvm_unreachable("Invalid operand");
 }
+
+void AlphaInstPrinter::printMemOperand(const MCInst *MI, int OpNum,
+                                       raw_ostream &O) {
+  // memri operands are (base register, displacement), printed as disp(base).
+  const MCOperand &Disp = MI->getOperand(OpNum + 1);
+  if (Disp.isImm())
+    O << Disp.getImm();
+  else
+    printOperand(MI, OpNum + 1, O);
+  O << '(' << getRegisterName(MI->getOperand(OpNum).getReg()) << ')';
+}

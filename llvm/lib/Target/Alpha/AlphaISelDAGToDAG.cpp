@@ -36,6 +36,10 @@ public:
 
   void Select(SDNode *Node) override;
 
+  // Match an address of the form base + 16-bit signed displacement (or a
+  // frame index) into (Base, Offset).
+  bool SelectADDRri(SDValue Addr, SDValue &Base, SDValue &Offset);
+
 #include "AlphaGenDAGISel.inc"
 };
 
@@ -62,6 +66,33 @@ void AlphaDAGToDAGISel::Select(SDNode *Node) {
     return;
   }
   SelectCode(Node);
+}
+
+bool AlphaDAGToDAGISel::SelectADDRri(SDValue Addr, SDValue &Base,
+                                     SDValue &Offset) {
+  SDLoc DL(Addr);
+
+  if (auto *FIN = dyn_cast<FrameIndexSDNode>(Addr)) {
+    Base = CurDAG->getTargetFrameIndex(FIN->getIndex(), MVT::i64);
+    Offset = CurDAG->getTargetConstant(0, DL, MVT::i64);
+    return true;
+  }
+
+  if (CurDAG->isBaseWithConstantOffset(Addr)) {
+    auto *CN = cast<ConstantSDNode>(Addr.getOperand(1));
+    if (isInt<16>(CN->getSExtValue())) {
+      if (auto *FIN = dyn_cast<FrameIndexSDNode>(Addr.getOperand(0)))
+        Base = CurDAG->getTargetFrameIndex(FIN->getIndex(), MVT::i64);
+      else
+        Base = Addr.getOperand(0);
+      Offset = CurDAG->getTargetConstant(CN->getSExtValue(), DL, MVT::i64);
+      return true;
+    }
+  }
+
+  Base = Addr;
+  Offset = CurDAG->getTargetConstant(0, DL, MVT::i64);
+  return true;
 }
 
 FunctionPass *llvm::createAlphaISelDag(AlphaTargetMachine &TM,
