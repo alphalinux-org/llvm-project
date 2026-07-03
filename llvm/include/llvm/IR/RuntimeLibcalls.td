@@ -3083,6 +3083,17 @@ def RISCVSystemLibrary
            DefaultSafeStackGlobals)>;
 
 //===----------------------------------------------------------------------===//
+// Alpha Runtime Libcalls
+//===----------------------------------------------------------------------===//
+
+def isAlpha : RuntimeLibcallAvailability<"TT.getArch() == Triple::alpha">;
+
+def AlphaSystemLibrary
+    : SystemRuntimeLibrary<isAlpha,
+      (add DefaultRuntimeLibcallImpls, Int128RTLibcalls,
+           DefaultStackProtector, DefaultSafeStackGlobals)>;
+
+//===----------------------------------------------------------------------===//
 // SPARC Runtime Libcalls
 //===----------------------------------------------------------------------===//
 
