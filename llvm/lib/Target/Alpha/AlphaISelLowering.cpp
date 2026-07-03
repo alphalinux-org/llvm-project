@@ -72,6 +72,10 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   setOperationAction(ISD::UINT_TO_FP, MVT::i64, Expand);
   setOperationAction(ISD::FP_TO_UINT, MVT::i64, Expand);
 
+  // There is no integer division instruction; call the division millicode.
+  for (auto Op : {ISD::SDIV, ISD::UDIV, ISD::SREM, ISD::UREM})
+    setOperationAction(Op, MVT::i64, Custom);
+
   // Only the ordered floating-point comparisons have direct instructions; the
   // rest are expanded into combinations of them.  SETNE belongs here too: the
   // NaN-agnostic codes otherwise map straight onto cmpteq/cmptlt/cmptle, but
@@ -100,6 +104,8 @@ const char *AlphaTargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "AlphaISD::LITERAL";
   case AlphaISD::CALL:
     return "AlphaISD::CALL";
+  case AlphaISD::DIVCALL:
+    return "AlphaISD::DIVCALL";
   case AlphaISD::GPREL_HI:
     return "AlphaISD::GPREL_HI";
   case AlphaISD::GPREL_LO:
@@ -131,9 +137,59 @@ SDValue AlphaTargetLowering::LowerOperation(SDValue Op,
     return LowerVAARG(Op, DAG);
   case ISD::VACOPY:
     return LowerVACOPY(Op, DAG);
+  case ISD::SDIV:
+  case ISD::UDIV:
+  case ISD::SREM:
+  case ISD::UREM:
+    return LowerDivRem(Op, DAG);
   default:
     llvm_unreachable("unexpected operation to lower");
   }
+}
+
+SDValue AlphaTargetLowering::LowerDivRem(SDValue Op, SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  MachineFunction &MF = DAG.getMachineFunction();
+  MF.getInfo<AlphaMachineFunctionInfo>()->setUsesGP();
+
+  const char *Name;
+  switch (Op.getOpcode()) {
+  case ISD::SDIV:
+    Name = "__divq";
+    break;
+  case ISD::UDIV:
+    Name = "__divqu";
+    break;
+  case ISD::SREM:
+    Name = "__remq";
+    break;
+  case ISD::UREM:
+    Name = "__remqu";
+    break;
+  default:
+    llvm_unreachable("unexpected division");
+  }
+
+  // Millicode convention: dividend in $24, divisor in $25, entered through $23
+  // with the routine address in $27, result in $27.
+  SDValue Chain = DAG.getEntryNode();
+  SDValue Glue;
+  Chain = DAG.getCopyToReg(Chain, DL, Alpha::R24, Op.getOperand(0), Glue);
+  Glue = Chain.getValue(1);
+  Chain = DAG.getCopyToReg(Chain, DL, Alpha::R25, Op.getOperand(1), Glue);
+  Glue = Chain.getValue(1);
+  SDValue Pv = DAG.getNode(AlphaISD::LITERAL, DL, MVT::i64,
+                           DAG.getTargetExternalSymbol(Name, MVT::i64));
+  Chain = DAG.getCopyToReg(Chain, DL, Alpha::R27, Pv, Glue);
+  Glue = Chain.getValue(1);
+
+  SDValue Ops[] = {Chain, DAG.getRegister(Alpha::R24, MVT::i64),
+                   DAG.getRegister(Alpha::R25, MVT::i64),
+                   DAG.getRegister(Alpha::R27, MVT::i64), Glue};
+  Chain = DAG.getNode(AlphaISD::DIVCALL, DL, {MVT::Other, MVT::Glue}, Ops);
+  Glue = Chain.getValue(1);
+
+  return DAG.getCopyFromReg(Chain, DL, Alpha::R27, MVT::i64, Glue);
 }
 
 SDValue AlphaTargetLowering::LowerGlobalAddress(SDValue Op,

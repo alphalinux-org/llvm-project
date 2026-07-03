@@ -51,6 +51,13 @@ def AlphaCall : SDNode<"AlphaISD::CALL", SDTNone,
                        [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
                         SDNPVariadic]>;
 
+// A call to a division millicode routine (__divq and friends): operands in
+// $24/$25, result in $27, entered through $23.  It clobbers only a few
+// registers, so it is modeled separately from a normal call.
+def AlphaDivCall : SDNode<"AlphaISD::DIVCALL", SDTNone,
+                          [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
+                           SDNPVariadic]>;
+
 // GP-relative address materialization (small/large-data local symbols such as
 // constant-pool entries): the high 16 bits via ldah !gprelhigh and the low 16
 // bits via lda !gprellow.
@@ -345,11 +352,12 @@ def LDGP : AlphaInst<(outs), (ins), "ldgp $$29, 0($$27)", []>;
 
 // Load a global's address from its GOT slot via an R_ALPHA_LITERAL relocation.
 let mayLoad = 1, hasSideEffects = 0, Uses = [R29] in
-def LDQl : AlphaInst<(outs GPRC:$dst), (ins symbol:$sym),
-                     "ldq $dst, $sym($$29)\t\t!literal", []> {
-  let Opcode = 0x29;
+def LDQl : MFormD<0x29, (outs GPRC:$Ra), (ins literal_sym:$disp),
+                  "ldq $Ra, $disp($$29)\t\t!literal", []> {
+  let Rb = 29;
 }
 def : Pat<(AlphaLiteral tglobaladdr:$sym), (LDQl tglobaladdr:$sym)>;
+def : Pat<(AlphaLiteral texternalsym:$sym), (LDQl texternalsym:$sym)>;
 
 // GP-relative high/low address parts.  The relocation suffix distinguishes the
 // two; the same symbol operand feeds both.
@@ -393,9 +401,19 @@ def : Pat<(f64 (extloadf32 (AlphaGprelLo tconstpool:$s, GPRC:$b))),
 // $26; the following ldgp reloads the caller's global pointer, which the callee
 // may have changed.  $29 is redefined with the caller's gp.
 let isCall = 1, Uses = [R27], Defs = [R26, R29] in
-def JSR : AlphaInst<(outs), (ins), "jsr $$26, ($$27)\n\tldgp $$29, 0($$26)",
-                    [(AlphaCall)]> {
-  let Opcode = 0x1a;
+def JSR : MbrForm<0b01, (outs), (ins), "jsr $$26, ($$27)\n\tldgp $$29, 0($$26)",
+                  [(AlphaCall)]> {
+  let Ra = 26;
+  let Rb = 27;
+}
+
+// Division millicode call: enter __divq etc. through $23; the routine preserves
+// all but a handful of registers, so no ldgp reload is needed afterwards.
+let isCall = 1, Uses = [R24, R25, R27],
+    Defs = [R23, R24, R25, R27, R28] in
+def DIVCALL : MbrForm<0b01, (outs), (ins), "jsr $$23, ($$27)", [(AlphaDivCall)]> {
+  let Ra = 23;
+  let Rb = 27;
 }
 
 //===----------------------------------------------------------------------===//
