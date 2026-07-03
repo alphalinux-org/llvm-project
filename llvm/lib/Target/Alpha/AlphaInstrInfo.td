@@ -126,6 +126,12 @@ def CPYS : AlphaInst<(outs FPRC:$Rc), (ins FPRC:$Ra, FPRC:$Rb),
 def LDA : MFormD<0x08, (outs GPRC:$Rc), (ins s16imm:$disp, GPRC:$Rb),
                     "lda $Rc, $disp($Rb)", []>;
 
+// Load address high: `ldah $Rc, $disp($Rb)` computes
+// $Rc = $Rb + (sign_ext($disp) << 16).  Paired with lda it materializes a
+// 32-bit signed constant.
+def LDAH : MFormD<0x09, (outs GPRC:$Rc), (ins s16imm:$disp, GPRC:$Rb),
+                     "ldah $Rc, $disp($Rb)", []>;
+
 } // hasSideEffects = 0, mayLoad = 0, mayStore = 0
 
 // Materialize a small signed constant with `lda $Rc, imm($31)`.
