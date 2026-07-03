@@ -68,6 +68,8 @@ const char *AlphaTargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "AlphaISD::RET_GLUE";
   case AlphaISD::LITERAL:
     return "AlphaISD::LITERAL";
+  case AlphaISD::CALL:
+    return "AlphaISD::CALL";
   }
   return nullptr;
 }
@@ -92,6 +94,83 @@ SDValue AlphaTargetLowering::LowerGlobalAddress(SDValue Op,
   SDValue TGA =
       DAG.getTargetGlobalAddress(N->getGlobal(), DL, MVT::i64, N->getOffset());
   return DAG.getNode(AlphaISD::LITERAL, DL, MVT::i64, TGA);
+}
+
+SDValue AlphaTargetLowering::LowerCall(CallLoweringInfo &CLI,
+                                       SmallVectorImpl<SDValue> &InVals) const {
+  SelectionDAG &DAG = CLI.DAG;
+  SDLoc &DL = CLI.DL;
+  MachineFunction &MF = DAG.getMachineFunction();
+
+  // No tail calls yet, and the caller uses the global pointer to load the
+  // callee address and to reload gp afterwards.
+  CLI.IsTailCall = false;
+  MF.getInfo<AlphaMachineFunctionInfo>()->setUsesGP();
+
+  SmallVector<CCValAssign, 16> ArgLocs;
+  CCState CCInfo(CLI.CallConv, CLI.IsVarArg, MF, ArgLocs, *DAG.getContext());
+  CCInfo.AnalyzeCallOperands(CLI.Outs, CC_Alpha);
+  unsigned NumBytes = CCInfo.getStackSize();
+
+  SDValue Chain = DAG.getCALLSEQ_START(CLI.Chain, NumBytes, 0, DL);
+
+  // Copy each argument into its assigned register.  The callee address goes in
+  // $27 (the procedure value).
+  SmallVector<std::pair<Register, SDValue>, 8> RegsToPass;
+  for (unsigned I = 0, E = ArgLocs.size(); I != E; ++I) {
+    const CCValAssign &VA = ArgLocs[I];
+    if (!VA.isRegLoc())
+      report_fatal_error("Alpha stack call arguments are not yet implemented");
+    RegsToPass.emplace_back(VA.getLocReg(), CLI.OutVals[I]);
+  }
+
+  SDValue Callee = CLI.Callee;
+  if (auto *G = dyn_cast<GlobalAddressSDNode>(Callee))
+    Callee =
+        DAG.getNode(AlphaISD::LITERAL, DL, MVT::i64,
+                    DAG.getTargetGlobalAddress(G->getGlobal(), DL, MVT::i64));
+  else if (auto *E = dyn_cast<ExternalSymbolSDNode>(Callee))
+    Callee = DAG.getNode(AlphaISD::LITERAL, DL, MVT::i64,
+                         DAG.getTargetExternalSymbol(E->getSymbol(), MVT::i64));
+  else
+    report_fatal_error("Alpha indirect calls are not yet implemented");
+  RegsToPass.emplace_back(Alpha::R27, Callee);
+
+  SDValue Glue;
+  for (auto &R : RegsToPass) {
+    Chain = DAG.getCopyToReg(Chain, DL, R.first, R.second, Glue);
+    Glue = Chain.getValue(1);
+  }
+
+  SmallVector<SDValue, 8> Ops(1, Chain);
+  for (auto &R : RegsToPass)
+    Ops.push_back(DAG.getRegister(R.first, R.second.getValueType()));
+
+  const TargetRegisterInfo *TRI = Subtarget.getRegisterInfo();
+  const uint32_t *Mask = TRI->getCallPreservedMask(MF, CLI.CallConv);
+  Ops.push_back(DAG.getRegisterMask(Mask));
+  if (Glue.getNode())
+    Ops.push_back(Glue);
+
+  Chain = DAG.getNode(AlphaISD::CALL, DL, {MVT::Other, MVT::Glue}, Ops);
+  Glue = Chain.getValue(1);
+
+  Chain = DAG.getCALLSEQ_END(Chain, NumBytes, 0, Glue, DL);
+  Glue = Chain.getValue(1);
+
+  // Copy the return values out of $0 / $f0.
+  SmallVector<CCValAssign, 16> RVLocs;
+  CCState RetCCInfo(CLI.CallConv, CLI.IsVarArg, MF, RVLocs, *DAG.getContext());
+  RetCCInfo.AnalyzeCallResult(CLI.Ins, RetCC_Alpha);
+  for (const CCValAssign &VA : RVLocs) {
+    SDValue Val =
+        DAG.getCopyFromReg(Chain, DL, VA.getLocReg(), VA.getLocVT(), Glue);
+    Chain = Val.getValue(1);
+    Glue = Val.getValue(2);
+    InVals.push_back(Val);
+  }
+
+  return Chain;
 }
 
 static const TargetRegisterClass *getRegClassForVT(MVT VT) {

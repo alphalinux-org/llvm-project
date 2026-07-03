@@ -41,3 +41,7 @@ def RetCC_Alpha : CallingConv<[
 // restore because jsr clobbers it.  $15 is the frame pointer when needed.
 def CSR_Alpha : CalleeSavedRegs<(add R9, R10, R11, R12, R13, R14, R15,
                                      F2, F3, F4, F5, F6, F7, F8, F9, R26)>;
+
+// Registers preserved across a call.  A callee does not preserve $26 (jsr
+// overwrites it with the return address), so it is excluded here.
+def CSR_Alpha_Call : CalleeSavedRegs<(sub CSR_Alpha, R26)>;

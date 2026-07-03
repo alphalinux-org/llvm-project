@@ -46,6 +46,11 @@ def AlphaRet : SDNode<"AlphaISD::RET_GLUE", SDTNone,
 // a GP-relative GOT slot resolved by an R_ALPHA_LITERAL relocation.
 def AlphaLiteral : SDNode<"AlphaISD::LITERAL", SDTIntUnaryOp>;
 
+// A call: the callee address is in $27 (pv); $26 receives the return address.
+def AlphaCall : SDNode<"AlphaISD::CALL", SDTNone,
+                       [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
+                        SDNPVariadic]>;
+
 //===----------------------------------------------------------------------===//
 // Operands and immediate predicates.
 //===----------------------------------------------------------------------===//
@@ -309,6 +314,15 @@ def LDQl : AlphaInst<(outs GPRC:$dst), (ins symbol:$sym),
   let Opcode = 0x29;
 }
 def : Pat<(AlphaLiteral tglobaladdr:$sym), (LDQl tglobaladdr:$sym)>;
+
+// Call through the procedure value in $27.  jsr leaves the return address in
+// $26; the following ldgp reloads the caller's global pointer, which the callee
+// may have changed.  $29 is redefined with the caller's gp.
+let isCall = 1, Uses = [R27], Defs = [R26, R29] in
+def JSR : AlphaInst<(outs), (ins), "jsr $$26, ($$27)\n\tldgp $$29, 0($$26)",
+                    [(AlphaCall)]> {
+  let Opcode = 0x1a;
+}
 
 //===----------------------------------------------------------------------===//
 // Integer/floating register moves and conversions.
