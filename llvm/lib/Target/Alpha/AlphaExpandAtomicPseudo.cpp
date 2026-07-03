@@ -73,6 +73,9 @@ private:
   bool expandSubwordRMW(MachineBasicBlock &MBB,
                         MachineBasicBlock::iterator MBBI,
                         MachineBasicBlock::iterator &NextMBBI);
+  bool expandSubwordCmpXchg(MachineBasicBlock &MBB,
+                            MachineBasicBlock::iterator MBBI,
+                            MachineBasicBlock::iterator &NextMBBI);
   bool expandSafeStore(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
                        MachineBasicBlock::iterator &NextMBBI);
 };
@@ -124,6 +127,8 @@ bool AlphaExpandAtomicPseudo::expandMI(MachineBasicBlock &MBB,
     return expandAtomicCmpXchg(MBB, MBBI, NextMBBI);
   case Alpha::ATOMIC_SUBWORD_RMW_LOOP:
     return expandSubwordRMW(MBB, MBBI, NextMBBI);
+  case Alpha::ATOMIC_SUBWORD_CAS_LOOP:
+    return expandSubwordCmpXchg(MBB, MBBI, NextMBBI);
   case Alpha::SAFE_STORE_LOOP:
     return expandSafeStore(MBB, MBBI, NextMBBI);
   }
@@ -342,6 +347,81 @@ bool AlphaExpandAtomicPseudo::expandSubwordRMW(
             .addImm(0);
   addNarrowedMemOperands(MIB, MI, MachineMemOperand::MOStore);
   BuildMI(LoopBB, DL, TII->get(Alpha::BEQ)).addReg(Quad).addMBB(LoopBB);
+
+  NextMBBI = MBB.end();
+  MI.eraseFromParent();
+  addLiveIns(Blocks);
+  return true;
+}
+
+//          bic     Aligned, Addr, 7
+//          zapnot  CmpField, Cmp, mask    ; expected value, field width
+// LoopBB:  ldq_l   Quad, 0(Aligned)
+//          ext     Field, Quad, Addr
+//          sext    Dst, Field
+//          cmpeq   Field, Field, CmpField
+//          beq     Field, ExitBB          ; mismatch: leave Dst, no store
+// StoreBB: msk     Field, Quad, Addr
+//          ins     Quad, New, Addr
+//          bis     Quad, Quad, Field
+//          stq_c   Quad, 0(Aligned)
+//          beq     Quad, LoopBB
+bool AlphaExpandAtomicPseudo::expandSubwordCmpXchg(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
+    MachineBasicBlock::iterator &NextMBBI) {
+  MachineInstr &MI = *MBBI;
+  const DebugLoc &DL = MI.getDebugLoc();
+
+  Register Dst = MI.getOperand(0).getReg();
+  Register Aligned = MI.getOperand(1).getReg();
+  Register CmpField = MI.getOperand(2).getReg();
+  Register Quad = MI.getOperand(3).getReg();
+  Register Field = MI.getOperand(4).getReg();
+  Register Addr = MI.getOperand(5).getReg();
+  Register Cmp = MI.getOperand(6).getReg();
+  Register New = MI.getOperand(7).getReg();
+  bool IsWord = MI.getOperand(8).getImm() != 0;
+  unsigned ExtOpc = IsWord ? Alpha::EXTWL : Alpha::EXTBL;
+  unsigned MskOpc = IsWord ? Alpha::MSKWL : Alpha::MSKBL;
+  unsigned InsOpc = IsWord ? Alpha::INSWL : Alpha::INSBL;
+  unsigned ZapMask = IsWord ? 0x3 : 0x1;
+
+  BuildMI(MBB, MI, DL, TII->get(Alpha::BICi), Aligned).addReg(Addr).addImm(7);
+  BuildMI(MBB, MI, DL, TII->get(Alpha::ZAPNOTi), CmpField)
+      .addReg(Cmp)
+      .addImm(ZapMask);
+
+  SmallVector<MachineBasicBlock *, 3> Blocks;
+  splitBlock(MBB, MI, Blocks, 3);
+  MachineBasicBlock *LoopBB = Blocks[0], *StoreBB = Blocks[1],
+                    *ExitBB = Blocks[2];
+  MBB.addSuccessor(LoopBB);
+  LoopBB->addSuccessor(StoreBB);
+  LoopBB->addSuccessor(ExitBB);
+  StoreBB->addSuccessor(LoopBB);
+  StoreBB->addSuccessor(ExitBB);
+
+  MachineInstrBuilder MIB =
+      BuildMI(LoopBB, DL, TII->get(Alpha::LDQ_L), Quad)
+          .addReg(Aligned)
+          .addImm(0);
+  addNarrowedMemOperands(MIB, MI, MachineMemOperand::MOLoad);
+  BuildMI(LoopBB, DL, TII->get(ExtOpc), Field).addReg(Quad).addReg(Addr);
+  emitSignExtendField(LoopBB, DL, TII, IsWord, Dst, Field);
+  BuildMI(LoopBB, DL, TII->get(Alpha::CMPEQ), Field)
+      .addReg(Field)
+      .addReg(CmpField);
+  BuildMI(LoopBB, DL, TII->get(Alpha::BEQ)).addReg(Field).addMBB(ExitBB);
+
+  BuildMI(StoreBB, DL, TII->get(MskOpc), Field).addReg(Quad).addReg(Addr);
+  BuildMI(StoreBB, DL, TII->get(InsOpc), Quad).addReg(New).addReg(Addr);
+  BuildMI(StoreBB, DL, TII->get(Alpha::BIS), Quad).addReg(Quad).addReg(Field);
+  MIB = BuildMI(StoreBB, DL, TII->get(Alpha::STQ_C), Quad)
+            .addReg(Quad)
+            .addReg(Aligned)
+            .addImm(0);
+  addNarrowedMemOperands(MIB, MI, MachineMemOperand::MOStore);
+  BuildMI(StoreBB, DL, TII->get(Alpha::BEQ)).addReg(Quad).addMBB(LoopBB);
 
   NextMBBI = MBB.end();
   MI.eraseFromParent();

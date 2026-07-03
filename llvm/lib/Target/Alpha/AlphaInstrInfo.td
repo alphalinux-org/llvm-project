@@ -783,22 +783,26 @@ def ATOMIC_XCHG_I8 : AtomicRMW<AtomicI8<atomic_swap>>;
 // Compare-and-swap, also expanded to an ldq_l/stq_c loop.  $dst receives the
 // value read; the caller compares it against $cmp to determine success.
 //
-// The fragment is constrained to a 64-bit access.  An unconstrained
-// atomic_cmp_swap would match a cmpxchg of any width and give an i8, i16 or
-// i32 one this ldq_l/stq_c loop -- the wrong access width and the wrong
-// comparison.  The narrower widths get their own pseudos in later commits.
+// Each fragment is constrained to its access width.  An unconstrained
+// atomic_cmp_swap would match a cmpxchg of any width and give a narrower one
+// the 64-bit ldq_l/stq_c loop -- the wrong access width and the wrong
+// comparison.
+class AtomicCAS<PatFrag node>
+    : AlphaPseudo<(outs GPRC:$dst), (ins GPRC:$addr, GPRC:$cmp, GPRC:$new), "",
+                  [(set i64:$dst, (node iPTR:$addr, i64:$cmp, i64:$new))]> {
+  let usesCustomInserter = 1;
+  let mayLoad = 1;
+  let mayStore = 1;
+}
 class AtomicCASvt<ValueType vt>
     : PatFrag<(ops node:$ptr, node:$cmp, node:$new),
               (atomic_cmp_swap node:$ptr, node:$cmp, node:$new)> {
   let IsAtomic = 1;
   let MemoryVT = vt;
 }
-let usesCustomInserter = 1, mayLoad = 1, mayStore = 1 in
-def ATOMIC_CMPXCHG_I64
-    : AlphaPseudo<(outs GPRC:$dst),
-                  (ins GPRC:$addr, GPRC:$cmp, GPRC:$new), "",
-                  [(set i64:$dst,
-                        (AtomicCASvt<i64> iPTR:$addr, i64:$cmp, i64:$new))]>;
+def ATOMIC_CMPXCHG_I64 : AtomicCAS<AtomicCASvt<i64>>;
+def ATOMIC_CMPXCHG_I16 : AtomicCAS<AtomicCASvt<i16>>;
+def ATOMIC_CMPXCHG_I8  : AtomicCAS<AtomicCASvt<i8>>;
 
 // The ldq_l/stq_c loops themselves.  The pseudos above are what the patterns
 // match; EmitInstrWithCustomInserter rewrites each into one of these, which
@@ -837,6 +841,15 @@ let Size = 44,
 def ATOMIC_SUBWORD_RMW_LOOP
     : AlphaPseudo<(outs GPRC:$dst, GPRC:$t0, GPRC:$t1, GPRC:$t2, GPRC:$t3),
                   (ins GPRC:$addr, GPRC:$val, i64imm:$alu, i64imm:$isword), "",
+                  []>;
+
+// bic and zapnot, then the extract/compare half and the mask/insert/store half.
+let Size = 52,
+    Constraints = "@earlyclobber $dst,@earlyclobber $t0,@earlyclobber $t1,"
+                  "@earlyclobber $t2,@earlyclobber $t3" in
+def ATOMIC_SUBWORD_CAS_LOOP
+    : AlphaPseudo<(outs GPRC:$dst, GPRC:$t0, GPRC:$t1, GPRC:$t2, GPRC:$t3),
+                  (ins GPRC:$addr, GPRC:$cmp, GPRC:$new, i64imm:$isword), "",
                   []>;
 
 // bic and insert, then ldq_l, mask, merge, stq_c and beq.

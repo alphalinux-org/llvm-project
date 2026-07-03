@@ -783,6 +783,14 @@ AlphaTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
     return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_SUBWORD_RMW_LOOP,
                           /*NumScratch=*/4, /*NumDefs=*/1,
                           {0, 1});
+  case Alpha::ATOMIC_CMPXCHG_I8:
+    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_SUBWORD_CAS_LOOP,
+                          /*NumScratch=*/4, /*NumDefs=*/1,
+                          {0});
+  case Alpha::ATOMIC_CMPXCHG_I16:
+    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_SUBWORD_CAS_LOOP,
+                          /*NumScratch=*/4, /*NumDefs=*/1,
+                          {1});
   case Alpha::SAFE_STOREI8:
     return emitAtomicLoop(MI, MBB, Alpha::SAFE_STORE_LOOP,
                           /*NumScratch=*/3, /*NumDefs=*/0,

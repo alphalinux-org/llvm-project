@@ -119,6 +119,13 @@ public:
     return ISD::SIGN_EXTEND;
   }
 
+  // The comparand has to be extended the same way, or the success flag compares
+  // a sign-extended loaded value against an any-extended operand and a negative
+  // narrow comparand never reports success.
+  ISD::NodeType getExtendForAtomicCmpSwapArg() const override {
+    return ISD::SIGN_EXTEND;
+  }
+
   SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
                                bool IsVarArg,
                                const SmallVectorImpl<ISD::InputArg> &Ins,
