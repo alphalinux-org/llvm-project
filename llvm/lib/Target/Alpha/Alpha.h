@@ -21,6 +21,12 @@ namespace llvm {
 
 class AlphaTargetMachine;
 class FunctionPass;
+class PassRegistry;
+
+FunctionPass *createAlphaExpandAtomicPseudo();
+void initializeAlphaExpandAtomicPseudoPass(PassRegistry &);
+FunctionPass *createAlphaVerifyInvariants();
+void initializeAlphaVerifyInvariantsPass(PassRegistry &);
 
 FunctionPass *createAlphaISelDag(AlphaTargetMachine &TM,
                                  CodeGenOptLevel OptLevel);

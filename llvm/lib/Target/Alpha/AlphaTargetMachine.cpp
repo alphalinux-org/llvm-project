@@ -19,6 +19,9 @@ using namespace llvm;
 
 extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeAlphaTarget() {
   RegisterTargetMachine<AlphaTargetMachine> X(getTheAlphaTarget());
+  PassRegistry &PR = *PassRegistry::getPassRegistry();
+  initializeAlphaExpandAtomicPseudoPass(PR);
+  initializeAlphaVerifyInvariantsPass(PR);
 }
 
 static Reloc::Model getEffectiveRelocModel(bool JIT,
@@ -79,6 +82,7 @@ public:
 
   void addIRPasses() override;
   bool addInstSelector() override;
+  void addPreEmitPass2() override;
 };
 } // end anonymous namespace
 
@@ -86,6 +90,22 @@ void AlphaPassConfig::addIRPasses() {
   // Expand atomic operations (inserting the memory barriers this target uses).
   addPass(createAtomicExpandLegacyPass());
   TargetPassConfig::addIRPasses();
+}
+
+void AlphaPassConfig::addPreEmitPass2() {
+  // Build the ldq_l/stq_c loops, as late as the pipeline allows.  The
+  // architecture requires that no memory access appear between the load locked
+  // and the store conditional, and a spill, a reload or a reordering placed
+  // there makes the store conditional fail every time round the loop, so the
+  // expansion has to come after register allocation and the post-RA scheduler
+  // -- and after anything later that could reintroduce one.
+  addPass(createAlphaExpandAtomicPseudo());
+
+  // Last of all, and only when asked for: check the property no test can
+  // observe -- the reservation window this pass just built.  It has to follow
+  // the expansion, because before it the window is a single pseudo and there
+  // is nothing to look inside.
+  addPass(createAlphaVerifyInvariants());
 }
 
 bool AlphaPassConfig::addInstSelector() {

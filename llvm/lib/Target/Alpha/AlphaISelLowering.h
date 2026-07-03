@@ -56,6 +56,13 @@ public:
 
   // Atomic loads/stores are plain aligned accesses; the atomic expander adds
   // memory barriers around the stronger orderings.
+  //
+  // This must keep returning true.  An acquire load lowering to `ldq; mb` is
+  // what makes a plain load that follows one ordered against it, and code that
+  // reads a pointer published by another thread and then dereferences it -- the
+  // openmp runtime's TCR_SYNC_PTR, among others -- relies on that.  Alpha is
+  // the one architecture where such a dependent load is not ordered by the
+  // dependency alone, so a bare `ldq` here would break that code silently.
   bool shouldInsertFencesForAtomic(const Instruction *I) const override {
     return true;
   }
@@ -70,6 +77,30 @@ public:
                                 AtomicOrdering Ord) const override;
   Instruction *emitTrailingFence(IRBuilderBase &Builder, Instruction *Inst,
                                  AtomicOrdering Ord) const override;
+
+  // The read-modify-writes that have an ldq_l/stq_c inserter stay as target
+  // nodes; everything else -- the min/max forms, nand, the floating-point and
+  // wrapping ones -- has no pattern, so let the atomic expander open-code it as
+  // a compare-and-swap loop around the cmpxchg lowering below.
+  AtomicExpansionKind
+  shouldExpandAtomicRMWInIR(const AtomicRMWInst *AI) const override {
+    switch (AI->getOperation()) {
+    case AtomicRMWInst::Xchg:
+    case AtomicRMWInst::Add:
+    case AtomicRMWInst::Sub:
+    case AtomicRMWInst::And:
+    case AtomicRMWInst::Or:
+    case AtomicRMWInst::Xor:
+      return AtomicExpansionKind::None;
+    default:
+      return AtomicExpansionKind::CmpXChg;
+    }
+  }
+
+  AtomicExpansionKind
+  shouldExpandAtomicCmpXchgInIR(const AtomicCmpXchgInst *AI) const override {
+    return AtomicExpansionKind::None;
+  }
 
   SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
                                bool IsVarArg,
