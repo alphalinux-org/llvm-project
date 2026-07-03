@@ -21,9 +21,20 @@ namespace llvm {
 class AlphaSubtarget;
 class AlphaTargetMachine;
 
+namespace AlphaISD {
+enum NodeType : unsigned {
+  FIRST_NUMBER = ISD::BUILTIN_OP_END,
+
+  // Return with a glue-connected chain of copies into the return registers.
+  RET_GLUE,
+};
+} // namespace AlphaISD
+
 class AlphaTargetLowering : public TargetLowering {
 public:
   AlphaTargetLowering(const AlphaTargetMachine &TM, const AlphaSubtarget &STI);
+
+  const char *getTargetNodeName(unsigned Opcode) const override;
 
   SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
                                bool IsVarArg,

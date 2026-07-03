@@ -10,17 +10,24 @@
 //
 //===----------------------------------------------------------------------===//
 
-// Integer args in $16-$21, FP args in $f16-$f21 (register slots are shared),
-// remaining args on the stack in 8-byte slots.
+// Integer args in $16-$21, FP args in $f16-$f21, remaining args on the stack
+// in 8-byte slots.  The six argument slots are shared between the integer and
+// floating registers: the Nth argument uses $16+N or $f16+N by its type, so an
+// integer register and its FP counterpart are allocated together (via a shadow)
+// to keep the slot index in step regardless of the mix of types.
 def CC_Alpha : CallingConv<[
   CCIfType<[i8, i16, i32], CCPromoteToType<i64>>,
-  CCIfType<[i64], CCAssignToReg<[R16, R17, R18, R19, R20, R21]>>,
-  CCIfType<[f32, f64], CCAssignToReg<[F16, F17, F18, F19, F20, F21]>>,
+  CCIfType<[i64], CCAssignToRegWithShadow<[R16, R17, R18, R19, R20, R21],
+                                          [F16, F17, F18, F19, F20, F21]>>,
+  CCIfType<[f32, f64], CCAssignToRegWithShadow<[F16, F17, F18, F19, F20, F21],
+                                               [R16, R17, R18, R19, R20, R21]>>,
   CCIfType<[i64], CCAssignToStack<8, 8>>,
   CCIfType<[f32, f64], CCAssignToStack<8, 8>>
 ]>;
 
-// Return values: integers in $0, floating-point in $f0.
+// Return values: an integer in $0, a floating-point value in $f0.  Anything
+// larger than a register is returned in memory through a hidden pointer, as
+// GCC does, so only one integer return register is available here.
 def RetCC_Alpha : CallingConv<[
   CCIfType<[i8, i16, i32], CCPromoteToType<i64>>,
   CCIfType<[i64], CCAssignToReg<[R0]>>,
