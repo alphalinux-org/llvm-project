@@ -10,12 +10,20 @@
 ; LARGE:       ldq $0, g($29){{.*}}!literal
 ; LARGE:       ldq $0, 0($0)
 
-; With small-data the address is formed GP-relative.
+; With small-data the address is formed GP-relative and the !gprellow low part
+; is folded into the load.
 ; SMALL-LABEL: get:
 ; SMALL:       ldah $0, g($29){{.*}}!gprelhigh
-; SMALL:       lda $0, g($0){{.*}}!gprellow
-; SMALL:       ldq $0, 0($0)
+; SMALL:       ldq $0, g($0){{.*}}!gprellow
 define i64 @get() {
   %v = load i64, ptr @g
   ret i64 %v
+}
+
+; SMALL-LABEL: set:
+; SMALL:       ldah $0, g($29){{.*}}!gprelhigh
+; SMALL:       stq $16, g($0){{.*}}!gprellow
+define void @set(i64 %x) {
+  store i64 %x, ptr @g
+  ret void
 }

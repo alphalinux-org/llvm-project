@@ -380,17 +380,42 @@ def LDTg : AlphaInst<(outs FPRC:$Ra), (ins symbol:$sym, GPRC:$base),
 def LDSg : AlphaInst<(outs FPRC:$Ra), (ins symbol:$sym, GPRC:$base),
                      "lds $Ra, $sym($base)\t\t!gprellow", []> { let Opcode = 0x22; }
 }
+// The corresponding stores, used for small-data globals.
+let mayStore = 1, hasSideEffects = 0 in {
+def STLg : AlphaInst<(outs), (ins GPRC:$Ra, symbol:$sym, GPRC:$base),
+                     "stl $Ra, $sym($base)\t\t!gprellow", []> { let Opcode = 0x2c; }
+def STQg : AlphaInst<(outs), (ins GPRC:$Ra, symbol:$sym, GPRC:$base),
+                     "stq $Ra, $sym($base)\t\t!gprellow", []> { let Opcode = 0x2d; }
+def STTg : AlphaInst<(outs), (ins FPRC:$Ra, symbol:$sym, GPRC:$base),
+                     "stt $Ra, $sym($base)\t\t!gprellow", []> { let Opcode = 0x27; }
+def STSg : AlphaInst<(outs), (ins FPRC:$Ra, symbol:$sym, GPRC:$base),
+                     "sts $Ra, $sym($base)\t\t!gprellow", []> { let Opcode = 0x26; }
+}
+// Fold the !gprellow low part into the load/store for constant pools and (with
+// small-data) globals.
+multiclass GprelFold<SDNode sym> {
+def : Pat<(i64 (sextloadi32 (AlphaGprelLo sym:$s, GPRC:$b))),
+          (LDLg sym:$s, GPRC:$b)>;
+def : Pat<(i64 (load (AlphaGprelLo sym:$s, GPRC:$b))),
+          (LDQg sym:$s, GPRC:$b)>;
+def : Pat<(f64 (load (AlphaGprelLo sym:$s, GPRC:$b))),
+          (LDTg sym:$s, GPRC:$b)>;
+def : Pat<(f32 (load (AlphaGprelLo sym:$s, GPRC:$b))),
+          (LDSg sym:$s, GPRC:$b)>;
+def : Pat<(f64 (extloadf32 (AlphaGprelLo sym:$s, GPRC:$b))),
+          (CVTST (LDSg sym:$s, GPRC:$b))>;
+def : Pat<(truncstorei32 GPRC:$v, (AlphaGprelLo sym:$s, GPRC:$b)),
+          (STLg GPRC:$v, sym:$s, GPRC:$b)>;
+def : Pat<(store GPRC:$v, (AlphaGprelLo sym:$s, GPRC:$b)),
+          (STQg GPRC:$v, sym:$s, GPRC:$b)>;
+def : Pat<(store f64:$v, (AlphaGprelLo sym:$s, GPRC:$b)),
+          (STTg FPRC:$v, sym:$s, GPRC:$b)>;
+def : Pat<(store f32:$v, (AlphaGprelLo sym:$s, GPRC:$b)),
+          (STSg FPRC:$v, sym:$s, GPRC:$b)>;
+}
 let AddedComplexity = 20 in {
-def : Pat<(i64 (sextloadi32 (AlphaGprelLo tconstpool:$s, GPRC:$b))),
-          (LDLg tconstpool:$s, GPRC:$b)>;
-def : Pat<(i64 (load (AlphaGprelLo tconstpool:$s, GPRC:$b))),
-          (LDQg tconstpool:$s, GPRC:$b)>;
-def : Pat<(f64 (load (AlphaGprelLo tconstpool:$s, GPRC:$b))),
-          (LDTg tconstpool:$s, GPRC:$b)>;
-def : Pat<(f32 (load (AlphaGprelLo tconstpool:$s, GPRC:$b))),
-          (LDSg tconstpool:$s, GPRC:$b)>;
-def : Pat<(f64 (extloadf32 (AlphaGprelLo tconstpool:$s, GPRC:$b))),
-          (CVTST (LDSg tconstpool:$s, GPRC:$b))>;
+defm : GprelFold<tconstpool>;
+defm : GprelFold<tglobaladdr>;
 }
 
 // Call through the procedure value in $27.  jsr leaves the return address in
