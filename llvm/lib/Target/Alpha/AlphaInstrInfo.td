@@ -107,6 +107,21 @@ def gprellow_sym : SymOperand<"getGprelLowEncoding">;
 // Retained alias so existing definitions read naturally.
 def symbol : SymOperand<"getGprelLowEncoding">;
 
+// A register printed inside parentheses, `($reg)`, as used by the jsr/jmp/ldq_u
+// address forms.  Written this way (rather than literal parens in the asm
+// string) so the instructions stay in the assembler matcher and disassembler.
+def parenGPR : RegisterOperand<GPRC> {
+  let PrintMethod = "printParenReg";
+  let DecoderMethod = "DecodeGPRCRegisterClass";
+}
+
+// The base register of ldq_u/stq_u, printed `0($reg)`: unlike jsr/jmp, the
+// assembler requires an explicit displacement on these memory forms.
+def memzGPR : RegisterOperand<GPRC> {
+  let PrintMethod = "printZeroDispReg";
+  let DecoderMethod = "DecodeGPRCRegisterClass";
+}
+
 def ADDRri : ComplexPattern<i64, 2, "SelectADDRri", [frameindex]>;
 
 // Match any address as a single register (used by the pre-BWX byte/word access
@@ -513,16 +528,16 @@ def JSR : MbrForm<0b01, (outs), (ins), "jsr $$26, ($$27)\n\tldgp $$29, 0($$26)",
   let Rb = 27;
 }
 
-// A bare jsr word (no ldgp reload); emitted by the assembler when it parses
-// `jsr $Ra, ($Rb)`.  Kept out of the matcher (the parser handles it specially).
-let isCall = 1, isCodeGenOnly = 1 in
-def JSRasm : MbrForm<0b01, (outs), (ins GPRC:$Ra, GPRC:$Rb),
-                     "jsr $Ra, ($Rb)", []>;
+// A bare jsr word (no ldgp reload); the assembler emits it for `jsr $Ra, ($Rb)`
+// and the disassembler decodes a jsr word with no branch-prediction hint to it.
+let isCall = 1 in
+def JSRr : MbrForm<0b01, (outs), (ins GPRC:$Ra, parenGPR:$Rb),
+                   "jsr $Ra, $Rb", []>;
 
 // Division millicode call: enter __divq etc. through $23; the routine preserves
 // all but a handful of registers, so no ldgp reload is needed afterwards.
 let isCall = 1, Uses = [R24, R25, R27],
-    Defs = [R23, R24, R25, R27, R28] in
+    Defs = [R23, R24, R25, R27, R28], isCodeGenOnly = 1 in
 def DIVCALL : MbrForm<0b01, (outs), (ins), "jsr $$23, ($$27)", [(AlphaDivCall)]> {
   let Ra = 23;
   let Rb = 27;
@@ -654,9 +669,9 @@ def : Pat<(i64 (extloadi16 ADDRri:$addr)), (LDWU memri:$addr)>;
 // word at the position given by the low address bits, zero-extended.
 // ldq_u/stq_u take a base register with an implicit zero displacement; the CPU
 // ignores the low three address bits.
-let mayLoad = 1, hasSideEffects = 0, isCodeGenOnly = 1 in
-def LDQ_U : MFormZ<0x0b, (outs GPRC:$Ra), (ins GPRC:$base),
-                   "ldq_u $Ra, 0($base)", []>;
+let mayLoad = 1, hasSideEffects = 0 in
+def LDQ_U : MFormZ<0x0b, (outs GPRC:$Ra), (ins memzGPR:$base),
+                   "ldq_u $Ra, $base", []>;
 let hasSideEffects = 0 in {
 def EXTBL : OForm<0x12, 0x06, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
                   "extbl $Ra, $Rb, $Rc", []>;
@@ -685,9 +700,9 @@ def MSKBL : OForm<0x12, 0x02, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
 def MSKWL : OForm<0x12, 0x12, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
                   "mskwl $Ra, $Rb, $Rc", []>;
 }
-let mayStore = 1, hasSideEffects = 0, isCodeGenOnly = 1 in
-def STQ_U : MFormZ<0x0f, (outs), (ins GPRC:$Ra, GPRC:$base),
-                   "stq_u $Ra, 0($base)", []>;
+let mayStore = 1, hasSideEffects = 0 in
+def STQ_U : MFormZ<0x0f, (outs), (ins GPRC:$Ra, memzGPR:$base),
+                   "stq_u $Ra, $base", []>;
 // bic with an 8-bit literal, used to align an address down to a quadword.
 let hasSideEffects = 0 in
 def BICi : OFormL<0x11, 0x08, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
@@ -944,6 +959,6 @@ def BNE : BForm<0x3d, (outs), (ins GPRC:$Ra, brtarget:$target),
 
 // Indirect branch through a register (used for jump tables).
 let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1,
-    Ra = 31, isCodeGenOnly = 1 in
-def JMP : MbrForm<0b00, (outs), (ins GPRC:$Rb), "jmp $$31, ($Rb), 0",
-                  [(brind GPRC:$Rb)]>;
+    Ra = 31 in
+def JMP : MbrForm<0b00, (outs), (ins parenGPR:$Rb), "jmp $$31, $Rb, 0", []>;
+def : Pat<(brind GPRC:$r), (JMP GPRC:$r)>;

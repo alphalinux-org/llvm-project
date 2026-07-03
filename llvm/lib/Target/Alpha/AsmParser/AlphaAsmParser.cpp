@@ -369,7 +369,7 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   // jsr $Ra, ($Rb): emit the bare jsr word.
   if (Mnemonic == "jsr" && Operands.size() == 3) {
     MCInst Inst;
-    Inst.setOpcode(Alpha::JSRasm);
+    Inst.setOpcode(Alpha::JSRr);
     Inst.addOperand(MCOperand::createReg(
         static_cast<AlphaOperand &>(*Operands[1]).getReg()));
     Inst.addOperand(MCOperand::createReg(
