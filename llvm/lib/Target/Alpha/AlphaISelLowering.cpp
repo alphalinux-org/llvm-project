@@ -81,6 +81,11 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   for (auto Op : {ISD::SDIV, ISD::UDIV, ISD::SREM, ISD::UREM})
     setOperationAction(Op, MVT::i64, Custom);
 
+  // The CIX extension (ev67) provides population/leading/trailing zero counts;
+  // otherwise they are expanded to bit-twiddling sequences.
+  for (auto Op : {ISD::CTPOP, ISD::CTLZ, ISD::CTTZ})
+    setOperationAction(Op, MVT::i64, STI.hasCIX() ? Legal : Expand);
+
   // Only the ordered floating-point comparisons have direct instructions; the
   // rest are expanded into combinations of them.  SETNE belongs here too: the
   // NaN-agnostic codes otherwise map straight onto cmpteq/cmptlt/cmptle, but
