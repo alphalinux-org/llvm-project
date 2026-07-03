@@ -43,6 +43,16 @@ def AlphaRet : SDNode<"AlphaISD::RET_GLUE", SDTNone,
                       [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 
 //===----------------------------------------------------------------------===//
+// Operands and immediate predicates.
+//===----------------------------------------------------------------------===//
+
+// A 16-bit signed displacement, as used by the memory-format instructions.
+def s16imm : Operand<i64>;
+
+// An immediate that fits in the 16-bit signed displacement of `lda`.
+def immSExt16 : ImmLeaf<i64, [{ return isInt<16>(Imm); }]>;
+
+//===----------------------------------------------------------------------===//
 // Instructions.
 //===----------------------------------------------------------------------===//
 
@@ -79,7 +89,15 @@ def CPYS : AlphaInst<(outs FPRC:$Rc), (ins FPRC:$Ra, FPRC:$Rb),
   let Opcode = 0x17;
 }
 
+// Load address: `lda $Rc, $disp($Rb)` computes $Rc = $Rb + sign_ext($disp).
+// With $Rb = $31 (zero) this materializes a 16-bit signed constant.
+def LDA : MFormD<0x08, (outs GPRC:$Ra), (ins s16imm:$disp, GPRC:$Rb),
+                    "lda $Ra, $disp($Rb)", []>;
+
 } // hasSideEffects = 0, mayLoad = 0, mayStore = 0
+
+// Materialize a small signed constant with `lda $Rc, imm($31)`.
+def : Pat<(i64 immSExt16:$imm), (LDA immSExt16:$imm, R31)>;
 
 // Subroutine return: `ret $31, ($26), 1`.
 // $26 is not listed as a use: the epilogue reloads it as a frame-destroy
