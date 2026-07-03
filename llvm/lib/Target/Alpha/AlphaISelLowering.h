@@ -52,6 +52,11 @@ public:
 
   const char *getTargetNodeName(unsigned Opcode) const override;
 
+  // Inline assembly: "r" selects an integer register.
+  std::pair<unsigned, const TargetRegisterClass *>
+  getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
+                               StringRef Constraint, MVT VT) const override;
+
   // Jump-table entries are absolute 64-bit block addresses.
   unsigned getJumpTableEncoding() const override {
     return MachineJumpTableInfo::EK_BlockAddress;
