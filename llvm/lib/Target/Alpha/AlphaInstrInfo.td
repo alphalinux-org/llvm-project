@@ -52,6 +52,9 @@ def s16imm : Operand<i64>;
 // An immediate that fits in the 16-bit signed displacement of `lda`.
 def immSExt16 : ImmLeaf<i64, [{ return isInt<16>(Imm); }]>;
 
+// An 8-bit unsigned literal, as used by operate instructions in literal form.
+def u8imm : Operand<i64>;
+
 // A memory address: base register plus 16-bit signed displacement, printed as
 // `disp($base)`.
 def memri : Operand<i64> {
@@ -91,6 +94,11 @@ def XOR  : ALU_rr<0x11, 0x40, "xor",  xor>;
 def SLL : ALU_rr<0x12, 0x39, "sll", shl>;
 def SRL : ALU_rr<0x12, 0x34, "srl", srl>;
 def SRA : ALU_rr<0x12, 0x3c, "sra", sra>;
+
+// `zapnot $Ra, lit, $Rc` keeps the bytes of $Ra selected by the 8-bit mask and
+// zeroes the rest.  It provides byte-granular zero-extension.
+def ZAPNOTi : OFormL<0x12, 0x31, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
+                        "zapnot $Ra, $lit, $Rc", []>;
 
 // Comparisons write 0 or 1 into $Rc (Alpha has no condition-code register).
 class CMP_rr<bits<7> func, string mnem>
@@ -176,6 +184,13 @@ def LDAH : MFormD<0x09, (outs GPRC:$Ra), (ins s16imm:$disp, GPRC:$Rb),
 
 // Materialize a small signed constant with `lda $Rc, imm($31)`.
 def : Pat<(i64 immSExt16:$imm), (LDA immSExt16:$imm, R31)>;
+
+// Zero-extension of the low 1/2/4 bytes via zapnot (the byte mask keeps the
+// low N bytes).  This also lets `and` with these masks avoid materializing a
+// wide constant.
+def : Pat<(and GPRC:$x, 0xff),       (ZAPNOTi GPRC:$x, 1)>;
+def : Pat<(and GPRC:$x, 0xffff),     (ZAPNOTi GPRC:$x, 3)>;
+def : Pat<(and GPRC:$x, 0xffffffff), (ZAPNOTi GPRC:$x, 15)>;
 
 // setcc.  Conditions without a direct instruction are formed by swapping the
 // operands (gt/ge) or inverting equality (ne).
