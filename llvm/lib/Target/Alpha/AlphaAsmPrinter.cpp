@@ -73,6 +73,9 @@ MCOperand AlphaAsmPrinter::lowerOperand(const MachineOperand &MO) const {
   case MachineOperand::MO_ConstantPoolIndex:
     return MCOperand::createExpr(
         MCSymbolRefExpr::create(GetCPISymbol(MO.getIndex()), OutContext));
+  case MachineOperand::MO_JumpTableIndex:
+    return MCOperand::createExpr(
+        MCSymbolRefExpr::create(GetJTISymbol(MO.getIndex()), OutContext));
   case MachineOperand::MO_ExternalSymbol:
     return MCOperand::createExpr(MCSymbolRefExpr::create(
         GetExternalSymbolSymbol(MO.getSymbolName()), OutContext));
