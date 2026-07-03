@@ -55,6 +55,10 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   setOperationAction(ISD::GlobalAddress, MVT::i64, Custom);
   setOperationAction(ISD::ConstantPool, MVT::i64, Custom);
 
+  // Unsigned integer/floating conversions expand through the signed ones.
+  setOperationAction(ISD::UINT_TO_FP, MVT::i64, Expand);
+  setOperationAction(ISD::FP_TO_UINT, MVT::i64, Expand);
+
   // Only the ordered floating-point comparisons have direct instructions; the
   // rest are expanded into combinations of them.  SETNE belongs here too: the
   // NaN-agnostic codes otherwise map straight onto cmpteq/cmptlt/cmptle, but
