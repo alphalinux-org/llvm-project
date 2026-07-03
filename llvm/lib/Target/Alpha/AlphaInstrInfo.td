@@ -151,34 +151,68 @@ def CMOVNE : OForm<0x11, 0x26, (outs GPRC:$Rc),
 // `bis $31, $Rb, $Rc` to move an integer register.
 def BIS : ALU_rr<0x11, 0x20, "bis", or>;
 
+// Logical operations with a complemented second operand.  These fold a `not`
+// (xor with -1) into a single instruction.
+def BIC   : OForm<0x11, 0x08, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                  "bic $Ra, $Rb, $Rc",
+                  [(set i64:$Rc, (and i64:$Ra, (not i64:$Rb)))]>;
+def ORNOT : OForm<0x11, 0x28, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                  "ornot $Ra, $Rb, $Rc",
+                  [(set i64:$Rc, (or i64:$Ra, (not i64:$Rb)))]>;
+def EQV   : OForm<0x11, 0x48, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                  "eqv $Ra, $Rb, $Rc",
+                  [(set i64:$Rc, (xor i64:$Ra, (not i64:$Rb)))]>;
+
 // Floating-point copy-sign: `cpys $Ra, $Rb, $Rc` builds the sign of $Ra with
 // the magnitude of $Rb.  Used by copyPhysReg as `cpys $Rb, $Rb, $Rc` to move a
 // floating-point register.
-def CPYS : AlphaInst<(outs FPRC:$Rc), (ins FPRC:$Ra, FPRC:$Rb),
-                     "cpys $Ra, $Rb, $Rc", []> {
-  let Opcode = 0x17;
-}
+def CPYS : FForm<0x17, 0x020, (outs FPRC:$Rc), (ins FPRC:$Ra, FPRC:$Rb),
+                 "cpys $Ra, $Rb, $Rc", []>;
 
 // Sign manipulation, built from cpys/cpysn.  Each is defined per floating-point
 // type so the result type is unambiguous.  fabs uses the (positive) sign of
 // $f31; fneg uses the negated sign of the source; fcopysign takes the magnitude
-// of $Ra and the sign of $Rb.
-let Opcode = 0x17 in {
-def FABSS : AlphaInst<(outs FPRC:$Rc), (ins FPRC:$Rb), "cpys $$f31, $Rb, $Rc",
-                      [(set f32:$Rc, (fabs f32:$Rb))]>;
-def FABST : AlphaInst<(outs FPRC:$Rc), (ins FPRC:$Rb), "cpys $$f31, $Rb, $Rc",
-                      [(set f64:$Rc, (fabs f64:$Rb))]>;
-def FNEGS : AlphaInst<(outs FPRC:$Rc), (ins FPRC:$Rb), "cpysn $Rb, $Rb, $Rc",
-                      [(set f32:$Rc, (fneg f32:$Rb))]>;
-def FNEGT : AlphaInst<(outs FPRC:$Rc), (ins FPRC:$Rb), "cpysn $Rb, $Rb, $Rc",
-                      [(set f64:$Rc, (fneg f64:$Rb))]>;
-def FCPYSS : AlphaInst<(outs FPRC:$Rc), (ins FPRC:$Ra, FPRC:$Rb),
-                       "cpys $Rb, $Ra, $Rc",
-                       [(set f32:$Rc, (fcopysign f32:$Ra, f32:$Rb))]>;
-def FCPYST : AlphaInst<(outs FPRC:$Rc), (ins FPRC:$Ra, FPRC:$Rb),
-                       "cpys $Rb, $Ra, $Rc",
-                       [(set f64:$Rc, (fcopysign f64:$Ra, f64:$Rb))]>;
+// of $Ra and the sign of $Rb.  The encodings are written out because Fa/Fb are
+// hardcoded ($f31), duplicated or swapped relative to the operand list.
+class FSign<bits<11> func, dag ins, string asmstr, list<dag> pattern>
+    : AlphaInst<(outs FPRC:$Rc), ins, asmstr, pattern> {
+  bits<5> fa;
+  bits<5> fb;
+  bits<5> Rc;
+  let Opcode = 0x17;
+  let Inst{25-21} = fa;
+  let Inst{20-16} = fb;
+  let Inst{15-5} = func;
+  let Inst{4-0} = Rc;
 }
+// fabs: cpys $f31, Rb, Rc.
+class FAbs<list<dag> pat> : FSign<0x020, (ins FPRC:$Rb), "cpys $$f31, $Rb, $Rc",
+                                  pat> {
+  bits<5> Rb;
+  let fa = 31;
+  let fb = Rb;
+}
+def FABSS : FAbs<[(set f32:$Rc, (fabs f32:$Rb))]>;
+def FABST : FAbs<[(set f64:$Rc, (fabs f64:$Rb))]>;
+// fneg: cpysn Rb, Rb, Rc.
+class FNeg<list<dag> pat> : FSign<0x021, (ins FPRC:$Rb), "cpysn $Rb, $Rb, $Rc",
+                                  pat> {
+  bits<5> Rb;
+  let fa = Rb;
+  let fb = Rb;
+}
+def FNEGS : FNeg<[(set f32:$Rc, (fneg f32:$Rb))]>;
+def FNEGT : FNeg<[(set f64:$Rc, (fneg f64:$Rb))]>;
+// fcopysign: cpys Rb, Ra, Rc (sign of Rb, magnitude of Ra).
+class FCpys<list<dag> pat>
+    : FSign<0x020, (ins FPRC:$Ra, FPRC:$Rb), "cpys $Rb, $Ra, $Rc", pat> {
+  bits<5> Ra;
+  bits<5> Rb;
+  let fa = Rb;
+  let fb = Ra;
+}
+def FCPYSS : FCpys<[(set f32:$Rc, (fcopysign f32:$Ra, f32:$Rb))]>;
+def FCPYST : FCpys<[(set f64:$Rc, (fcopysign f64:$Ra, f64:$Rb))]>;
 
 // IEEE floating-point operate instruction: `<mnem> $Ra, $Rb, $Rc`.  The `s`
 // forms operate on S_floating (f32), the `t` forms on T_floating (f64).
@@ -240,6 +274,9 @@ def LDAH : MFormD<0x09, (outs GPRC:$Ra), (ins s16imm:$disp, GPRC:$Rb),
 
 // Materialize a small signed constant with `lda $Rc, imm($31)`.
 def : Pat<(i64 immSExt16:$imm), (LDA immSExt16:$imm, R31)>;
+
+// `not $x` is `ornot $31, $x` (0 OR ~x), avoiding an explicit -1.
+def : Pat<(not GPRC:$x), (ORNOT R31, GPRC:$x)>;
 
 //===----------------------------------------------------------------------===//
 // Integer/floating register moves and conversions.
