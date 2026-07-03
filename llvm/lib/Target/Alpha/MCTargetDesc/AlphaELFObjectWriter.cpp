@@ -31,9 +31,9 @@ protected:
                         bool IsPCRel) const override {
     switch (unsigned(Fixup.getKind())) {
     case FK_Data_4:
-      return ELF::R_ALPHA_REFLONG;
+      return IsPCRel ? ELF::R_ALPHA_SREL32 : ELF::R_ALPHA_REFLONG;
     case FK_Data_8:
-      return ELF::R_ALPHA_REFQUAD;
+      return IsPCRel ? ELF::R_ALPHA_SREL64 : ELF::R_ALPHA_REFQUAD;
     case Alpha::fixup_alpha_braddr:
       return ELF::R_ALPHA_BRADDR;
     case Alpha::fixup_alpha_literal:
@@ -42,6 +42,8 @@ protected:
       return ELF::R_ALPHA_GPRELHIGH;
     case Alpha::fixup_alpha_gprellow:
       return ELF::R_ALPHA_GPRELLOW;
+    case Alpha::fixup_alpha_gpdisp:
+      return ELF::R_ALPHA_GPDISP;
     default:
       reportError(Fixup.getLoc(), "unsupported relocation type");
       return ELF::R_ALPHA_NONE;
