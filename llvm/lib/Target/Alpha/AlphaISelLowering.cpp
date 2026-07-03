@@ -18,6 +18,8 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
+#include "llvm/IR/GlobalIFunc.h"
+#include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/Support/ErrorHandling.h"
 
@@ -199,6 +201,26 @@ SDValue AlphaTargetLowering::LowerDivRem(SDValue Op, SelectionDAG &DAG) const {
   return DAG.getCopyFromReg(Chain, DL, Alpha::R27, MVT::i64, Glue);
 }
 
+// Whether a global's address can be computed from the global pointer instead
+// of being loaded from the GOT.  A gp-relative address is an ldah/lda pair
+// covering a signed 32-bit displacement, which reaches anywhere in the data
+// segment, so the only question is whether the linker will let this reference
+// see the definition's own address.  This mirrors gcc's local_symbolic_operand.
+static bool isGprelAddressable(const GlobalValue &GV) {
+  // A preemptible symbol's address is whatever the dynamic linker picks.
+  if (!GV.isDSOLocal())
+    return false;
+  // An undefined weak symbol has to read as zero, and an ifunc's address is the
+  // one its resolver returned; both of those the GOT entry supplies.
+  if (GV.hasExternalWeakLinkage() || isa<GlobalIFunc>(GV))
+    return false;
+  // An absolute symbol is not in the data segment and has no gp offset.
+  if (const auto *Var = dyn_cast<GlobalVariable>(&GV))
+    if (Var->isAbsoluteSymbolRef())
+      return false;
+  return true;
+}
+
 SDValue AlphaTargetLowering::LowerGlobalAddress(SDValue Op,
                                                 SelectionDAG &DAG) const {
   // Loading a global's address establishes and uses the global pointer.
@@ -208,6 +230,18 @@ SDValue AlphaTargetLowering::LowerGlobalAddress(SDValue Op,
   SDLoc DL(Op);
   SDValue TGA =
       DAG.getTargetGlobalAddress(N->getGlobal(), DL, MVT::i64, N->getOffset());
+
+  // A global the linker resolves itself is a fixed distance from the global
+  // pointer, so form the address GP-relative (ldah/lda !gprelhigh/!gprellow)
+  // rather than loading it from the GOT.  Only a symbol the GOT entry itself
+  // has to answer for stays there.  This is not just a saving of one
+  // instruction: a gp reaches 64KB of GOT, i.e. 8192 entries, and spending one
+  // on every local string constant overflows that on a large link.
+  if (isGprelAddressable(*N->getGlobal())) {
+    SDValue GP = DAG.getRegister(Alpha::R29, MVT::i64);
+    SDValue Hi = DAG.getNode(AlphaISD::GPREL_HI, DL, MVT::i64, TGA, GP);
+    return DAG.getNode(AlphaISD::GPREL_LO, DL, MVT::i64, TGA, Hi);
+  }
   return DAG.getNode(AlphaISD::LITERAL, DL, MVT::i64, TGA);
 }
 
