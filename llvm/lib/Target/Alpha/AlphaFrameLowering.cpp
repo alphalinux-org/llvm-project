@@ -7,9 +7,12 @@
 //===----------------------------------------------------------------------===//
 
 #include "AlphaFrameLowering.h"
+#include "AlphaInstrInfo.h"
 #include "AlphaSubtarget.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/Support/ErrorHandling.h"
 
 using namespace llvm;
 
@@ -17,11 +20,37 @@ AlphaFrameLowering::AlphaFrameLowering(const AlphaSubtarget &STI)
     : TargetFrameLowering(StackGrowsDown, Align(16), /*LocalAreaOffset=*/0,
                           Align(16)) {}
 
+// Adjust the stack pointer by Amount using `lda $sp, Amount($sp)`.  Amount must
+// fit in the 16-bit signed displacement; larger frames are not handled yet.
+static void adjustStack(MachineBasicBlock &MBB,
+                        MachineBasicBlock::iterator MBBI, const DebugLoc &DL,
+                        const AlphaInstrInfo &TII, int64_t Amount) {
+  if (Amount == 0)
+    return;
+  if (!isInt<16>(Amount))
+    report_fatal_error("Alpha stack frame larger than 32KiB is not supported");
+  BuildMI(MBB, MBBI, DL, TII.get(Alpha::LDA), Alpha::R30)
+      .addImm(Amount)
+      .addReg(Alpha::R30);
+}
+
 void AlphaFrameLowering::emitPrologue(MachineFunction &MF,
-                                      MachineBasicBlock &MBB) const {}
+                                      MachineBasicBlock &MBB) const {
+  const AlphaInstrInfo &TII = *MF.getSubtarget<AlphaSubtarget>().getInstrInfo();
+  uint64_t StackSize = MF.getFrameInfo().getStackSize();
+  MachineBasicBlock::iterator MBBI = MBB.begin();
+  DebugLoc DL;
+  adjustStack(MBB, MBBI, DL, TII, -(int64_t)StackSize);
+}
 
 void AlphaFrameLowering::emitEpilogue(MachineFunction &MF,
-                                      MachineBasicBlock &MBB) const {}
+                                      MachineBasicBlock &MBB) const {
+  const AlphaInstrInfo &TII = *MF.getSubtarget<AlphaSubtarget>().getInstrInfo();
+  uint64_t StackSize = MF.getFrameInfo().getStackSize();
+  MachineBasicBlock::iterator MBBI = MBB.getFirstTerminator();
+  DebugLoc DL = MBBI != MBB.end() ? MBBI->getDebugLoc() : DebugLoc();
+  adjustStack(MBB, MBBI, DL, TII, StackSize);
+}
 
 bool AlphaFrameLowering::hasFPImpl(const MachineFunction &MF) const {
   return MF.getFrameInfo().hasVarSizedObjects();

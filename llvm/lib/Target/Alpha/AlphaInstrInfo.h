@@ -14,6 +14,8 @@
 #define LLVM_LIB_TARGET_ALPHA_ALPHAINSTRINFO_H
 
 #include "AlphaRegisterInfo.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 
 #define GET_INSTRINFO_HEADER
@@ -22,6 +24,13 @@
 namespace llvm {
 
 class AlphaSubtarget;
+
+// Give an instruction built out of MI's expansion the memory operands MI
+// carried, narrowed to the half of the access it performs.  A read-modify-write
+// pseudo claims both a load and a store; the verifier rejects a load handed an
+// operand that claims a store, and the other way round.
+void addNarrowedMemOperands(MachineInstrBuilder MIB, const MachineInstr &MI,
+                            MachineMemOperand::Flags Half);
 
 class AlphaInstrInfo : public AlphaGenInstrInfo {
   const AlphaRegisterInfo RI;
@@ -35,6 +44,17 @@ public:
                    const DebugLoc &DL, Register DestReg, Register SrcReg,
                    bool KillSrc, bool RenamableDest = false,
                    bool RenamableSrc = false) const override;
+
+  void storeRegToStackSlot(
+      MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, Register SrcReg,
+      bool isKill, int FrameIndex, const TargetRegisterClass *RC, Register VReg,
+      MachineInstr::MIFlag Flags = MachineInstr::NoFlags) const override;
+
+  void loadRegFromStackSlot(
+      MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
+      Register DestReg, int FrameIndex, const TargetRegisterClass *RC,
+      Register VReg, unsigned SubReg = 0,
+      MachineInstr::MIFlag Flags = MachineInstr::NoFlags) const override;
 };
 
 } // end namespace llvm

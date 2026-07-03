@@ -36,7 +36,8 @@ def RetCC_Alpha : CallingConv<[
   CCIfType<[f32, f64], CCAssignToReg<[F0, F1]>>
 ]>;
 
-// Callee-saved integer registers ($9-$15) and floating-point registers
-// ($f2-$f9).  $15 is the frame pointer when one is needed.
+// Registers preserved across a function (callee-saved): $9-$15, $f2-$f9, and
+// the return address $26, which a function that makes calls must save and
+// restore because jsr clobbers it.  $15 is the frame pointer when needed.
 def CSR_Alpha : CalleeSavedRegs<(add R9, R10, R11, R12, R13, R14, R15,
-                                     F2, F3, F4, F5, F6, F7, F8, F9)>;
+                                     F2, F3, F4, F5, F6, F7, F8, F9, R26)>;
