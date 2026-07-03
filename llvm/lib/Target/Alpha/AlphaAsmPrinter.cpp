@@ -54,6 +54,8 @@ MCOperand AlphaAsmPrinter::lowerOperand(const MachineOperand &MO) const {
     if (MO.isImplicit())
       return MCOperand();
     return MCOperand::createReg(MO.getReg());
+  case MachineOperand::MO_RegisterMask:
+    return MCOperand();
   case MachineOperand::MO_Immediate:
     return MCOperand::createImm(MO.getImm());
   case MachineOperand::MO_MachineBasicBlock:
