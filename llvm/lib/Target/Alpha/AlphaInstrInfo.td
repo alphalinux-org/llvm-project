@@ -224,6 +224,16 @@ def MULT : FP_rr<0x0a2,"mult", f64, fmul>;
 def DIVS : FP_rr<0x083,"divs", f32, fdiv>;
 def DIVT : FP_rr<0x0a3,"divt", f64, fdiv>;
 
+// Floating-point comparisons write 2.0 (true) or 0.0 (false) into an FP
+// register.  They operate on the T_floating register format, which both f32 and
+// f64 values use, so the same instructions serve both.
+class CMPT_rr<bits<11> func, string mnem>
+    : FForm<0x16, func, (outs FPRC:$Rc), (ins FPRC:$Ra, FPRC:$Rb),
+            mnem # " $Ra, $Rb, $Rc", []>;
+def CMPTEQ : CMPT_rr<0x0a5,"cmpteq">;
+def CMPTLT : CMPT_rr<0x0a6,"cmptlt">;
+def CMPTLE : CMPT_rr<0x0a7,"cmptle">;
+
 // Precision conversions between S_floating (f32) and T_floating (f64).  Both
 // stay in floating-point registers.
 def CVTST : AlphaInst<(outs FPRC:$Fc), (ins FPRC:$Fb), "cvtst $Fb, $Fc",
@@ -360,6 +370,20 @@ def : Pat<(setcc GPRC:$a, GPRC:$b, SETULT), (CMPULT GPRC:$a, GPRC:$b)>;
 def : Pat<(setcc GPRC:$a, GPRC:$b, SETULE), (CMPULE GPRC:$a, GPRC:$b)>;
 def : Pat<(setcc GPRC:$a, GPRC:$b, SETUGT), (CMPULT GPRC:$b, GPRC:$a)>;
 def : Pat<(setcc GPRC:$a, GPRC:$b, SETUGE), (CMPULE GPRC:$b, GPRC:$a)>;
+
+// Ordered floating-point comparisons.  The compare leaves 2.0 or 0.0 in an FP
+// register; moving those bits to an integer register and shifting right by 62
+// yields 1 or 0.  Greater-than forms swap the operands.
+class FCmpPat<CondCode cc, ValueType vt, Instruction cmp, dag a, dag b>
+    : Pat<(setcc vt:$x, vt:$y, cc), (SRLi (MOVf2i (cmp a, b)), 62)>;
+
+foreach vt = [f32, f64] in {
+def : FCmpPat<SETOEQ, vt, CMPTEQ, (vt $x), (vt $y)>;
+def : FCmpPat<SETOLT, vt, CMPTLT, (vt $x), (vt $y)>;
+def : FCmpPat<SETOLE, vt, CMPTLE, (vt $x), (vt $y)>;
+def : FCmpPat<SETOGT, vt, CMPTLT, (vt $y), (vt $x)>;
+def : FCmpPat<SETOGE, vt, CMPTLE, (vt $y), (vt $x)>;
+}
 
 //===----------------------------------------------------------------------===//
 // Aligned loads and stores (base + 16-bit displacement).
