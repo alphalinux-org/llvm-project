@@ -60,6 +60,14 @@ void AlphaFrameLowering::emitEpilogue(MachineFunction &MF,
   adjustStack(MBB, MBBI, DL, TII, StackSize);
 }
 
+MachineBasicBlock::iterator AlphaFrameLowering::eliminateCallFramePseudoInstr(
+    MachineFunction &MF, MachineBasicBlock &MBB,
+    MachineBasicBlock::iterator I) const {
+  // Arguments are passed in registers, so the call-frame markers just get
+  // removed; stack argument space is not handled yet.
+  return MBB.erase(I);
+}
+
 bool AlphaFrameLowering::hasFPImpl(const MachineFunction &MF) const {
   return MF.getFrameInfo().hasVarSizedObjects();
 }
