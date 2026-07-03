@@ -175,6 +175,35 @@ def STS : AlphaInst<(outs), (ins FPRC:$Ra, memri:$addr), "sts $Ra, $addr",
 // which is only materialized in the encoding, from reading as undefined
 // before the epilogue is inserted (mirrors RISCV's PseudoRET).
 let isReturn = 1, isTerminator = 1, isBarrier = 1 in
-def RET : AlphaInst<(outs), (ins), "ret $$31, ($$26), 1", [(AlphaRet)]> {
-  let Opcode = 0x1a;   // JSR-format opcode (jmp/jsr/ret/jsr_coroutine).
+def RET : MbrForm<0b10, (outs), (ins), "ret $$31, ($$26), 1", [(AlphaRet)]> {
+  let Ra = 31;
+  let Rb = 26;
+  let hint = 1;  // return-prediction hint
+}
+
+//===----------------------------------------------------------------------===//
+// Branches.
+//===----------------------------------------------------------------------===//
+
+def brtarget : Operand<OtherVT> {
+  let EncoderMethod = "getBranchTargetEncoding";
+}
+
+// Unconditional branch: `br $31, target` ($31 discards the saved PC).
+let isBranch = 1, isTerminator = 1, isBarrier = 1 in
+def BR : AlphaInst<(outs), (ins brtarget:$target), "br $$31, $target",
+                   [(br bb:$target)]> {
+  let Opcode = 0x30;
+}
+
+// Conditional branches test a register against zero.
+let isBranch = 1, isTerminator = 1 in {
+def BEQ : AlphaInst<(outs), (ins GPRC:$Ra, brtarget:$target),
+                    "beq $Ra, $target", []> {
+  let Opcode = 0x39;
+}
+def BNE : AlphaInst<(outs), (ins GPRC:$Ra, brtarget:$target),
+                    "bne $Ra, $target", [(brcond GPRC:$Ra, bb:$target)]> {
+  let Opcode = 0x3d;
+}
 }

@@ -39,6 +39,13 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   setOperationAction(ISD::SELECT, MVT::i64, Legal);
   setOperationAction(ISD::SELECT_CC, MVT::i64, Expand);
 
+  // Only BRCOND (branch on a 0/1 register) is supported; expand BR_CC into
+  // SETCC + BRCOND, and there are no jump tables yet.
+  setOperationAction(ISD::BR_CC, MVT::i64, Expand);
+  setOperationAction(ISD::BR_CC, MVT::f32, Expand);
+  setOperationAction(ISD::BR_CC, MVT::f64, Expand);
+  setOperationAction(ISD::BR_JT, MVT::Other, Expand);
+
   computeRegisterProperties(STI.getRegisterInfo());
 }
 
