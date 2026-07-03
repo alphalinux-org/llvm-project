@@ -7,6 +7,7 @@ tablegen(LLVM AlphaGenCallingConv.inc -gen-callingconv)
 tablegen(LLVM AlphaGenDAGISel.inc -gen-dag-isel)
 tablegen(LLVM AlphaGenInstrInfo.inc -gen-instr-info)
 tablegen(LLVM AlphaGenMCCodeEmitter.inc -gen-emitter)
+tablegen(LLVM AlphaGenDisassemblerTables.inc -gen-disassembler)
 tablegen(LLVM AlphaGenRegisterInfo.inc -gen-register-info)
 tablegen(LLVM AlphaGenSubtargetInfo.inc -gen-subtarget)
 
@@ -40,5 +41,6 @@ add_llvm_target(AlphaCodeGen
   Alpha
   )
 
+add_subdirectory(Disassembler)
 add_subdirectory(MCTargetDesc)
 add_subdirectory(TargetInfo)
