@@ -83,3 +83,17 @@ class MFormD<bits<6> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
   let Inst{20-16} = Rb;
   let Inst{15-0} = disp;
 }
+
+// Memory-format branch (jsr/ret/jmp), opcode 0x1a: Ra (25-21, return address),
+// Rb (20-16, target), 2-bit sub-opcode (15-14), 14-bit hint (13-0).
+class MbrForm<bits<2> sub, dag outs, dag ins, string asmstr, list<dag> pattern>
+    : AlphaInst<outs, ins, asmstr, pattern> {
+  bits<5> Ra;
+  bits<5> Rb;
+  bits<14> hint = 0;
+  let Opcode = 0x1a;
+  let Inst{25-21} = Ra;
+  let Inst{20-16} = Rb;
+  let Inst{15-14} = sub;
+  let Inst{13-0} = hint;
+}
