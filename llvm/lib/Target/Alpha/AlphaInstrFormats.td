@@ -70,3 +70,16 @@ class OFormL<bits<6> opc, bits<7> func, dag outs, dag ins, string asmstr,
   let Inst{11-5} = func;
   let Inst{4-0} = Rc;
 }
+
+// Memory format with the destination/source in the Ra field and a base register
+// plus displacement written separately (lda/ldah and the relocated variants).
+class MFormD<bits<6> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
+    : AlphaInst<outs, ins, asmstr, pattern> {
+  bits<5> Ra;
+  bits<5> Rb;
+  bits<16> disp;
+  let Opcode = opc;
+  let Inst{25-21} = Ra;
+  let Inst{20-16} = Rb;
+  let Inst{15-0} = disp;
+}
