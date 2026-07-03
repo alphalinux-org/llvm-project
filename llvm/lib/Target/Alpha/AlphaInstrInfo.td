@@ -147,6 +147,18 @@ def CMOVNE : OForm<0x11, 0x26, (outs GPRC:$Rc),
 // `bis $31, $Rb, $Rc` to move an integer register.
 def BIS : ALU_rr<0x11, 0x20, "bis", or>;
 
+// Logical operations with a complemented second operand.  These fold a `not`
+// (xor with -1) into a single instruction.
+def BIC   : OForm<0x11, 0x08, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                      "bic $Ra, $Rb, $Rc",
+                      [(set i64:$Rc, (and i64:$Ra, (not i64:$Rb)))]>;
+def ORNOT : OForm<0x11, 0x28, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                      "ornot $Ra, $Rb, $Rc",
+                      [(set i64:$Rc, (or i64:$Ra, (not i64:$Rb)))]>;
+def EQV   : OForm<0x11, 0x48, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                      "eqv $Ra, $Rb, $Rc",
+                      [(set i64:$Rc, (xor i64:$Ra, (not i64:$Rb)))]>;
+
 // Floating-point copy-sign: `cpys $Ra, $Rb, $Rc` builds the sign of $Ra with
 // the magnitude of $Rb.  Used by copyPhysReg as `cpys $Rb, $Rb, $Rc` to move a
 // floating-point register.
@@ -231,6 +243,9 @@ def LDAH : MFormD<0x09, (outs GPRC:$Rc), (ins s16imm:$disp, GPRC:$Rb),
 
 // Materialize a small signed constant with `lda $Rc, imm($31)`.
 def : Pat<(i64 immSExt16:$imm), (LDA immSExt16:$imm, R31)>;
+
+// `not $x` is `ornot $31, $x` (0 OR ~x), avoiding an explicit -1.
+def : Pat<(not GPRC:$x), (ORNOT R31, GPRC:$x)>;
 
 //===----------------------------------------------------------------------===//
 // Integer/floating register moves and conversions.
