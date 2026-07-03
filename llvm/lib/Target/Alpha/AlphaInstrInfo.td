@@ -224,10 +224,25 @@ def CMPULE : CMP_rr<0x3d, "cmpule">;
 // implements `select`.
 let Constraints = "$Rfalse = $Rc" in
 def CMOVNE : OForm<0x11, 0x26, (outs GPRC:$Rc),
-                       (ins GPRC:$Rfalse, GPRC:$Ra, GPRC:$Rb),
-                       "cmovne $Ra, $Rb, $Rc",
-                       [(set i64:$Rc,
-                             (select i64:$Ra, i64:$Rb, i64:$Rfalse))]>;
+                   (ins GPRC:$Rfalse, GPRC:$Ra, GPRC:$Rb),
+                   "cmovne $Ra, $Rb, $Rc",
+                   [(set i64:$Rc,
+                         (select i64:$Ra, i64:$Rb, i64:$Rfalse))]>;
+
+// Conditional moves testing $Ra against zero with a specific condition, which
+// fold a compare-against-zero into the select instead of a separate cmpXX.
+class CMOV_cc<bits<7> func, string mnem, CondCode cc>
+    : OForm<0x11, func, (outs GPRC:$Rc), (ins GPRC:$Rfalse, GPRC:$Ra, GPRC:$Rb),
+            mnem # " $Ra, $Rb, $Rc",
+            [(set i64:$Rc, (select (i64 (setcc i64:$Ra, 0, cc)),
+                                   i64:$Rb, i64:$Rfalse))]> {
+  let Constraints = "$Rfalse = $Rc";
+}
+// Only the conditions that survive DAG canonicalization against zero are given
+// patterns (setge/setle against 0 are rewritten to setgt/setlt against -1/1).
+def CMOVEQ : CMOV_cc<0x24, "cmoveq", SETEQ>;
+def CMOVLT : CMOV_cc<0x44, "cmovlt", SETLT>;
+def CMOVGT : CMOV_cc<0x66, "cmovgt", SETGT>;
 
 // `bis $Ra, $Rb, $Rc` computes $Rc = $Ra OR $Rb.  copyPhysReg emits it as
 // `bis $31, $Rb, $Rc` to move an integer register.
