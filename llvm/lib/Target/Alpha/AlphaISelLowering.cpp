@@ -151,6 +151,17 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   computeRegisterProperties(STI.getRegisterInfo());
 }
 
+std::pair<unsigned, const TargetRegisterClass *>
+AlphaTargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
+                                                  StringRef Constraint,
+                                                  MVT VT) const {
+  // "r" selects an integer register.  (Floating-point "f" operands still need
+  // register-class spilling work and are left to the generic handler.)
+  if (Constraint.size() == 1 && Constraint[0] == 'r')
+    return std::make_pair(0U, &Alpha::GPRCRegClass);
+  return TargetLowering::getRegForInlineAsmConstraint(TRI, Constraint, VT);
+}
+
 const char *AlphaTargetLowering::getTargetNodeName(unsigned Opcode) const {
   switch (static_cast<AlphaISD::NodeType>(Opcode)) {
   case AlphaISD::FIRST_NUMBER:

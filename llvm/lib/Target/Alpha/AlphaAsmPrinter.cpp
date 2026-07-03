@@ -13,6 +13,7 @@
 
 #include "Alpha.h"
 #include "AlphaTargetMachine.h"
+#include "MCTargetDesc/AlphaInstPrinter.h"
 #include "TargetInfo/AlphaTargetInfo.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
@@ -39,6 +40,9 @@ public:
   StringRef getPassName() const override { return "Alpha Assembly Printer"; }
 
   void emitInstruction(const MachineInstr *MI) override;
+
+  bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
+                       const char *ExtraCode, raw_ostream &O) override;
 
 private:
   MCOperand lowerOperand(const MachineOperand &MO) const;
@@ -109,6 +113,24 @@ void AlphaAsmPrinter::emitInstruction(const MachineInstr *MI) {
     }
     EmitToStreamer(*OutStreamer, OutMI);
   } while (++I != E && I->isInsideBundle());
+}
+
+bool AlphaAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
+                                      const char *ExtraCode, raw_ostream &O) {
+  if (ExtraCode && ExtraCode[0])
+    return AsmPrinter::PrintAsmOperand(MI, OpNo, ExtraCode, O);
+
+  const MachineOperand &MO = MI->getOperand(OpNo);
+  switch (MO.getType()) {
+  case MachineOperand::MO_Register:
+    O << AlphaInstPrinter::getRegisterName(MO.getReg());
+    return false;
+  case MachineOperand::MO_Immediate:
+    O << MO.getImm();
+    return false;
+  default:
+    return AsmPrinter::PrintAsmOperand(MI, OpNo, ExtraCode, O);
+  }
 }
 
 extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeAlphaAsmPrinter() {
