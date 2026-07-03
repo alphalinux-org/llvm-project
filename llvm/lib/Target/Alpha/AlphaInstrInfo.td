@@ -174,3 +174,28 @@ let isReturn = 1, isTerminator = 1, isBarrier = 1 in
 def RET : AlphaInst<(outs), (ins), "ret $$31, ($$26), 1", [(AlphaRet)]> {
   let Opcode = 0x1a;   // JSR-format opcode (jmp/jsr/ret/jsr_coroutine).
 }
+
+//===----------------------------------------------------------------------===//
+// Branches.
+//===----------------------------------------------------------------------===//
+
+def brtarget : Operand<OtherVT>;
+
+// Unconditional branch: `br $31, target` ($31 discards the saved PC).
+let isBranch = 1, isTerminator = 1, isBarrier = 1 in
+def BR : AlphaInst<(outs), (ins brtarget:$target), "br $$31, $target",
+                   [(br bb:$target)]> {
+  let Opcode = 0x30;
+}
+
+// Conditional branches test a register against zero.
+let isBranch = 1, isTerminator = 1 in {
+def BEQ : AlphaInst<(outs), (ins GPRC:$Ra, brtarget:$target),
+                    "beq $Ra, $target", []> {
+  let Opcode = 0x39;
+}
+def BNE : AlphaInst<(outs), (ins GPRC:$Ra, brtarget:$target),
+                    "bne $Ra, $target", [(brcond GPRC:$Ra, bb:$target)]> {
+  let Opcode = 0x3d;
+}
+}
