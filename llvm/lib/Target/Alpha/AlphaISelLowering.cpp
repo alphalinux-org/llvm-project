@@ -49,6 +49,9 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   setOperationAction(ISD::BR_CC, MVT::f64, Expand);
   setOperationAction(ISD::BR_JT, MVT::Other, Expand);
 
+  // Global addresses are loaded from the GOT.
+  setOperationAction(ISD::GlobalAddress, MVT::i64, Custom);
+
   // Signed byte/word loads become a zero/any-extending load plus an explicit
   // sign-extension, so only the extending byte/word loads need instructions.
   for (MVT VT : {MVT::i8, MVT::i16})
@@ -63,8 +66,32 @@ const char *AlphaTargetLowering::getTargetNodeName(unsigned Opcode) const {
     break;
   case AlphaISD::RET_GLUE:
     return "AlphaISD::RET_GLUE";
+  case AlphaISD::LITERAL:
+    return "AlphaISD::LITERAL";
   }
   return nullptr;
+}
+
+SDValue AlphaTargetLowering::LowerOperation(SDValue Op,
+                                            SelectionDAG &DAG) const {
+  switch (Op.getOpcode()) {
+  case ISD::GlobalAddress:
+    return LowerGlobalAddress(Op, DAG);
+  default:
+    llvm_unreachable("unexpected operation to lower");
+  }
+}
+
+SDValue AlphaTargetLowering::LowerGlobalAddress(SDValue Op,
+                                                SelectionDAG &DAG) const {
+  // Loading a global's address establishes and uses the global pointer.
+  DAG.getMachineFunction().getInfo<AlphaMachineFunctionInfo>()->setUsesGP();
+
+  auto *N = cast<GlobalAddressSDNode>(Op);
+  SDLoc DL(Op);
+  SDValue TGA =
+      DAG.getTargetGlobalAddress(N->getGlobal(), DL, MVT::i64, N->getOffset());
+  return DAG.getNode(AlphaISD::LITERAL, DL, MVT::i64, TGA);
 }
 
 static const TargetRegisterClass *getRegClassForVT(MVT VT) {

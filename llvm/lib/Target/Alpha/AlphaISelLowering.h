@@ -27,6 +27,10 @@ enum NodeType : unsigned {
 
   // Return with a glue-connected chain of copies into the return registers.
   RET_GLUE,
+
+  // Wraps a global address whose value is loaded from its GOT slot with an
+  // R_ALPHA_LITERAL relocation.
+  LITERAL,
 };
 } // namespace AlphaISD
 
@@ -72,7 +76,11 @@ public:
   EmitInstrWithCustomInserter(MachineInstr &MI,
                               MachineBasicBlock *MBB) const override;
 
+  SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
+
 private:
+  SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
+
   const AlphaSubtarget &Subtarget;
 };
 

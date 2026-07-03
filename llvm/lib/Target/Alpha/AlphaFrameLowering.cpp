@@ -8,6 +8,7 @@
 
 #include "AlphaFrameLowering.h"
 #include "AlphaInstrInfo.h"
+#include "AlphaMachineFunctionInfo.h"
 #include "AlphaSubtarget.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -40,6 +41,13 @@ void AlphaFrameLowering::emitPrologue(MachineFunction &MF,
   uint64_t StackSize = MF.getFrameInfo().getStackSize();
   MachineBasicBlock::iterator MBBI = MBB.begin();
   DebugLoc DL;
+
+  // Establish the global pointer from the procedure value ($27) if needed.
+  if (MF.getInfo<AlphaMachineFunctionInfo>()->usesGP()) {
+    MBB.addLiveIn(Alpha::R27);
+    BuildMI(MBB, MBBI, DL, TII.get(Alpha::LDGP));
+  }
+
   adjustStack(MBB, MBBI, DL, TII, -(int64_t)StackSize);
 }
 
