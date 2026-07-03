@@ -89,8 +89,11 @@ char AlphaExpandAtomicPseudo::ID = 0;
 static void emitSignExtendField(MachineBasicBlock *MBB, const DebugLoc &DL,
                                 const AlphaInstrInfo *TII, bool HasBWX,
                                 bool IsWord, Register Dst, Register Src) {
-  assert(!HasBWX && "sextb/sextw are not defined yet");
-  (void)HasBWX;
+  if (HasBWX) {
+    BuildMI(MBB, DL, TII->get(IsWord ? Alpha::SEXTW : Alpha::SEXTB), Dst)
+        .addReg(Src);
+    return;
+  }
   unsigned Shift = IsWord ? 48 : 56;
   BuildMI(MBB, DL, TII->get(Alpha::SLLi), Dst).addReg(Src).addImm(Shift);
   BuildMI(MBB, DL, TII->get(Alpha::SRAi), Dst).addReg(Dst).addImm(Shift);

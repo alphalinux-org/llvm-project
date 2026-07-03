@@ -182,7 +182,16 @@ def SRAi : ALU_ri<0x12, 0x3c, "sra", sra>;
 // `zapnot $Ra, lit, $Rc` keeps the bytes of $Ra selected by the 8-bit mask and
 // zeroes the rest.  It provides byte-granular zero-extension.
 def ZAPNOTi : OFormL<0x12, 0x31, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
-                        "zapnot $Ra, $lit, $Rc", []>;
+                     "zapnot $Ra, $lit, $Rc", []>;
+
+// Byte/word sign-extend from the BWX extension: one instruction in place of the
+// sll/sra pair.  The single source is $Rb (with $Ra = $31).
+let Predicates = [HasBWX], hasSideEffects = 0, Ra = 31 in {
+def SEXTB : OForm<0x1c, 0x00, (outs GPRC:$Rc), (ins GPRC:$Rb), "sextb $Rb, $Rc",
+                  [(set i64:$Rc, (sext_inreg i64:$Rb, i8))]>;
+def SEXTW : OForm<0x1c, 0x01, (outs GPRC:$Rc), (ins GPRC:$Rb), "sextw $Rb, $Rc",
+                  [(set i64:$Rc, (sext_inreg i64:$Rb, i16))]>;
+}
 
 // Count instructions from the CIX extension (ev67).  The single source is $Rb
 // (with $Ra = $31); ctlz/cttz of zero produce 64, matching ISD semantics.
@@ -198,7 +207,7 @@ def CTTZ : OForm<0x1c, 0x33, (outs GPRC:$Rc), (ins GPRC:$Rb), "cttz $Rb, $Rc",
 // `addl $Ra, $Rb, $Rc` is a 32-bit add whose result is sign-extended to 64
 // bits.  With $Rb = $31 it sign-extends the low 32 bits of $Ra.
 def ADDL : OForm<0x10, 0x00, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
-                     "addl $Ra, $Rb, $Rc", []>;
+                 "addl $Ra, $Rb, $Rc", []>;
 
 // Comparisons write 0 or 1 into $Rc (Alpha has no condition-code register).
 class CMP_rr<bits<7> func, string mnem>

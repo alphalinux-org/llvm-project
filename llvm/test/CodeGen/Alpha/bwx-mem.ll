@@ -24,8 +24,7 @@ define i64 @zext16(ptr %p) {
 
 ; CHECK-LABEL: sext8:
 ; CHECK:       ldbu $0, 0($16)
-; CHECK:       sll $0, 56, $0
-; CHECK-NEXT:  sra $0, 56, $0
+; CHECK-NEXT:  sextb $0, $0
 ; CHECK-NEXT:  ret
 define i64 @sext8(ptr %p) {
   %v = load i8, ptr %p
