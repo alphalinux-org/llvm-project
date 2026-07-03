@@ -46,6 +46,8 @@ StringRef Triple::getArchTypeName(ArchType Kind) {
     return "aarch64_32";
   case aarch64_be:
     return "aarch64_be";
+  case alpha:
+    return "alpha";
   case amdgpu:
     return "amdgpu";
   case amdil64:
@@ -307,6 +309,9 @@ StringRef Triple::getArchTypePrefix(ArchType Kind) {
   case aarch64_32:
     return "aarch64";
 
+  case alpha:
+    return "alpha";
+
   case arc:
     return "arc";
 
@@ -502,6 +507,7 @@ Triple::ArchType Triple::getArchTypeForLLVMName(StringRef Name) {
       .Case("aarch64", aarch64)
       .Case("aarch64_be", aarch64_be)
       .Case("aarch64_32", aarch64_32)
+      .Case("alpha", alpha)
       .Case("arc", arc)
       .Case("arm64", aarch64) // "arm64" is an alias for "aarch64"
       .Case("arm64_32", aarch64_32)
@@ -652,6 +658,7 @@ Triple::ArchType Triple::parseArch(StringRef ArchName) {
           .Case("aarch64_be", Triple::aarch64_be)
           .Case("aarch64_32", Triple::aarch64_32)
           .Case("aarch64_lfi", Triple::aarch64)
+          .StartsWith("alpha", Triple::alpha)
           .Case("arc", Triple::arc)
           .Case("arm64", Triple::aarch64)
           .Case("arm64_32", Triple::aarch64_32)
@@ -1001,6 +1008,7 @@ static Triple::ObjectFormatType getDefaultFormat(const Triple &T) {
       return T.isOSDarwin() ? Triple::MachO : Triple::ELF;
     }
   case Triple::aarch64_be:
+  case Triple::alpha:
   case Triple::amdgpu:
   case Triple::amdil64:
   case Triple::amdil:
@@ -1816,6 +1824,7 @@ unsigned Triple::getArchPointerBitWidth(llvm::Triple::ArchType Arch) {
 
   case llvm::Triple::aarch64:
   case llvm::Triple::aarch64_be:
+  case llvm::Triple::alpha:
   case llvm::Triple::amdgpu:
   case llvm::Triple::amdil64:
   case llvm::Triple::bpfeb:
@@ -1878,6 +1887,7 @@ Triple Triple::get32BitArchVariant() const {
   Triple T(*this);
   switch (getArch()) {
   case Triple::UnknownArch:
+  case Triple::alpha:
   case Triple::amdgpu:
   case Triple::avr:
   case Triple::bpfeb:
@@ -2012,6 +2022,7 @@ Triple Triple::get64BitArchVariant() const {
 
   case Triple::aarch64:
   case Triple::aarch64_be:
+  case Triple::alpha:
   case Triple::amdgpu:
   case Triple::amdil64:
   case Triple::bpfeb:
@@ -2115,6 +2126,7 @@ Triple Triple::getBigEndianArchVariant() const {
     return T;
   switch (getArch()) {
   case Triple::UnknownArch:
+  case Triple::alpha:
   case Triple::amdgpu:
   case Triple::amdil64:
   case Triple::amdil:
@@ -2250,6 +2262,7 @@ bool Triple::isLittleEndian() const {
   switch (getArch()) {
   case Triple::aarch64:
   case Triple::aarch64_32:
+  case Triple::alpha:
   case Triple::amdgpu:
   case Triple::amdil64:
   case Triple::amdil:
@@ -2534,6 +2547,7 @@ ExceptionHandling Triple::getDefaultExceptionHandling() const {
     return ExceptionHandling::DwarfCFI;
 
   switch (getArch()) {
+  case Triple::alpha:
   case Triple::arc:
   case Triple::csky:
   case Triple::hexagon:

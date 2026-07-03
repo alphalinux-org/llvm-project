@@ -55,6 +55,7 @@ public:
     aarch64,     // AArch64 (little endian): aarch64
     aarch64_be,  // AArch64 (big endian): aarch64_be
     aarch64_32,  // AArch64 (little endian) ILP32: aarch64_32
+    alpha,       // Alpha (little endian): DEC Alpha
     arc,         // ARC: Synopsys ARC
     avr,         // AVR: Atmel AVR microcontroller
     bpfel,       // eBPF or extended BPF or 64-bit BPF (little endian)
@@ -1190,6 +1191,9 @@ public:
 
   /// Tests whether the target is SystemZ.
   bool isSystemZ() const { return getArch() == Triple::systemz; }
+
+  /// Tests whether the target is DEC Alpha.
+  bool isAlpha() const { return getArch() == Triple::alpha; }
 
   /// Tests whether the target is x86 (32- or 64-bit).
   bool isX86() const {

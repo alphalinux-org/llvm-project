@@ -575,6 +575,11 @@ std::string Triple::computeDataLayout(StringRef ABIName) const {
   case Triple::aarch64_be:
   case Triple::aarch64_32:
     return computeAArch64DataLayout(*this);
+  case Triple::alpha:
+    // Little-endian LP64.  16-byte stack alignment and 64-bit native integer
+    // width match the Digital UNIX / OSF ABI (GCC's alpha.h: STACK_BOUNDARY
+    // 128, BIGGEST_ALIGNMENT 128).
+    return "e-m:e-p:64:64-i64:64-i128:128-n64-S128";
   case Triple::arc:
     return "e-m:e-p:32:32-i1:8:32-i8:8:32-i16:16:32-i32:32:32-"
            "f32:32:32-i64:32-f64:32-a:0:32-n32";
