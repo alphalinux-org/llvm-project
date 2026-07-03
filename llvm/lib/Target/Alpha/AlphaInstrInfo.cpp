@@ -9,7 +9,10 @@
 #include "AlphaInstrInfo.h"
 #include "AlphaSubtarget.h"
 #include "MCTargetDesc/AlphaMCTargetDesc.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineInstrBundle.h"
+#include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/Support/ErrorHandling.h"
 
 #define GET_INSTRINFO_CTOR_DTOR
@@ -42,4 +45,48 @@ void AlphaInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     return;
   }
   llvm_unreachable("Alpha copyPhysReg: unsupported register class");
+}
+
+// Describe an access to the whole of a stack slot, so that what follows knows
+// which object is touched and can tell one slot's traffic from another's.
+static MachineMemOperand *getStackSlotMMO(MachineFunction &MF, int FrameIndex,
+                                          MachineMemOperand::Flags Flags) {
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  return MF.getMachineMemOperand(
+      MachinePointerInfo::getFixedStack(MF, FrameIndex), Flags,
+      MFI.getObjectSize(FrameIndex), MFI.getObjectAlign(FrameIndex));
+}
+
+void AlphaInstrInfo::storeRegToStackSlot(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, Register SrcReg,
+    bool isKill, int FrameIndex, const TargetRegisterClass *RC, Register VReg,
+    MachineInstr::MIFlag Flags) const {
+  DebugLoc DL = MBBI != MBB.end() ? MBBI->getDebugLoc() : DebugLoc();
+  unsigned Opc =
+      Alpha::GPRCRegClass.hasSubClassEq(RC) ? Alpha::STQ : Alpha::STT;
+  MachineFunction &MF = *MBB.getParent();
+  BuildMI(MBB, MBBI, DL, get(Opc))
+      .addReg(SrcReg, getKillRegState(isKill))
+      .addFrameIndex(FrameIndex)
+      .addImm(0)
+      .addMemOperand(
+          getStackSlotMMO(MF, FrameIndex, MachineMemOperand::MOStore))
+      .setMIFlag(Flags);
+}
+
+void AlphaInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
+                                          MachineBasicBlock::iterator MBBI,
+                                          Register DestReg, int FrameIndex,
+                                          const TargetRegisterClass *RC,
+                                          Register VReg, unsigned SubReg,
+                                          MachineInstr::MIFlag Flags) const {
+  DebugLoc DL = MBBI != MBB.end() ? MBBI->getDebugLoc() : DebugLoc();
+  unsigned Opc =
+      Alpha::GPRCRegClass.hasSubClassEq(RC) ? Alpha::LDQ : Alpha::LDT;
+  MachineFunction &MF = *MBB.getParent();
+  BuildMI(MBB, MBBI, DL, get(Opc), DestReg)
+      .addFrameIndex(FrameIndex)
+      .addImm(0)
+      .addMemOperand(getStackSlotMMO(MF, FrameIndex, MachineMemOperand::MOLoad))
+      .setMIFlag(Flags);
 }

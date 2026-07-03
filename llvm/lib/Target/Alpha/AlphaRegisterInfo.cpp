@@ -52,7 +52,29 @@ BitVector AlphaRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
 bool AlphaRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
                                             int SPAdj, unsigned FIOperandNum,
                                             RegScavenger *RS) const {
-  report_fatal_error("Alpha frame index elimination is not yet implemented");
+  // SPAdj is non-zero only inside a call sequence of a function whose call
+  // frame is not reserved, which here means one with a variable-sized
+  // allocation -- and such a function has a frame pointer, so the reference
+  // below resolves against $15 and the stack pointer's movement does not
+  // reach it.  Assert rather than discard: if it ever is non-zero the offset
+  // computed below is wrong by that much, silently.
+  assert(SPAdj == 0 && "call-frame adjustment reached eliminateFrameIndex");
+  MachineInstr &Inst = *MI;
+  MachineFunction &MF = *Inst.getParent()->getParent();
+  const TargetFrameLowering *TFI = MF.getSubtarget().getFrameLowering();
+
+  int FI = Inst.getOperand(FIOperandNum).getIndex();
+  Register FrameReg;
+  // The displacement operand of the memory instruction follows the base.
+  int64_t Offset = TFI->getFrameIndexReference(MF, FI, FrameReg).getFixed() +
+                   Inst.getOperand(FIOperandNum + 1).getImm();
+
+  if (!isInt<16>(Offset))
+    report_fatal_error("Alpha frame offset does not fit in 16 bits");
+
+  Inst.getOperand(FIOperandNum).ChangeToRegister(FrameReg, /*isDef=*/false);
+  Inst.getOperand(FIOperandNum + 1).setImm(Offset);
+  return false;
 }
 
 Register AlphaRegisterInfo::getFrameRegister(const MachineFunction &MF) const {
