@@ -151,11 +151,9 @@ void AlphaDAGToDAGISel::Select(SDNode *Node) {
       SDValue GP = CurDAG->getRegister(Alpha::R29, MVT::i64);
       SDNode *High =
           CurDAG->getMachineNode(Alpha::LDAHg, DL, MVT::i64, CPI, GP);
-      SDNode *Addr = CurDAG->getMachineNode(Alpha::LDAg, DL, MVT::i64, CPI,
+      // ldq with a !gprellow displacement folds the low part into the load.
+      SDNode *Load = CurDAG->getMachineNode(Alpha::LDQg, DL, MVT::i64, CPI,
                                             SDValue(High, 0));
-      SDNode *Load =
-          CurDAG->getMachineNode(Alpha::LDQ, DL, MVT::i64, SDValue(Addr, 0),
-                                 CurDAG->getTargetConstant(0, DL, MVT::i64));
       ReplaceNode(Node, Load);
       return;
     }
