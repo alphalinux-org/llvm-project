@@ -6,9 +6,11 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "MCTargetDesc/AlphaFixupKinds.h"
 #include "MCTargetDesc/AlphaMCTargetDesc.h"
 #include "TargetInfo/AlphaTargetInfo.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/ADT/StringSwitch.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
@@ -72,6 +74,14 @@ public:
     assert(Kind == Immediate);
     return Imm.Val;
   }
+  MCRegister getMemBase() const {
+    assert(Kind == Memory);
+    return Mem.Base;
+  }
+  const MCExpr *getMemOff() const {
+    assert(Kind == Memory);
+    return Mem.Off;
+  }
 
   SMLoc getStartLoc() const override { return StartLoc; }
   SMLoc getEndLoc() const override { return EndLoc; }
@@ -112,6 +122,15 @@ public:
     assert(N == 2);
     Inst.addOperand(MCOperand::createReg(Mem.Base));
     addExpr(Inst, Mem.Off);
+  }
+
+  // Wrap the displacement/immediate in a relocation-specifier expression from a
+  // trailing `!literal` / `!gprelhigh` / ... suffix.
+  void applySpecifier(unsigned Spec, MCContext &Ctx) {
+    if (Kind == Memory)
+      Mem.Off = MCSpecifierExpr::create(Mem.Off, Spec, Ctx);
+    else if (Kind == Immediate)
+      Imm.Val = MCSpecifierExpr::create(Imm.Val, Spec, Ctx);
   }
 
   static std::unique_ptr<AlphaOperand> createToken(StringRef Str, SMLoc S) {
@@ -270,6 +289,32 @@ bool AlphaAsmParser::parseInstruction(ParseInstructionInfo &Info,
     if (!parseOperand(Operands).isSuccess())
       return true;
   }
+
+  // An optional relocation suffix `!name` (with an optional `!seq` number)
+  // attaches a relocation specifier to the last operand.
+  if (getLexer().is(AsmToken::Exclaim)) {
+    getParser().Lex(); // !
+    if (getLexer().isNot(AsmToken::Identifier))
+      return Error(getLexer().getLoc(), "expected relocation name");
+    StringRef R = getParser().getTok().getIdentifier();
+    unsigned Spec = StringSwitch<unsigned>(R)
+                        .Case("literal", Alpha::fixup_alpha_literal)
+                        .Case("gprelhigh", Alpha::fixup_alpha_gprelhigh)
+                        .Case("gprellow", Alpha::fixup_alpha_gprellow)
+                        .Case("gpdisp", Alpha::fixup_alpha_gpdisp)
+                        .Default(0);
+    if (!Spec)
+      return Error(getLexer().getLoc(), "unknown relocation name");
+    getParser().Lex(); // name
+    // Ignore the optional !seq sequence number used to pair relocations.
+    if (getLexer().is(AsmToken::Exclaim)) {
+      getParser().Lex(); // !
+      getParser().Lex(); // number
+    }
+    static_cast<AlphaOperand &>(*Operands.back())
+        .applySpecifier(Spec, getContext());
+  }
+
   if (getLexer().isNot(AsmToken::EndOfStatement))
     return Error(getLexer().getLoc(), "unexpected token");
   return false;
@@ -280,6 +325,60 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
                                              MCStreamer &Out,
                                              uint64_t &ErrorInfo,
                                              bool MatchingInlineAsm) {
+  StringRef Mnemonic = static_cast<AlphaOperand &>(*Operands[0]).getToken();
+
+  // ldgp $Ra, disp($Rb): expand to ldah/lda with a GPDISP relocation (addend
+  // 4) referencing the parsed base register.
+  if (Mnemonic == "ldgp" && Operands.size() == 3) {
+    // The destination is $Ra, not always $29: GNU as assembles
+    // `ldgp $0, 0($27)' into a pair naming $0.  The displacement is carried by
+    // the lda half.  Check the operand kinds before reading them, or a
+    // register written where a memory operand belongs reads the wrong member
+    // of the operand union.
+    if (!Operands[1]->isReg())
+      return Error(Operands[1]->getStartLoc(), "expected register operand");
+    if (!Operands[2]->isMem())
+      return Error(Operands[2]->getStartLoc(),
+                   "expected memory operand of the form disp($reg)");
+    MCRegister Dst = static_cast<AlphaOperand &>(*Operands[1]).getReg();
+    MCRegister Base = static_cast<AlphaOperand &>(*Operands[2]).getMemBase();
+    const MCExpr *Off = static_cast<AlphaOperand &>(*Operands[2]).getMemOff();
+    const MCExpr *GpDisp =
+        MCSpecifierExpr::create(MCConstantExpr::create(4, getContext()),
+                                Alpha::fixup_alpha_gpdisp, getContext());
+    MCInst Ldah;
+    Ldah.setOpcode(Alpha::LDAHm);
+    Ldah.addOperand(MCOperand::createReg(Dst));
+    Ldah.addOperand(MCOperand::createReg(Base));
+    Ldah.addOperand(MCOperand::createExpr(GpDisp));
+    Ldah.setLoc(IDLoc);
+    Out.emitInstruction(Ldah, getSTI());
+    MCInst Lda;
+    Lda.setOpcode(Alpha::LEA);
+    Lda.addOperand(MCOperand::createReg(Dst));
+    Lda.addOperand(MCOperand::createReg(Dst));
+    if (const auto *CE = dyn_cast<MCConstantExpr>(Off))
+      Lda.addOperand(MCOperand::createImm(CE->getValue()));
+    else
+      Lda.addOperand(MCOperand::createExpr(Off));
+    Lda.setLoc(IDLoc);
+    Out.emitInstruction(Lda, getSTI());
+    return false;
+  }
+
+  // jsr $Ra, ($Rb): emit the bare jsr word.
+  if (Mnemonic == "jsr" && Operands.size() == 3) {
+    MCInst Inst;
+    Inst.setOpcode(Alpha::JSRasm);
+    Inst.addOperand(MCOperand::createReg(
+        static_cast<AlphaOperand &>(*Operands[1]).getReg()));
+    Inst.addOperand(MCOperand::createReg(
+        static_cast<AlphaOperand &>(*Operands[2]).getMemBase()));
+    Inst.setLoc(IDLoc);
+    Out.emitInstruction(Inst, getSTI());
+    return false;
+  }
+
   MCInst Inst;
   unsigned Result =
       MatchInstructionImpl(Operands, Inst, ErrorInfo, MatchingInlineAsm);

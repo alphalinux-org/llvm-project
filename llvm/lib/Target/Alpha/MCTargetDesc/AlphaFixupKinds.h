@@ -29,6 +29,23 @@ enum Fixups {
   fixup_alpha_invalid,
   NumTargetFixupKinds = fixup_alpha_invalid - FirstTargetFixupKind
 };
+
+// The `!name` relocation-specifier suffix that selects the given fixup kind
+// (empty for kinds without a specifier spelling).
+inline StringRef getSpecifierName(unsigned Kind) {
+  switch (Kind) {
+  case fixup_alpha_literal:
+    return "literal";
+  case fixup_alpha_gprelhigh:
+    return "gprelhigh";
+  case fixup_alpha_gprellow:
+    return "gprellow";
+  case fixup_alpha_gpdisp:
+    return "gpdisp";
+  default:
+    return "";
+  }
+}
 } // namespace Alpha
 } // namespace llvm
 
