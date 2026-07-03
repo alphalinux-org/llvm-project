@@ -64,10 +64,9 @@ public:
   MCFixupKindInfo getFixupKindInfo(MCFixupKind Kind) const override {
     // {name, offset, bits, flags}
     const static MCFixupKindInfo Infos[Alpha::NumTargetFixupKinds] = {
-        {"fixup_alpha_braddr", 0, 21, 0},
-        {"fixup_alpha_literal", 0, 16, 0},
-        {"fixup_alpha_gprelhigh", 0, 16, 0},
-        {"fixup_alpha_gprellow", 0, 16, 0},
+        {"fixup_alpha_braddr", 0, 21, 0},    {"fixup_alpha_literal", 0, 16, 0},
+        {"fixup_alpha_gprelhigh", 0, 16, 0}, {"fixup_alpha_gprellow", 0, 16, 0},
+        {"fixup_alpha_gpdisp", 0, 16, 0},
     };
     // Infos is indexed positionally by Kind - FirstTargetFixupKind, so its
     // rows stay in the order of enum Fixups in AlphaFixupKinds.h.
@@ -85,14 +84,15 @@ public:
   void applyFixup(const MCFragment &F, const MCFixup &Fixup,
                   const MCValue &Target, uint8_t *Data, uint64_t Value,
                   bool IsResolved) override {
-    maybeAddReloc(F, Fixup, Target, Value, IsResolved);
     MCFixupKind Kind = Fixup.getKind();
-    if (mc::isRelocation(Kind))
-      return;
-    // GOT- and GP-relative displacements are always resolved by a relocation.
-    if (Kind == MCFixupKind(Alpha::fixup_alpha_literal) ||
-        Kind == MCFixupKind(Alpha::fixup_alpha_gprelhigh) ||
-        Kind == MCFixupKind(Alpha::fixup_alpha_gprellow))
+    // The GOT/GP-relative and gpdisp displacements are always filled by a
+    // relocation, even when the fixup value is locally known.
+    bool AlwaysReloc = Kind == MCFixupKind(Alpha::fixup_alpha_literal) ||
+                       Kind == MCFixupKind(Alpha::fixup_alpha_gprelhigh) ||
+                       Kind == MCFixupKind(Alpha::fixup_alpha_gprellow) ||
+                       Kind == MCFixupKind(Alpha::fixup_alpha_gpdisp);
+    maybeAddReloc(F, Fixup, Target, Value, AlwaysReloc ? false : IsResolved);
+    if (mc::isRelocation(Kind) || AlwaysReloc)
       return;
     if (!IsResolved)
       return;
