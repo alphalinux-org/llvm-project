@@ -55,6 +55,9 @@ def immSExt16 : ImmLeaf<i64, [{ return isInt<16>(Imm); }]>;
 // An 8-bit unsigned literal, as used by operate instructions in literal form.
 def u8imm : Operand<i64>;
 
+// An immediate that fits in the 8-bit operate literal field.
+def immUExt8 : ImmLeaf<i64, [{ return isUInt<8>(Imm); }]>;
+
 // A memory address: base register plus 16-bit signed displacement, printed as
 // `disp($base)`.
 def memri : Operand<i64> {
@@ -90,10 +93,29 @@ def MULQ : ALU_rr<0x13, 0x20, "mulq", mul>;
 def AND  : ALU_rr<0x11, 0x00, "and",  and>;
 def XOR  : ALU_rr<0x11, 0x40, "xor",  xor>;
 
+// Literal (8-bit immediate) form of an operate instruction:
+// `<mnem> $Ra, lit, $Rc` computes $Rc = $Ra <op> zext(lit).
+class ALU_ri<bits<6> opc, bits<7> func, string mnem, SDPatternOperator node>
+    : OFormL<opc, func, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
+             mnem # " $Ra, $lit, $Rc",
+             [(set i64:$Rc, (node i64:$Ra, immUExt8:$lit))]>;
+
+def ADDQi : ALU_ri<0x10, 0x20, "addq", add>;
+def SUBQi : ALU_ri<0x10, 0x29, "subq", sub>;
+def MULQi : ALU_ri<0x13, 0x20, "mulq", mul>;
+def ANDi  : ALU_ri<0x11, 0x00, "and",  and>;
+def BISi  : ALU_ri<0x11, 0x20, "bis",  or>;
+def XORi  : ALU_ri<0x11, 0x40, "xor",  xor>;
+
 // Shifts use the low 6 bits of $Rb as the shift amount.
 def SLL : ALU_rr<0x12, 0x39, "sll", shl>;
 def SRL : ALU_rr<0x12, 0x34, "srl", srl>;
 def SRA : ALU_rr<0x12, 0x3c, "sra", sra>;
+
+// Immediate shift amount.
+def SLLi : ALU_ri<0x12, 0x39, "sll", shl>;
+def SRLi : ALU_ri<0x12, 0x34, "srl", srl>;
+def SRAi : ALU_ri<0x12, 0x3c, "sra", sra>;
 
 // `zapnot $Ra, lit, $Rc` keeps the bytes of $Ra selected by the 8-bit mask and
 // zeroes the rest.  It provides byte-granular zero-extension.
@@ -185,18 +207,20 @@ def LDAH : MFormD<0x09, (outs GPRC:$Ra), (ins s16imm:$disp, GPRC:$Rb),
 // Materialize a small signed constant with `lda $Rc, imm($31)`.
 def : Pat<(i64 immSExt16:$imm), (LDA immSExt16:$imm, R31)>;
 
-// Zero-extension of the low 1/2/4 bytes via zapnot (the byte mask keeps the
-// low N bytes).  This also lets `and` with these masks avoid materializing a
-// wide constant.
-def : Pat<(and GPRC:$x, 0xff),       (ZAPNOTi GPRC:$x, 1)>;
+// Zero-extension of the low two or four bytes via zapnot (the byte mask keeps
+// the low N bytes).  This also lets `and` with these masks avoid materializing
+// a wide constant.  0xff is no longer one of them: it fits and's own 8-bit
+// literal field, and and is a logic operation where zap and zapnot are
+// shift-class ones -- the whole Ebox rather than the upper subcluster on the
+// 21264, either integer pipe rather than E0 alone on the 21164, and a
+// one-cycle result rather than a two-cycle one on the 21064.
 def : Pat<(and GPRC:$x, 0xffff),     (ZAPNOTi GPRC:$x, 3)>;
 def : Pat<(and GPRC:$x, 0xffffffff), (ZAPNOTi GPRC:$x, 15)>;
 
 // setcc.  Conditions without a direct instruction are formed by swapping the
 // operands (gt/ge) or inverting equality (ne).
 def : Pat<(setcc GPRC:$a, GPRC:$b, SETEQ),  (CMPEQ  GPRC:$a, GPRC:$b)>;
-def : Pat<(setcc GPRC:$a, GPRC:$b, SETNE),  (XOR (CMPEQ GPRC:$a, GPRC:$b),
-                                                 (LDA 1, R31))>;
+def : Pat<(setcc GPRC:$a, GPRC:$b, SETNE),  (XORi (CMPEQ GPRC:$a, GPRC:$b), 1)>;
 def : Pat<(setcc GPRC:$a, GPRC:$b, SETLT),  (CMPLT  GPRC:$a, GPRC:$b)>;
 def : Pat<(setcc GPRC:$a, GPRC:$b, SETLE),  (CMPLE  GPRC:$a, GPRC:$b)>;
 def : Pat<(setcc GPRC:$a, GPRC:$b, SETGT),  (CMPLT  GPRC:$b, GPRC:$a)>;

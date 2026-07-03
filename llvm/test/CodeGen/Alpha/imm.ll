@@ -15,8 +15,7 @@ define i64 @neg() {
 }
 
 ; CHECK-LABEL: addimm:
-; CHECK:       lda $0, 10($31)
-; CHECK:       addq $16, $0, $0
+; CHECK:       addq $16, 10, $0
 ; CHECK-NEXT:  ret
 define i64 @addimm(i64 %x) {
   %r = add i64 %x, 10

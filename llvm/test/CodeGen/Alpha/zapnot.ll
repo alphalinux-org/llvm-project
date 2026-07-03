@@ -1,11 +1,13 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
 
 ; zapnot provides byte-granular zero-extension.  The 8-bit mask keeps the low
-; N bytes, so masking with 0xff / 0xffff / 0xffffffff (and zero-extending a
-; narrow value) becomes a single zapnot instead of materializing a wide mask.
+; N bytes, so masking with 0xffff / 0xffffffff (and zero-extending a narrow
+; value) becomes a single zapnot instead of materializing a wide mask.  0xff is
+; the exception: it fits and's literal field, and and is not restricted to the
+; pipes that can shift.
 
 ; CHECK-LABEL: mask8:
-; CHECK:       zapnot $16, 1, $0
+; CHECK:       and $16, 255, $0
 ; CHECK-NEXT:  ret
 define i64 @mask8(i64 %x) {
   %r = and i64 %x, 255
