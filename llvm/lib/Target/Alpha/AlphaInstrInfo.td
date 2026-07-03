@@ -87,6 +87,11 @@ def MULQ : ALU_rr<0x13, 0x20, "mulq", mul>;
 def AND  : ALU_rr<0x11, 0x00, "and",  and>;
 def XOR  : ALU_rr<0x11, 0x40, "xor",  xor>;
 
+// Shifts use the low 6 bits of $Rb as the shift amount.
+def SLL : ALU_rr<0x12, 0x39, "sll", shl>;
+def SRL : ALU_rr<0x12, 0x34, "srl", srl>;
+def SRA : ALU_rr<0x12, 0x3c, "sra", sra>;
+
 // `bis $Ra, $Rb, $Rc` computes $Rc = $Ra OR $Rb.  copyPhysReg emits it as
 // `bis $31, $Rb, $Rc` to move an integer register.
 def BIS : ALU_rr<0x11, 0x20, "bis", or>;
