@@ -31,6 +31,9 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
 
   setStackPointerRegisterToSaveRestore(Alpha::R30);
 
+  // Comparison instructions leave 0 or 1 in the destination register.
+  setBooleanContents(ZeroOrOneBooleanContent);
+
   computeRegisterProperties(STI.getRegisterInfo());
 }
 

@@ -36,6 +36,12 @@ public:
 
   const char *getTargetNodeName(unsigned Opcode) const override;
 
+  // Comparisons produce a 0/1 result in a 64-bit integer register.
+  EVT getSetCCResultType(const DataLayout &DL, LLVMContext &Context,
+                         EVT VT) const override {
+    return MVT::i64;
+  }
+
   SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
                                bool IsVarArg,
                                const SmallVectorImpl<ISD::InputArg> &Ins,
