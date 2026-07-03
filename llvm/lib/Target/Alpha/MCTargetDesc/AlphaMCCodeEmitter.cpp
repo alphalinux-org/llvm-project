@@ -95,9 +95,12 @@ AlphaMCCodeEmitter::getMachineOpValue(const MCInst &MI, const MCOperand &MO,
     return Ctx.getRegisterInfo()->getEncodingValue(MO.getReg());
   if (MO.isImm())
     return static_cast<unsigned>(MO.getImm());
-  // Bare symbol references without an explicit relocation kind are not
-  // expected on ordinary operands.
   assert(MO.isExpr() && "unexpected operand kind");
+  // A relocation-specifier expression (from an assembler !literal/!gprel...
+  // suffix) contributes a fixup of the requested kind.
+  if (auto *SE = dyn_cast<MCSpecifierExpr>(MO.getExpr()))
+    Fixups.push_back(
+        MCFixup::create(0, MO.getExpr(), MCFixupKind(SE->getSpecifier())));
   return 0;
 }
 
