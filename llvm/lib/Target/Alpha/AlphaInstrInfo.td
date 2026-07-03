@@ -51,6 +51,12 @@ def AlphaCall : SDNode<"AlphaISD::CALL", SDTNone,
                        [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
                         SDNPVariadic]>;
 
+// GP-relative address materialization (small/large-data local symbols such as
+// constant-pool entries): the high 16 bits via ldah !gprelhigh and the low 16
+// bits via lda !gprellow.
+def AlphaGprelHi : SDNode<"AlphaISD::GPREL_HI", SDTIntBinOp>;
+def AlphaGprelLo : SDNode<"AlphaISD::GPREL_LO", SDTIntBinOp>;
+
 //===----------------------------------------------------------------------===//
 // Operands and immediate predicates.
 //===----------------------------------------------------------------------===//
@@ -315,6 +321,19 @@ def LDQl : AlphaInst<(outs GPRC:$dst), (ins symbol:$sym),
 }
 def : Pat<(AlphaLiteral tglobaladdr:$sym), (LDQl tglobaladdr:$sym)>;
 
+// GP-relative high/low address parts.  The relocation suffix distinguishes the
+// two; the same symbol operand feeds both.
+let hasSideEffects = 0 in {
+def LDAHg : MFormD<0x09, (outs GPRC:$Ra), (ins gprelhigh_sym:$disp, GPRC:$Rb),
+                   "ldah $Ra, $disp($Rb)\t\t!gprelhigh", []>;
+def LDAg : MFormD<0x08, (outs GPRC:$Ra), (ins gprellow_sym:$disp, GPRC:$Rb),
+                  "lda $Ra, $disp($Rb)\t\t!gprellow", []>;
+}
+def : Pat<(AlphaGprelHi tconstpool:$sym, GPRC:$base),
+          (LDAHg tconstpool:$sym, GPRC:$base)>;
+def : Pat<(AlphaGprelLo tconstpool:$sym, GPRC:$base),
+          (LDAg tconstpool:$sym, GPRC:$base)>;
+
 // Call through the procedure value in $27.  jsr leaves the return address in
 // $26; the following ldgp reloads the caller's global pointer, which the callee
 // may have changed.  $29 is redefined with the caller's gp.
@@ -394,6 +413,10 @@ def LDS : MForm<0x22, (outs FPRC:$Ra), (ins memri:$addr), "lds $Ra, $addr",
 // zero-extending load clears the high half with zapnot.
 def : Pat<(i64 (extloadi32 ADDRri:$addr)), (LDL memri:$addr)>;
 def : Pat<(i64 (zextloadi32 ADDRri:$addr)), (ZAPNOTi (LDL memri:$addr), 15)>;
+
+// An f32 loaded and widened to f64 (e.g. an f32-encoded double constant): lds
+// loads the S_floating value and cvtst widens it exactly.
+def : Pat<(f64 (extloadf32 ADDRri:$addr)), (CVTST (LDS memri:$addr))>;
 
 // Byte and word memory access (BWX extension, ev56 and later).  ldbu/ldwu
 // zero-extend; stb/stw store the low 8/16 bits.  Signed byte/word loads are
