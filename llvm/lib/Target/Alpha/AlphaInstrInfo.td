@@ -137,6 +137,23 @@ def MULQ : ALU_rr<0x13, 0x20, "mulq", mul>;
 def AND  : ALU_rr<0x11, 0x00, "and",  and>;
 def XOR  : ALU_rr<0x11, 0x40, "xor",  xor>;
 
+// Scaled add/subtract: `s4addq $Ra, $Rb, $Rc` computes $Rc = $Ra*4 + $Rb (s8
+// scales by 8); useful for array-index address arithmetic.
+let hasSideEffects = 0 in {
+def S4ADDQ : OForm<0x10, 0x22, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                   "s4addq $Ra, $Rb, $Rc",
+                   [(set i64:$Rc, (add (shl i64:$Ra, (i64 2)), i64:$Rb))]>;
+def S8ADDQ : OForm<0x10, 0x32, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                   "s8addq $Ra, $Rb, $Rc",
+                   [(set i64:$Rc, (add (shl i64:$Ra, (i64 3)), i64:$Rb))]>;
+def S4SUBQ : OForm<0x10, 0x2b, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                   "s4subq $Ra, $Rb, $Rc",
+                   [(set i64:$Rc, (sub (shl i64:$Ra, (i64 2)), i64:$Rb))]>;
+def S8SUBQ : OForm<0x10, 0x3b, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                   "s8subq $Ra, $Rb, $Rc",
+                   [(set i64:$Rc, (sub (shl i64:$Ra, (i64 3)), i64:$Rb))]>;
+}
+
 // Literal (8-bit immediate) form of an operate instruction:
 // `<mnem> $Ra, lit, $Rc` computes $Rc = $Ra <op> zext(lit).
 class ALU_ri<bits<6> opc, bits<7> func, string mnem, SDPatternOperator node>
