@@ -93,6 +93,10 @@ def symbol : SymOperand<"getGprelLowEncoding">;
 
 def ADDRri : ComplexPattern<i64, 2, "SelectADDRri", [frameindex]>;
 
+// Match any address as a single register (used by the pre-BWX byte/word access
+// sequences, which need the effective address for both ldq_u and the extract).
+def ADDRr : ComplexPattern<i64, 1, "SelectAddrReg", []>;
+
 //===----------------------------------------------------------------------===//
 // Instructions.
 //===----------------------------------------------------------------------===//
@@ -489,6 +493,27 @@ def STW : MForm<0x0d, (outs), (ins GPRC:$Ra, memri:$addr), "stw $Ra, $addr",
 def : Pat<(i64 (extloadi8 ADDRri:$addr)), (LDBU memri:$addr)>;
 def : Pat<(i64 (extloadi16 ADDRri:$addr)), (LDWU memri:$addr)>;
 } // Predicates = [HasBWX]
+
+// Pre-BWX byte/word access.  ldq_u loads the aligned quadword containing the
+// datum (ignoring the low three address bits); extbl/extwl extract the byte or
+// word at the position given by the low address bits, zero-extended.
+// ldq_u/stq_u take a base register with an implicit zero displacement; the CPU
+// ignores the low three address bits.
+let mayLoad = 1, hasSideEffects = 0 in
+def LDQ_U : MFormZ<0x0b, (outs GPRC:$Ra), (ins GPRC:$base),
+                   "ldq_u $Ra, 0($base)", []>;
+let hasSideEffects = 0 in {
+def EXTBL : OForm<0x12, 0x06, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                  "extbl $Ra, $Rb, $Rc", []>;
+def EXTWL : OForm<0x12, 0x16, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                  "extwl $Ra, $Rb, $Rc", []>;
+}
+let Predicates = [NotBWX] in {
+def : Pat<(i64 (zextloadi8 ADDRr:$a)),  (EXTBL (LDQ_U GPRC:$a), GPRC:$a)>;
+def : Pat<(i64 (extloadi8 ADDRr:$a)),   (EXTBL (LDQ_U GPRC:$a), GPRC:$a)>;
+def : Pat<(i64 (zextloadi16 ADDRr:$a)), (EXTWL (LDQ_U GPRC:$a), GPRC:$a)>;
+def : Pat<(i64 (extloadi16 ADDRr:$a)),  (EXTWL (LDQ_U GPRC:$a), GPRC:$a)>;
+}
 
 let mayStore = 1, hasSideEffects = 0 in {
 def STL : AlphaInst<(outs), (ins GPRC:$Ra, memri:$addr), "stl $Ra, $addr",

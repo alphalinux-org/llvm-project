@@ -108,6 +108,19 @@ class MFormD<bits<6> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
   let Inst{15-0} = disp;
 }
 
+// Memory format with an implicit zero displacement: Ra (25-21), base (20-16),
+// and a zero displacement field (ldq_u/stq_u, which ignore the low three bits
+// of the address they are given).
+class MFormZ<bits<6> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
+    : AlphaInst<outs, ins, asmstr, pattern> {
+  bits<5> Ra;
+  bits<5> base;
+  let Opcode = opc;
+  let Inst{25-21} = Ra;
+  let Inst{20-16} = base;
+  let Inst{15-0} = 0;
+}
+
 // Memory-format branch (jsr/ret/jmp), opcode 0x1a: Ra (25-21, return address),
 // Rb (20-16, target), 2-bit sub-opcode (15-14), 14-bit hint (13-0).
 class MbrForm<bits<2> sub, dag outs, dag ins, string asmstr, list<dag> pattern>
