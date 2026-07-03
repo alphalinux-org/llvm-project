@@ -69,9 +69,20 @@ MCOperand AlphaAsmPrinter::lowerOperand(const MachineOperand &MO) const {
           Expr, MCConstantExpr::create(MO.getOffset(), OutContext), OutContext);
     return MCOperand::createExpr(Expr);
   }
-  case MachineOperand::MO_ConstantPoolIndex:
+  case MachineOperand::MO_ConstantPoolIndex: {
+    // The offset is part of the address: a constant pool entry can be indexed
+    // into (a vector splat's element, an aggregate's field), and dropping it
+    // names the start of the entry instead.
+    const MCExpr *Expr =
+        MCSymbolRefExpr::create(GetCPISymbol(MO.getIndex()), OutContext);
+    if (MO.getOffset())
+      Expr = MCBinaryExpr::createAdd(
+          Expr, MCConstantExpr::create(MO.getOffset(), OutContext), OutContext);
+    return MCOperand::createExpr(Expr);
+  }
+  case MachineOperand::MO_JumpTableIndex:
     return MCOperand::createExpr(
-        MCSymbolRefExpr::create(GetCPISymbol(MO.getIndex()), OutContext));
+        MCSymbolRefExpr::create(GetJTISymbol(MO.getIndex()), OutContext));
   case MachineOperand::MO_ExternalSymbol:
     return MCOperand::createExpr(MCSymbolRefExpr::create(
         GetExternalSymbolSymbol(MO.getSymbolName()), OutContext));
