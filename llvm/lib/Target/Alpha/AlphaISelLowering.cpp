@@ -208,6 +208,14 @@ SDValue AlphaTargetLowering::LowerGlobalAddress(SDValue Op,
   SDLoc DL(Op);
   SDValue TGA =
       DAG.getTargetGlobalAddress(N->getGlobal(), DL, MVT::i64, N->getOffset());
+
+  // With small-data, form the address GP-relative (ldah/lda
+  // !gprelhigh/!gprellow) instead of loading it from the GOT.
+  if (Subtarget.hasSmallData()) {
+    SDValue GP = DAG.getRegister(Alpha::R29, MVT::i64);
+    SDValue Hi = DAG.getNode(AlphaISD::GPREL_HI, DL, MVT::i64, TGA, GP);
+    return DAG.getNode(AlphaISD::GPREL_LO, DL, MVT::i64, TGA, Hi);
+  }
   return DAG.getNode(AlphaISD::LITERAL, DL, MVT::i64, TGA);
 }
 

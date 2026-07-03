@@ -27,6 +27,11 @@ def HasMVI : Predicate<"Subtarget->hasMVI()">,
 // that they are safe against concurrent accesses to the same quadword.
 def FeatureSafeBWA : SubtargetFeature<"safe-bwa", "HasSafeBWA", "true",
     "Use a lock-based sequence for pre-BWX byte/word stores">;
+
+// Address global data GP-relative (gprel) rather than through the GOT.  This is
+// gcc's -msmall-data (the default is -mlarge-data, i.e. GOT/literal).
+def FeatureSmallData : SubtargetFeature<"small-data", "HasSmallData", "true",
+    "Address global data GP-relative instead of through the GOT">;
 // Pre-BWX byte/word store variants: plain read-modify-write vs. lock-based.
 def UnsafeBWStore
     : Predicate<"!Subtarget->hasBWX() && !Subtarget->hasSafeBWA()">;
