@@ -81,6 +81,9 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   for (auto Op : {ISD::SDIV, ISD::UDIV, ISD::SREM, ISD::UREM})
     setOperationAction(Op, MVT::i64, Custom);
 
+  // No byte-swap instruction; expand to shift/mask.
+  setOperationAction(ISD::BSWAP, MVT::i64, Expand);
+
   // The CIX extension (ev67) provides population/leading/trailing zero counts;
   // otherwise they are expanded to bit-twiddling sequences.
   for (auto Op : {ISD::CTPOP, ISD::CTLZ, ISD::CTTZ})
