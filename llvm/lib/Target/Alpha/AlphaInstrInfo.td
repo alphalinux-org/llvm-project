@@ -49,16 +49,28 @@ def AlphaRet : SDNode<"AlphaISD::RET_GLUE", SDTNone,
 let hasSideEffects = 0, mayLoad = 0, mayStore = 0 in {
 
 // NOP is the canonical `bis $31, $31, $31`.
-def NOP : AlphaInst<(outs), (ins), "nop", []> {
-  let Opcode = 0x11;   // Integer arithmetic (operate) primary opcode.
+def NOP : OForm<0x11, 0x20, (outs), (ins), "nop", []> {
+  let Ra = 31;
+  let Rb = 31;
+  let Rc = 31;
 }
 
-// Integer register-to-register move: `bis $Ra, $Rb, $Rc` computes
-// $Rc = $Ra OR $Rb.  Used by copyPhysReg as `bis $31, $Rb, $Rc`.
-def BIS : AlphaInst<(outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
-                    "bis $Ra, $Rb, $Rc", []> {
-  let Opcode = 0x11;
-}
+// Register-register integer operate instruction: `<mnem> $Ra, $Rb, $Rc`
+// computes $Rc = $Ra <op> $Rb.
+class ALU_rr<bits<6> opc, bits<7> func, string mnem, SDPatternOperator node>
+    : OForm<opc, func, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+            mnem # " $Ra, $Rb, $Rc",
+            [(set i64:$Rc, (node i64:$Ra, i64:$Rb))]>;
+
+def ADDQ : ALU_rr<0x10, 0x20, "addq", add>;
+def SUBQ : ALU_rr<0x10, 0x29, "subq", sub>;
+def MULQ : ALU_rr<0x13, 0x20, "mulq", mul>;
+def AND  : ALU_rr<0x11, 0x00, "and",  and>;
+def XOR  : ALU_rr<0x11, 0x40, "xor",  xor>;
+
+// `bis $Ra, $Rb, $Rc` computes $Rc = $Ra OR $Rb.  copyPhysReg emits it as
+// `bis $31, $Rb, $Rc` to move an integer register.
+def BIS : ALU_rr<0x11, 0x20, "bis", or>;
 
 // Floating-point copy-sign: `cpys $Ra, $Rb, $Rc`.  Used by copyPhysReg as
 // `cpys $Rb, $Rb, $Rc` to move a floating-point register.
