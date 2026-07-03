@@ -173,6 +173,15 @@ def SRAi : ALU_ri<0x12, 0x3c, "sra", sra>;
 def ZAPNOTi : OFormL<0x12, 0x31, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
                         "zapnot $Ra, $lit, $Rc", []>;
 
+// Byte/word sign-extend from the BWX extension: one instruction in place of the
+// sll/sra pair.  The single source is $Rb (with $Ra = $31).
+let Predicates = [HasBWX], hasSideEffects = 0 in {
+def SEXTB : OForm<0x1c, 0x00, (outs GPRC:$Rc), (ins GPRC:$Rb), "sextb $Rb, $Rc",
+                      [(set i64:$Rc, (sext_inreg i64:$Rb, i8))]>;
+def SEXTW : OForm<0x1c, 0x01, (outs GPRC:$Rc), (ins GPRC:$Rb), "sextw $Rb, $Rc",
+                      [(set i64:$Rc, (sext_inreg i64:$Rb, i16))]>;
+}
+
 // Count instructions from the CIX extension (ev67).  The single source is $Rb
 // (with $Ra = $31); ctlz/cttz of zero produce 64, matching ISD semantics.
 let Predicates = [HasCIX], hasSideEffects = 0 in {
