@@ -65,6 +65,29 @@ void AlphaDAGToDAGISel::Select(SDNode *Node) {
     Node->setNodeId(-1);
     return;
   }
+
+  // Materialize a constant that does not fit in the 16-bit `lda` displacement
+  // as an ldah/lda pair, when it decomposes into two 16-bit signed halves:
+  // V = (Hi << 16) + Lo.  16-bit constants are handled by a pattern; constants
+  // that need a third instruction (e.g. 0x7fffffff) are not supported yet.
+  if (Node->getOpcode() == ISD::Constant && Node->getValueType(0) == MVT::i64) {
+    int64_t V = cast<ConstantSDNode>(Node)->getSExtValue();
+    int64_t Lo = static_cast<int16_t>(V);
+    int64_t Hi = (V - Lo) >> 16;
+    if (!isInt<16>(V) && isInt<16>(Hi)) {
+      SDLoc DL(Node);
+      SDValue Zero = CurDAG->getRegister(Alpha::R31, MVT::i64);
+      SDNode *High = CurDAG->getMachineNode(
+          Alpha::LDAH, DL, MVT::i64,
+          CurDAG->getTargetConstant(Hi, DL, MVT::i64), Zero);
+      SDNode *Low = CurDAG->getMachineNode(
+          Alpha::LDA, DL, MVT::i64, CurDAG->getTargetConstant(Lo, DL, MVT::i64),
+          SDValue(High, 0));
+      ReplaceNode(Node, Low);
+      return;
+    }
+  }
+
   SelectCode(Node);
 }
 
