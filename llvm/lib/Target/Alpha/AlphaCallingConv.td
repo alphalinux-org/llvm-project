@@ -10,8 +10,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-// Integer args in $16-$21, FP args in $f16-$f21 (register slots are shared),
-// remaining args on the stack in 8-byte slots.
+// Integer args in $16-$21, FP args in $f16-$f21, remaining args on the stack
+// in 8-byte slots.  The six argument slots are shared between the integer and
+// floating registers: the Nth argument uses $16+N or $f16+N by its type, so an
+// integer register and its FP counterpart are allocated together (via a shadow)
+// to keep the slot index in step regardless of the mix of types.
 def CC_Alpha : CallingConv<[
   CCIfType<[i8, i16, i32], CCPromoteToType<i64>>,
   CCIfType<[i64], CCAssignToRegWithShadow<[R16, R17, R18, R19, R20, R21],
@@ -22,11 +25,15 @@ def CC_Alpha : CallingConv<[
   CCIfType<[f32, f64], CCAssignToStack<8, 8>>
 ]>;
 
-// Return values: integers in $0, floating-point in $f0.
+// Return values: an integer in $0, a floating-point value in $f0, and the two
+// halves of a complex float or complex double in $f0/$f1.  Anything larger than
+// a register -- an aggregate, __int128, X_floating -- is returned in memory
+// through a hidden pointer the caller passes in $16, so only one integer
+// register is available here; see AlphaTargetLowering::CanLowerReturn.
 def RetCC_Alpha : CallingConv<[
   CCIfType<[i8, i16, i32], CCPromoteToType<i64>>,
   CCIfType<[i64], CCAssignToReg<[R0]>>,
-  CCIfType<[f32, f64], CCAssignToReg<[F0]>>
+  CCIfType<[f32, f64], CCAssignToReg<[F0, F1]>>
 ]>;
 
 // Callee-saved integer registers ($9-$15) and floating-point registers

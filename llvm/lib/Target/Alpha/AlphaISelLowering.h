@@ -21,9 +21,20 @@ namespace llvm {
 class AlphaSubtarget;
 class AlphaTargetMachine;
 
+namespace AlphaISD {
+enum NodeType : unsigned {
+  FIRST_NUMBER = ISD::BUILTIN_OP_END,
+
+  // Return with a glue-connected chain of copies into the return registers.
+  RET_GLUE,
+};
+} // namespace AlphaISD
+
 class AlphaTargetLowering : public TargetLowering {
 public:
   AlphaTargetLowering(const AlphaTargetMachine &TM, const AlphaSubtarget &STI);
+
+  const char *getTargetNodeName(unsigned Opcode) const override;
 
   SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
                                bool IsVarArg,
@@ -35,6 +46,15 @@ public:
                       const SmallVectorImpl<ISD::OutputArg> &Outs,
                       const SmallVectorImpl<SDValue> &OutVals, const SDLoc &DL,
                       SelectionDAG &DAG) const override;
+
+  // Anything that does not fit the single return register comes back in memory
+  // through a hidden pointer, as it does under GCC (alpha_return_in_memory
+  // returns true for every value wider than a word).  Returning false here is
+  // what makes the caller allocate the buffer and pass it in $16.
+  bool CanLowerReturn(CallingConv::ID CallConv, MachineFunction &MF,
+                      bool IsVarArg,
+                      const SmallVectorImpl<ISD::OutputArg> &Outs,
+                      LLVMContext &Context, const Type *RetTy) const override;
 
 private:
   const AlphaSubtarget &Subtarget;
