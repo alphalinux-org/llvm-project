@@ -86,6 +86,15 @@ TEST(TripleTest, ParsedIDs) {
   EXPECT_EQ(Triple::Darwin, T.getOS());
   EXPECT_EQ(Triple::UnknownEnvironment, T.getEnvironment());
 
+  T = Triple("alpha-unknown-linux-gnu");
+  EXPECT_EQ(Triple::alpha, T.getArch());
+  EXPECT_EQ(Triple::UnknownVendor, T.getVendor());
+  EXPECT_EQ(Triple::Linux, T.getOS());
+  EXPECT_EQ(Triple::GNU, T.getEnvironment());
+  EXPECT_TRUE(T.isAlpha());
+  EXPECT_TRUE(T.isArch64Bit());
+  EXPECT_TRUE(T.isLittleEndian());
+
   T = Triple("i386-pc-elfiamcu");
   EXPECT_EQ(Triple::x86, T.getArch());
   EXPECT_EQ(Triple::PC, T.getVendor());
