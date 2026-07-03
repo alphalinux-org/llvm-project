@@ -92,6 +92,16 @@ def SLL : ALU_rr<0x12, 0x39, "sll", shl>;
 def SRL : ALU_rr<0x12, 0x34, "srl", srl>;
 def SRA : ALU_rr<0x12, 0x3c, "sra", sra>;
 
+// Comparisons write 0 or 1 into $Rc (Alpha has no condition-code register).
+class CMP_rr<bits<7> func, string mnem>
+    : OForm<0x10, func, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+            mnem # " $Ra, $Rb, $Rc", []>;
+def CMPEQ  : CMP_rr<0x2d, "cmpeq">;
+def CMPLT  : CMP_rr<0x4d, "cmplt">;
+def CMPLE  : CMP_rr<0x6d, "cmple">;
+def CMPULT : CMP_rr<0x1d, "cmpult">;
+def CMPULE : CMP_rr<0x3d, "cmpule">;
+
 // `bis $Ra, $Rb, $Rc` computes $Rc = $Ra OR $Rb.  copyPhysReg emits it as
 // `bis $31, $Rb, $Rc` to move an integer register.
 def BIS : ALU_rr<0x11, 0x20, "bis", or>;
@@ -112,6 +122,20 @@ def LDA : MFormD<0x08, (outs GPRC:$Ra), (ins s16imm:$disp, GPRC:$Rb),
 
 // Materialize a small signed constant with `lda $Rc, imm($31)`.
 def : Pat<(i64 immSExt16:$imm), (LDA immSExt16:$imm, R31)>;
+
+// setcc.  Conditions without a direct instruction are formed by swapping the
+// operands (gt/ge) or inverting equality (ne).
+def : Pat<(setcc GPRC:$a, GPRC:$b, SETEQ),  (CMPEQ  GPRC:$a, GPRC:$b)>;
+def : Pat<(setcc GPRC:$a, GPRC:$b, SETNE),  (XOR (CMPEQ GPRC:$a, GPRC:$b),
+                                                 (LDA 1, R31))>;
+def : Pat<(setcc GPRC:$a, GPRC:$b, SETLT),  (CMPLT  GPRC:$a, GPRC:$b)>;
+def : Pat<(setcc GPRC:$a, GPRC:$b, SETLE),  (CMPLE  GPRC:$a, GPRC:$b)>;
+def : Pat<(setcc GPRC:$a, GPRC:$b, SETGT),  (CMPLT  GPRC:$b, GPRC:$a)>;
+def : Pat<(setcc GPRC:$a, GPRC:$b, SETGE),  (CMPLE  GPRC:$b, GPRC:$a)>;
+def : Pat<(setcc GPRC:$a, GPRC:$b, SETULT), (CMPULT GPRC:$a, GPRC:$b)>;
+def : Pat<(setcc GPRC:$a, GPRC:$b, SETULE), (CMPULE GPRC:$a, GPRC:$b)>;
+def : Pat<(setcc GPRC:$a, GPRC:$b, SETUGT), (CMPULT GPRC:$b, GPRC:$a)>;
+def : Pat<(setcc GPRC:$a, GPRC:$b, SETUGE), (CMPULE GPRC:$b, GPRC:$a)>;
 
 //===----------------------------------------------------------------------===//
 // Aligned loads and stores (base + 16-bit displacement).
