@@ -24,10 +24,12 @@ class LLVM_LIBRARY_VISIBILITY AlphaTargetInfo : public TargetInfo {
   static const char *const GCCRegNames[];
 
   // Optional instruction-set extensions, selected by -mcpu or -m<ext> flags.
-  bool HasBWX = false; // Byte/word memory access.
-  bool HasCIX = false; // Count instructions.
-  bool HasMVI = false; // Motion video instructions.
-  bool HasFIX = false; // Float/int register moves and conversions.
+  bool HasBWX = false;         // Byte/word memory access.
+  bool HasCIX = false;         // Count instructions.
+  bool HasMVI = false;         // Motion video instructions.
+  bool HasFIX = false;         // Float/int register moves and conversions.
+  bool HasIEEE = false;        // -mieee: IEEE FP with software completion.
+  bool HasIEEEInexact = false; // -mieee-with-inexact.
 
   std::string CPU = "generic"; // Selected processor (-mcpu).
 
@@ -106,6 +108,10 @@ public:
         HasMVI = true;
       else if (Feature == "+fix")
         HasFIX = true;
+      else if (Feature == "+ieee")
+        HasIEEE = true;
+      else if (Feature == "+ieee-with-inexact")
+        HasIEEE = HasIEEEInexact = true;
     }
     return true;
   }
@@ -117,6 +123,8 @@ public:
         .Case("cix", HasCIX)
         .Case("mvi", HasMVI)
         .Case("fix", HasFIX)
+        .Case("ieee", HasIEEE)
+        .Case("ieee-with-inexact", HasIEEEInexact)
         .Default(false);
   }
 

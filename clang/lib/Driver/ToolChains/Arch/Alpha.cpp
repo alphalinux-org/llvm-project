@@ -41,4 +41,15 @@ void alpha::getAlphaTargetFeatures(const Driver &D, const ArgList &Args,
   Handle(options::OPT_mcix, options::OPT_mno_cix, "cix");
   Handle(options::OPT_mmax, options::OPT_mno_max, "mvi");
   Handle(options::OPT_mfix, options::OPT_mno_fix, "fix");
+
+  // IEEE floating-point conformance.  -mieee-with-inexact implies -mieee.
+  if (Args.hasArg(options::OPT_mieee_with_inexact)) {
+    Features.push_back("+ieee-with-inexact");
+    // -mieee-with-inexact implies -mieee; claim the weaker flag to silence
+    // "unsupported option" when both are passed (as glibc does).
+    Args.ClaimAllArgs(options::OPT_mieee);
+    Args.ClaimAllArgs(options::OPT_mno_ieee);
+  } else {
+    Handle(options::OPT_mieee, options::OPT_mno_ieee, "ieee");
+  }
 }
