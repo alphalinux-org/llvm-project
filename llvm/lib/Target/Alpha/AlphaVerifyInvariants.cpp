@@ -22,6 +22,11 @@
 // error and so keeps scheduling-model completeness true by construction rather
 // than by review.
 //
+// The invariant checked outside this pass -- that no instruction requiring a
+// subtarget feature is emitted for a subtarget without it -- is in
+// AlphaAsmPrinter, where TableGen already generates the predicate table
+// (Alpha_MC::verifyInstructionPredicates).
+//
 // The pass is on by default in any build with assertions and can be turned on
 // or off anywhere with -alpha-check-invariants.
 //
