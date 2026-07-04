@@ -84,6 +84,10 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   // since i16 and i32 are not legal register types.
   setOperationAction(ISD::LOAD, MVT::i64, Custom);
   setOperationAction(ISD::STORE, MVT::i64, Custom);
+
+  // Software-directed prefetch lowers to a load whose destination is R31/F31,
+  // but only where that is a real prefetch; drop it otherwise.
+  setOperationAction(ISD::PREFETCH, MVT::Other, Custom);
   for (MVT VT : {MVT::i16, MVT::i32}) {
     setLoadExtAction(ISD::EXTLOAD, MVT::i64, VT, Custom);
     setLoadExtAction(ISD::ZEXTLOAD, MVT::i64, VT, Custom);
@@ -369,16 +373,6 @@ SDValue AlphaTargetLowering::LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
 SDValue AlphaTargetLowering::LowerOperation(SDValue Op,
                                             SelectionDAG &DAG) const {
   switch (Op.getOpcode()) {
-  case ISD::ATOMIC_FENCE:
-    // A fence within a single thread orders nothing another processor can see:
-    // it exists only to keep the compiler from moving accesses across it, and
-    // MEMBARRIER says that without asking for an instruction.  A cross-thread
-    // one falls through to the mb pattern.
-    if (static_cast<SyncScope::ID>(Op.getConstantOperandVal(2)) ==
-        SyncScope::SingleThread)
-      return DAG.getNode(ISD::MEMBARRIER, SDLoc(Op), MVT::Other,
-                         Op.getOperand(0));
-    return Op;
   case ISD::GlobalAddress:
     return LowerGlobalAddress(Op, DAG);
   case ISD::GlobalTLSAddress:
@@ -404,6 +398,23 @@ SDValue AlphaTargetLowering::LowerOperation(SDValue Op,
   case ISD::SREM:
   case ISD::UREM:
     return LowerDivRem(Op, DAG);
+  case ISD::PREFETCH:
+    // Available only on the 21264 and later; drop it elsewhere (a load to
+    // R31/F31 there is an ordinary load that can fault).  When available, keep
+    // the node for the prefetch patterns to select.
+    if (!Subtarget.hasPrefetch())
+      return Op.getOperand(0);
+    return Op;
+  case ISD::ATOMIC_FENCE:
+    // A fence within a single thread orders nothing another processor can see:
+    // it exists only to keep the compiler from moving accesses across it, and
+    // MEMBARRIER says that without asking for an instruction.  A cross-thread
+    // one falls through to the mb pattern.
+    if (static_cast<SyncScope::ID>(Op.getConstantOperandVal(2)) ==
+        SyncScope::SingleThread)
+      return DAG.getNode(ISD::MEMBARRIER, SDLoc(Op), MVT::Other,
+                         Op.getOperand(0));
+    return Op;
   case ISD::LOAD:
     return LowerLOAD(Op, DAG);
   case ISD::STORE:
