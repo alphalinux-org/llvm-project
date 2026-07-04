@@ -8,7 +8,6 @@
 
 ; CHECK-LABEL: <loopcount>:
 ; CHECK:      bne {{\$[0-9]+}}, -6
-; CHECK-NEXT: br {{\$[0-9]+}}, 0
 define i64 @loopcount(i64 %n) {
 entry:
   br label %loop
