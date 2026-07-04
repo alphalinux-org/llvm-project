@@ -48,6 +48,10 @@ enum NodeType : unsigned {
   // with ldah !tprelhi and lda !tprello.
   TPREL_HI,
   TPREL_LO,
+
+  // Initial-exec TLS: the thread-pointer-relative offset loaded from the GOT
+  // with ldq !gottprel.
+  GOTTPREL,
 };
 } // namespace AlphaISD
 

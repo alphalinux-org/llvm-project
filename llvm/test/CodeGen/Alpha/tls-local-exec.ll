@@ -53,3 +53,19 @@ define i64 @readq() {
   %v = load i64, ptr %p
   ret i64 %v
 }
+
+; Initial-exec: the thread-pointer offset is loaded from the GOT with
+; ldq !gottprel, then added to the thread pointer read from rduniq.
+@ie = external thread_local(initialexec) global i32
+
+; CHECK-LABEL: read_ie:
+; CHECK:      ldgp $29, 0($27)
+; CHECK:      call_pal 0x9e
+; CHECK:      ldq {{\$[0-9]+}}, ie($29)		!gottprel
+; CHECK:      addq {{\$[0-9]+}}, {{\$[0-9]+}}, {{\$[0-9]+}}
+; CHECK:      ldl {{\$[0-9]+}}, 0({{\$[0-9]+}})
+define i32 @read_ie() {
+  %p = call ptr @llvm.threadlocal.address.p0(ptr @ie)
+  %v = load i32, ptr %p
+  ret i32 %v
+}

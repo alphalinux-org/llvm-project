@@ -200,6 +200,8 @@ const char *AlphaTargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "AlphaISD::TPREL_HI";
   case AlphaISD::TPREL_LO:
     return "AlphaISD::TPREL_LO";
+  case AlphaISD::GOTTPREL:
+    return "AlphaISD::GOTTPREL";
   }
   return nullptr;
 }
@@ -345,11 +347,22 @@ SDValue AlphaTargetLowering::LowerGlobalTLSAddress(SDValue Op,
   SDValue TP =
       DAG.getCopyFromReg(DAG.getEntryNode(), DL, Alpha::R0, MVT::i64, RdUniq);
 
-  // Only local-exec is implemented: the offset from the thread pointer is a
-  // link-time constant formed with ldah !tprelhi / lda !tprello.
-  if (Model != TLSModel::LocalExec)
-    report_fatal_error("only local-exec TLS is supported on Alpha");
   SDValue TGA = DAG.getTargetGlobalAddress(GV, DL, MVT::i64, N->getOffset());
+
+  if (Model == TLSModel::InitialExec) {
+    // The offset from the thread pointer is loaded from the GOT
+    // (ldq !gottprel), then added to the thread pointer.
+    DAG.getMachineFunction().getInfo<AlphaMachineFunctionInfo>()->setUsesGP();
+    SDValue Off = DAG.getNode(AlphaISD::GOTTPREL, DL, MVT::i64, TGA);
+    return DAG.getNode(ISD::ADD, DL, MVT::i64, TP, Off);
+  }
+
+  // Local-exec: the offset from the thread pointer is a link-time constant
+  // formed with ldah !tprelhi / lda !tprello.
+  if (Model != TLSModel::LocalExec)
+    report_fatal_error("only local-exec and initial-exec TLS are supported on "
+                       "Alpha");
+
   SDValue Hi = DAG.getNode(AlphaISD::TPREL_HI, DL, MVT::i64, TGA, TP);
   return DAG.getNode(AlphaISD::TPREL_LO, DL, MVT::i64, TGA, Hi);
 }

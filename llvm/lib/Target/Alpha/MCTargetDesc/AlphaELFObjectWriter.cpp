@@ -13,6 +13,7 @@
 #include "llvm/MC/MCELFObjectWriter.h"
 #include "llvm/MC/MCFixup.h"
 #include "llvm/MC/MCObjectWriter.h"
+#include "llvm/MC/MCSymbolELF.h"
 #include "llvm/MC/MCValue.h"
 #include "llvm/Support/ErrorHandling.h"
 
@@ -29,6 +30,18 @@ public:
 protected:
   unsigned getRelocType(const MCFixup &Fixup, const MCValue &Target,
                         bool IsPCRel) const override {
+    // A symbol referenced by a TLS relocation must be typed STT_TLS so the
+    // linker matches it against the thread-local definition.
+    switch (unsigned(Fixup.getKind())) {
+    case Alpha::fixup_alpha_tprelhi:
+    case Alpha::fixup_alpha_tprello:
+    case Alpha::fixup_alpha_gottprel:
+      if (auto *SA = const_cast<MCSymbol *>(Target.getAddSym()))
+        static_cast<MCSymbolELF *>(SA)->setType(ELF::STT_TLS);
+      break;
+    default:
+      break;
+    }
     switch (unsigned(Fixup.getKind())) {
     case FK_Data_4:
       return IsPCRel ? ELF::R_ALPHA_SREL32 : ELF::R_ALPHA_REFLONG;
@@ -48,6 +61,8 @@ protected:
       return ELF::R_ALPHA_TPRELHI;
     case Alpha::fixup_alpha_tprello:
       return ELF::R_ALPHA_TPRELLO;
+    case Alpha::fixup_alpha_gottprel:
+      return ELF::R_ALPHA_GOTTPREL;
     default:
       reportError(Fixup.getLoc(), "unsupported relocation type");
       return ELF::R_ALPHA_NONE;
@@ -62,6 +77,7 @@ protected:
     case ELF::R_ALPHA_GPRELLOW:
     case ELF::R_ALPHA_TPRELHI:
     case ELF::R_ALPHA_TPRELLO:
+    case ELF::R_ALPHA_GOTTPREL:
       return true;
     default:
       return false;
