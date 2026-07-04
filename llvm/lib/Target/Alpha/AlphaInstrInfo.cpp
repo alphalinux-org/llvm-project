@@ -273,6 +273,78 @@ bool AlphaInstrInfo::reverseBranchCondition(
 
 bool AlphaInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   unsigned Opc = MI.getOpcode();
+
+  if (Opc == Alpha::RMW_USTORE) {
+    // A misaligned store: read the one or two quadwords the field falls in,
+    // splice the field into them and write them back.  Both reads come before
+    // either write, so a field that spans two quadwords is written correctly
+    // whichever way round they are; keeping the whole sequence together is what
+    // stops another store to the same quadword from being lost.
+    MachineBasicBlock &MBB = *MI.getParent();
+    MachineBasicBlock::iterator End = std::next(MI.getIterator());
+    DebugLoc DL = MI.getDebugLoc();
+    Register HiAddr = MI.getOperand(0).getReg();
+    Register Lo = MI.getOperand(1).getReg();
+    Register Hi = MI.getOperand(2).getReg();
+    Register Ins = MI.getOperand(3).getReg();
+    Register Val = MI.getOperand(4).getReg();
+    Register Addr = MI.getOperand(5).getReg();
+    int64_t Bytes = MI.getOperand(6).getImm();
+
+    unsigned InsL, InsH, MskL, MskH;
+    switch (Bytes) {
+    case 2:
+      InsL = Alpha::INSWL;
+      InsH = Alpha::INSWH;
+      MskL = Alpha::MSKWL;
+      MskH = Alpha::MSKWH;
+      break;
+    case 4:
+      InsL = Alpha::INSLL;
+      InsH = Alpha::INSLH;
+      MskL = Alpha::MSKLL;
+      MskH = Alpha::MSKLH;
+      break;
+    default:
+      InsL = Alpha::INSQL;
+      InsH = Alpha::INSQH;
+      MskL = Alpha::MSKQL;
+      MskH = Alpha::MSKQH;
+      break;
+    }
+
+    MachineInstrBuilder First = BuildMI(MBB, MI, DL, get(Alpha::LDA), HiAddr)
+                                    .addImm(Bytes - 1)
+                                    .addReg(Addr);
+    addNarrowedMemOperands(
+        BuildMI(MBB, MI, DL, get(Alpha::LDQ_U), Lo).addReg(Addr), MI,
+        MachineMemOperand::MOLoad);
+    addNarrowedMemOperands(
+        BuildMI(MBB, MI, DL, get(Alpha::LDQ_U), Hi).addReg(HiAddr), MI,
+        MachineMemOperand::MOLoad);
+
+    // The high quadword first: when the field does not cross a boundary the
+    // two are the same quadword, and the high half is then empty, so writing it
+    // first leaves the low half's write-back as the one that counts.
+    BuildMI(MBB, MI, DL, get(MskH), Hi).addReg(Hi).addReg(Addr);
+    BuildMI(MBB, MI, DL, get(InsH), Ins).addReg(Val).addReg(Addr);
+    BuildMI(MBB, MI, DL, get(Alpha::BIS), Hi).addReg(Hi).addReg(Ins);
+    addNarrowedMemOperands(
+        BuildMI(MBB, MI, DL, get(Alpha::STQ_U)).addReg(Hi).addReg(HiAddr), MI,
+        MachineMemOperand::MOStore);
+
+    BuildMI(MBB, MI, DL, get(MskL), Lo).addReg(Lo).addReg(Addr);
+    BuildMI(MBB, MI, DL, get(InsL), Ins).addReg(Val).addReg(Addr);
+    BuildMI(MBB, MI, DL, get(Alpha::BIS), Lo).addReg(Lo).addReg(Ins);
+    addNarrowedMemOperands(
+        BuildMI(MBB, MI, DL, get(Alpha::STQ_U)).addReg(Lo).addReg(Addr), MI,
+        MachineMemOperand::MOStore);
+
+    MBB.erase(MI);
+    finalizeBundle(MBB, First->getIterator(), End.getInstrIterator());
+    return true;
+  }
+
   if (Opc != Alpha::RMW_STOREI8 && Opc != Alpha::RMW_STOREI16)
     return false;
 
