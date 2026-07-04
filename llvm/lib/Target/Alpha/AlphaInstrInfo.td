@@ -963,14 +963,18 @@ def RMW_STOREI16 : AlphaPseudo<(outs GPRC:$t1, GPRC:$t2),
                                (ins GPRC:$val, GPRC:$addr), "", []>;
 }
 
-// Lock-based byte/word store (-msafe-bwa): the read-modify-write is done with
-// an ldq_l/stq_c loop by a custom inserter.
-let usesCustomInserter = 1, mayLoad = 1, mayStore = 1,
-    Predicates = [SafeBWStore] in {
-def SAFE_STOREI8  : AlphaPseudo<(outs), (ins GPRC:$val, GPRC:$addr), "",
-                                [(truncstorei8 GPRC:$val, ADDRr:$addr)]>;
-def SAFE_STOREI16 : AlphaPseudo<(outs), (ins GPRC:$val, GPRC:$addr), "",
-                                [(truncstorei16 GPRC:$val, ADDRr:$addr)]>;
+// Lock-based byte/word store: the read-modify-write is done with an
+// ldq_l/stq_c loop by a custom inserter.  Used for -msafe-bwa and, always, for
+// pre-BWX atomic stores (where the plain read-modify-write is not atomic).
+let usesCustomInserter = 1, mayLoad = 1, mayStore = 1 in {
+def SAFE_STOREI8  : AlphaPseudo<(outs), (ins GPRC:$val, GPRC:$addr), "", []>;
+def SAFE_STOREI16 : AlphaPseudo<(outs), (ins GPRC:$val, GPRC:$addr), "", []>;
+}
+let Predicates = [SafeBWStore] in {
+def : Pat<(truncstorei8 GPRC:$val, ADDRr:$addr),
+          (SAFE_STOREI8 GPRC:$val, GPRC:$addr)>;
+def : Pat<(truncstorei16 GPRC:$val, ADDRr:$addr),
+          (SAFE_STOREI16 GPRC:$val, GPRC:$addr)>;
 }
 
 let mayStore = 1, hasSideEffects = 0 in {
@@ -1016,6 +1020,21 @@ def : Pat<(i64 (atomic_load_sext_8 ADDRr:$a)),
           (SRAi (SLLi (EXTBL (LDQ_U GPRC:$a), GPRC:$a), 56), 56)>;
 def : Pat<(i64 (atomic_load_sext_16 ADDRr:$a)),
           (SRAi (SLLi (EXTWL (LDQ_U GPRC:$a), GPRC:$a), 48), 48)>;
+}
+
+// A byte/word atomic store: stb/stw with BWX; otherwise the lock-based
+// ldq_l/stq_c sequence, since the plain read-modify-write is not atomic.
+let Predicates = [HasBWX] in {
+def : Pat<(atomic_store_8 GPRC:$val, ADDRri:$addr),
+          (STB GPRC:$val, memri:$addr)>;
+def : Pat<(atomic_store_16 GPRC:$val, ADDRri:$addr),
+          (STW GPRC:$val, memri:$addr)>;
+}
+let Predicates = [NotBWX] in {
+def : Pat<(atomic_store_8 GPRC:$val, ADDRr:$addr),
+          (SAFE_STOREI8 GPRC:$val, GPRC:$addr)>;
+def : Pat<(atomic_store_16 GPRC:$val, ADDRr:$addr),
+          (SAFE_STOREI16 GPRC:$val, GPRC:$addr)>;
 }
 
 // Load-locked / store-conditional, the primitives for atomic read-modify-write.
