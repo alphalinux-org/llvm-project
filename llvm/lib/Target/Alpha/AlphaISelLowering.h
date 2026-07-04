@@ -52,7 +52,8 @@ public:
 
   const char *getTargetNodeName(unsigned Opcode) const override;
 
-  // Inline assembly: "r" selects an integer register.
+  // Inline assembly: "r" selects an integer register, "f" a floating-point one.
+  ConstraintType getConstraintType(StringRef Constraint) const override;
   std::pair<unsigned, const TargetRegisterClass *>
   getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
                                StringRef Constraint, MVT VT) const override;
