@@ -151,14 +151,31 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   computeRegisterProperties(STI.getRegisterInfo());
 }
 
+TargetLowering::ConstraintType
+AlphaTargetLowering::getConstraintType(StringRef Constraint) const {
+  if (Constraint.size() == 1 && Constraint[0] == 'f')
+    return C_RegisterClass;
+  return TargetLowering::getConstraintType(Constraint);
+}
+
 std::pair<unsigned, const TargetRegisterClass *>
 AlphaTargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
                                                   StringRef Constraint,
                                                   MVT VT) const {
-  // "r" selects an integer register.  (Floating-point "f" operands still need
-  // register-class spilling work and are left to the generic handler.)
-  if (Constraint.size() == 1 && Constraint[0] == 'r')
-    return std::make_pair(0U, &Alpha::GPRCRegClass);
+  if (Constraint.size() == 1) {
+    switch (Constraint[0]) {
+    case 'r':
+      return std::make_pair(0U, &Alpha::GPRCRegClass);
+    case 'f':
+      // Use a single-value-type register class so the operand's value type is
+      // unambiguous (the shared FPRC would default to f32 and mishandle f64).
+      // An integer bound to an FP register (e.g. loading the FPCR) is 64-bit,
+      // so treat i64 like f64.
+      if (VT == MVT::f64 || VT == MVT::i64)
+        return std::make_pair(0U, &Alpha::F8RCRegClass);
+      return std::make_pair(0U, &Alpha::F4RCRegClass);
+    }
+  }
   return TargetLowering::getRegForInlineAsmConstraint(TRI, Constraint, VT);
 }
 
