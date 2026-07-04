@@ -232,6 +232,13 @@
 // RUN: not %clang --target=x86_64-linux-android -fsanitize=memory %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-MSAN-ANDROID
 // CHECK-MSAN-ANDROID: unsupported option '-fsanitize=memory' for target
 
+// RUN: not %clang --target=alpha-unknown-linux-gnu -fsanitize=memory %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-MSAN-ALPHA
+// CHECK-MSAN-ALPHA: unsupported option '-fsanitize=memory' for target 'alpha-unknown-linux-gnu'
+
+// RUN: %clang --target=alpha-unknown-linux-gnu -fsanitize=address %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-ASAN-ALPHA
+// RUN: %clang --target=alpha-unknown-linux-gnu -fsanitize=undefined %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-ASAN-ALPHA
+// CHECK-ASAN-ALPHA-NOT: unsupported option
+
 // RUN: %clang --target=x86_64-linux-gnu -fsanitize=memory %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-MSAN
 // CHECK-MSAN: "-fno-assume-sane-operator-new"
 // RUN: %clang --target=x86_64-linux-gnu -fsanitize=address %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-ASAN

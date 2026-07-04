@@ -100,6 +100,7 @@ static bool useFramePointerForTargetByDefault(const llvm::opt::ArgList &Args,
     // XCore never wants frame pointers, regardless of OS.
     // WebAssembly never wants frame pointers.
     return false;
+  case llvm::Triple::alpha:
   case llvm::Triple::ppc:
   case llvm::Triple::ppcle:
   case llvm::Triple::ppc64:
@@ -585,6 +586,8 @@ void tools::AddLinkerInputs(const ToolChain &TC, const InputInfoList &Inputs,
 
 const char *tools::getLDMOption(const llvm::Triple &T, const ArgList &Args) {
   switch (T.getArch()) {
+  case llvm::Triple::alpha:
+    return "elf64alpha";
   case llvm::Triple::x86:
     if (T.isOSIAMCU())
       return "elf_iamcu";
