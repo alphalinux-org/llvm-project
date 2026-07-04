@@ -1215,3 +1215,13 @@ let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1,
     Ra = 31 in
 def JMP : MbrForm<0b00, (outs), (ins parenGPR:$Rb), "jmp $$31, $Rb, 0", []>;
 def : Pat<(brind GPRC:$r), (JMP GPRC:$r)>;
+
+//===----------------------------------------------------------------------===//
+// GAS-compatible pseudo-instruction aliases.
+//===----------------------------------------------------------------------===//
+
+// mov copies a register (bis $31, src, dst); clr zeros one; nop is bis of $31.
+// bis operands are (Rc, Ra, Rb); the result register is Rc.  mov copies Rb
+// into Rc (bis $31, Rb, Rc); clr zeros Rc.  (nop is the def above.)
+def : InstAlias<"mov $src, $dst", (BIS GPRC:$dst, R31, GPRC:$src)>;
+def : InstAlias<"clr $dst", (BIS GPRC:$dst, R31, R31)>;
