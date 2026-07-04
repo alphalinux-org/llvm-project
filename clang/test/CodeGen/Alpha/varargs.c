@@ -50,3 +50,38 @@ double test_double(int n, ...) {
 }
 
 struct S3 { long a, b, c; };
+
+// An aggregate is passed by value as consecutive 8-byte slots, so va_arg reads
+// it in place and advances past all of them.  It must not be read as a pointer:
+// the caller stores the members themselves into the argument registers.
+// CHECK-LABEL: define {{.*}}void @test_struct
+// CHECK: %ap.offset = load i32, ptr %ap.offset.addr
+// CHECK: [[EXT:%.*]] = sext i32 %ap.offset to i64
+// CHECK: %ap.cur = getelementptr i8, ptr %ap.base, i64 [[EXT]]
+// CHECK-NOT: load ptr, ptr %ap.cur
+// CHECK: %ap.next = add i32 %ap.offset, 24
+// CHECK: call void @llvm.memcpy{{.*}}(ptr align 8 %agg.result, ptr align 8 %ap.cur, i64 24,
+struct S3 test_struct(int n, ...) {
+  __builtin_va_list ap;
+  __builtin_va_start(ap, n);
+  struct S3 r = __builtin_va_arg(ap, struct S3);
+  __builtin_va_end(ap);
+  return r;
+}
+
+// long double is passed by invisible reference, so its slot holds a pointer
+// that has to be loaded before the value is.  It occupies one slot, not two.
+// CHECK-LABEL: define {{.*}}void @test_long_double
+// CHECK: %ap.offset = load i32, ptr %ap.offset.addr
+// CHECK: [[EXT:%.*]] = sext i32 %ap.offset to i64
+// CHECK: %ap.cur = getelementptr i8, ptr %ap.base, i64 [[EXT]]
+// CHECK: %ap.next = add i32 %ap.offset, 8
+// CHECK: %ap.indirect = load ptr, ptr %ap.cur
+// CHECK: load fp128, ptr %ap.indirect
+long double test_long_double(int n, ...) {
+  __builtin_va_list ap;
+  __builtin_va_start(ap, n);
+  long double r = __builtin_va_arg(ap, long double);
+  __builtin_va_end(ap);
+  return r;
+}
