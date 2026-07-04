@@ -18,6 +18,11 @@
 
 #define GET_INSTRINFO_MC_DESC
 #define GET_INSTRINFO_MC_HELPERS
+// Alpha_MC::verifyInstructionPredicates, which AlphaAsmPrinter calls on every
+// instruction it emits so that an instruction gated on a subtarget feature
+// cannot reach a subtarget without it.  The body compiles away when NDEBUG is
+// set.
+#define ENABLE_INSTR_PREDICATE_VERIFIER
 #include "AlphaGenInstrInfo.inc"
 
 #define GET_REGINFO_MC_DESC

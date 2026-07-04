@@ -13,7 +13,10 @@
 
 # The properties AlphaVerifyInvariants checks.  Nothing the backend generates
 # violates any of them, so each input here is written by hand -- that is the
-# point of the pass: these are the failures no test can otherwise produce.
+# point of the pass: these are the failures no test can otherwise produce.  The
+# invariant checked outside the pass, that no feature-gated instruction reaches
+# a subtarget without the feature, is in AlphaAsmPrinter with the predicate
+# table TableGen generates, not here.
 
 # First: a plain load between the load locked and the store conditional.  On
 # real hardware that clears the lock flag and the loop never terminates; qemu
