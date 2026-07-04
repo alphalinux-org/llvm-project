@@ -77,6 +77,14 @@ def AlphaDivCall : SDNode<"AlphaISD::DIVCALL", SDTNone,
 def AlphaGprelHi : SDNode<"AlphaISD::GPREL_HI", SDTIntBinOp>;
 def AlphaGprelLo : SDNode<"AlphaISD::GPREL_LO", SDTIntBinOp>;
 
+// Unaligned quadword load/store, ignoring the low three address bits.
+def SDT_AlphaLdqU : SDTypeProfile<1, 1, [SDTCisVT<0, i64>, SDTCisPtrTy<1>]>;
+def SDT_AlphaStqU : SDTypeProfile<0, 2, [SDTCisVT<0, i64>, SDTCisPtrTy<1>]>;
+def AlphaLdqU : SDNode<"AlphaISD::LDQ_U", SDT_AlphaLdqU,
+                       [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
+def AlphaStqU : SDNode<"AlphaISD::STQ_U", SDT_AlphaStqU,
+                       [SDNPHasChain, SDNPMayStore, SDNPMemOperand]>;
+
 // Conditional branches that test a single register against zero: equal,
 // not-equal, the signed relations, and the low-bit tests.
 def SDTAlphaCondBr : SDTypeProfile<0, 2, [SDTCisVT<0, i64>, SDTCisVT<1, OtherVT>]>;
@@ -1000,7 +1008,7 @@ def : Pat<(i64 (extloadi16 ADDRri:$addr)), (LDWU memri:$addr)>;
 // ignores the low three address bits.
 let mayLoad = 1, hasSideEffects = 0 in
 def LDQ_U : AlphaInst<(outs GPRC:$Ra), (ins memzGPR:$base), "ldq_u $Ra, $base",
-                      []> {
+                      [(set i64:$Ra, (AlphaLdqU i64:$base))]> {
   bits<5> Ra;
   bits<5> base;
   let Opcode = 0x0b;
@@ -1038,7 +1046,7 @@ def MSKWL : OForm<0x12, 0x12, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
 }
 let mayStore = 1, hasSideEffects = 0 in
 def STQ_U : AlphaInst<(outs), (ins GPRC:$Ra, memzGPR:$base), "stq_u $Ra, $base",
-                      []> {
+                      [(AlphaStqU i64:$Ra, i64:$base)]> {
   bits<5> Ra;
   bits<5> base;
   let Opcode = 0x0f;
