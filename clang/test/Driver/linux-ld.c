@@ -1027,6 +1027,13 @@
 // CHECK-SPARCV9: "-dynamic-linker" "{{(/usr/sparcv9-unknown-linux-gnu)?}}/lib{{(64)?}}/ld-linux.so.2"
 // CHECK-SPARCV9-NOT: "-latomic"
 
+// RUN: %clang -### %s -no-pie 2>&1 \
+// RUN:     --target=alpha-unknown-linux-gnu \
+// RUN:   | FileCheck --check-prefix=CHECK-ALPHA %s
+// CHECK-ALPHA: "{{.*}}ld{{(.exe)?}}"
+// CHECK-ALPHA: "-m" "elf64alpha"
+// CHECK-ALPHA: "-dynamic-linker" "{{(/usr/alpha-unknown-linux-gnu)?}}/lib/ld-linux.so.2"
+
 // Test linker invocation on Android.
 // RUN: %clang -### %s -no-pie 2>&1 \
 // RUN:     --target=arm-linux-androideabi -rtlib=platform --unwindlib=platform \

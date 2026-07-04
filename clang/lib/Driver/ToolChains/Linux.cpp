@@ -52,6 +52,9 @@ std::string Linux::getMultiarchTriple(const Driver &D,
   default:
     break;
 
+  case llvm::Triple::alpha:
+    return "alpha-linux-gnu";
+
   // We use the existence of '/lib/<triple>' as a directory to detect some
   // common linux triples that don't quite match the Clang triple for both
   // 32-bit and 64-bit targets. Multiarch fixes its install triples to these
@@ -205,6 +208,10 @@ static StringRef getOSLibDir(const llvm::Triple &Triple, const ArgList &Args) {
 
   if (Triple.isRISCV32())
     return "lib32";
+
+  // Alpha is LP64 but keeps its libraries in 'lib', not 'lib64'.
+  if (Triple.getArch() == llvm::Triple::alpha)
+    return "lib";
 
   if (Triple.getArch() == llvm::Triple::loongarch32) {
     switch (Triple.getEnvironment()) {
@@ -621,6 +628,10 @@ std::string Linux::getDynamicLinker(const ArgList &Args) const {
   default:
     llvm_unreachable("unsupported architecture");
 
+  case llvm::Triple::alpha:
+    LibDir = "lib";
+    Loader = "ld-linux.so.2";
+    break;
   case llvm::Triple::aarch64:
     LibDir = "lib";
     Loader = "ld-linux-aarch64.so.1";
@@ -978,6 +989,7 @@ Linux::getSupportedSanitizers(BoundArch BA,
   const bool IsSystemZ = getTriple().getArch() == llvm::Triple::systemz;
   const bool IsHexagon = getTriple().getArch() == llvm::Triple::hexagon;
   const bool IsAndroid = getTriple().isAndroid();
+  const bool IsAlpha = getTriple().isAlpha();
   SanitizerMask Res = ToolChain::getSupportedSanitizers(BA, DeviceOffloadKind);
   Res |= SanitizerKind::Address;
   Res |= SanitizerKind::PointerCompare;
@@ -1013,7 +1025,9 @@ Linux::getSupportedSanitizers(BoundArch BA,
   }
   if (IsX86_64)
     Res |= SanitizerKind::NumericalStability;
-  if (!IsAndroid)
+  // MemorySanitizer has no Alpha shadow mapping; advertising it would make the
+  // instrumentation pass abort with "unsupported architecture".
+  if (!IsAndroid && !IsAlpha)
     Res |= SanitizerKind::Memory;
 
   // Work around "Cannot represent a difference across sections".

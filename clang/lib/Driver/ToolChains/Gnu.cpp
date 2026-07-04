@@ -2334,6 +2334,10 @@ void Generic_GCC::GCCInstallationDetector::AddDefaultGCCPrefixes(
   // They are not needed when the user has correct LLVM_DEFAULT_TARGET_TRIPLE
   // and always uses the full --target (e.g. --target=aarch64-linux-gnu).  The
   // lists should shrink over time. Please don't add more elements to *Triples.
+  static const char *const AlphaLibDirs[] = {"/lib"};
+  static const char *const AlphaTriples[] = {"alpha-unknown-linux-gnu",
+                                             "alpha-linux-gnu"};
+
   static const char *const AArch64LibDirs[] = {"/lib64", "/lib"};
   static const char *const AArch64Triples[] = {
       "aarch64-none-linux-gnu", "aarch64-redhat-linux", "aarch64-suse-linux"};
@@ -2589,6 +2593,10 @@ void Generic_GCC::GCCInstallationDetector::AddDefaultGCCPrefixes(
   }
 
   switch (TargetTriple.getArch()) {
+  case llvm::Triple::alpha:
+    LibDirs.append(begin(AlphaLibDirs), end(AlphaLibDirs));
+    TripleAliases.append(begin(AlphaTriples), end(AlphaTriples));
+    break;
   case llvm::Triple::aarch64:
     LibDirs.append(begin(AArch64LibDirs), end(AArch64LibDirs));
     TripleAliases.append(begin(AArch64Triples), end(AArch64Triples));
