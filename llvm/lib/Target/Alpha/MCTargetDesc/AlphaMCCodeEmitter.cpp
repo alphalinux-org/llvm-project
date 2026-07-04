@@ -229,19 +229,31 @@ void AlphaMCCodeEmitter::encodeInstruction(const MCInst &MI,
     return emitLdgp(Alpha::R26, CB, Fixups, STI);
   }
   case Alpha::JSRd:
-  case Alpha::JSRdl: {
-    // A direct jsr.  JSRd (external callee) also fills the hint field with an
-    // R_ALPHA_HINT while encoding its operand.  Both forms emit a lituse_jsr
-    // relocation (addend 3) marking the jsr as a use of the GOT literal so the
-    // linker can relax a dso-local call; JSRdl carries only that, since a hint
-    // would inhibit the relaxation.  The ldgp reload follows as for JSR.
+  case Alpha::JSRdl:
+  case Alpha::JSRtlsgd:
+  case Alpha::JSRtlsldm: {
+    // A direct jsr, or the jsr to __tls_get_addr in a dynamic TLS sequence.
+    // JSRd (external callee) also fills the hint field with an R_ALPHA_HINT
+    // while encoding its operand.  Every form emits an R_ALPHA_LITUSE
+    // relocation marking the jsr as a use of the GOT literal so the linker can
+    // relax it; the addend selects the use type: jsr (3), tlsgd (4), or tlsldm
+    // (5).  JSRdl carries no hint: the linker relaxes a dso-local call into a
+    // direct branch, so there is no jsr left for the hint to predict.  A hint
+    // does not itself inhibit that relaxation -- GNU as writes one on exactly
+    // this jsr and bfd relaxes it anyway.  The TLS forms carry none either:
+    // their symbol operand is the thread-local variable rather than
+    // __tls_get_addr, so there is nothing to hang one on.  The ldgp reload
+    // follows as for JSR.
     size_t FirstFixup = Fixups.size();
     uint32_t Bits = getBinaryCodeForInstr(MI, Fixups, STI);
-    // Only the addend of the lituse_jsr relocation matters -- it holds the use
-    // type, 3 -- and bfd says so outright: "the symbol associated with GPDISP
-    // and LITUSE is immaterial".  Emit no symbol, as the gpdisp pair does,
-    // rather than naming .text, which the instruction need not be in.
-    Fixups.push_back(MCFixup::create(0, MCConstantExpr::create(3, Ctx),
+    unsigned UseType = MI.getOpcode() == Alpha::JSRtlsgd    ? 4
+                       : MI.getOpcode() == Alpha::JSRtlsldm ? 5
+                                                            : 3;
+    // Only the addend of the lituse relocation matters -- it holds the use
+    // type -- and bfd says so outright: "the symbol associated with GPDISP and
+    // LITUSE is immaterial".  Emit no symbol, as the gpdisp pair does, rather
+    // than naming .text, which the instruction need not be in.
+    Fixups.push_back(MCFixup::create(0, MCConstantExpr::create(UseType, Ctx),
                                      MCFixupKind(Alpha::fixup_alpha_lituse_jsr)));
     // GNU as puts the lituse ahead of the hint, and bfd only inspects the
     // relocation immediately following a literal's, so match that order or the
