@@ -572,17 +572,19 @@ SDValue AlphaTargetLowering::LowerVASTART(SDValue Op, SelectionDAG &DAG) const {
   SDValue VAList = Op.getOperand(1);
   const Value *SV = cast<SrcValueSDNode>(Op.getOperand(2))->getValue();
 
-  // *va_list = base
   Chain = DAG.getStore(Chain, DL, Base, VAList, MachinePointerInfo(SV));
-  // va_list[8] = offset
+  // va_list[8] = offset, which is an int: gcc's alpha_build_builtin_va_list
+  // gives the field integer_type_node, so writing a quadword here would
+  // scribble on whatever the ABI puts in the tail padding.
   SDValue OffPtr = DAG.getMemBasePlusOffset(VAList, TypeSize::getFixed(8), DL);
   SDValue Off = DAG.getConstant(FI->getVarArgsOffset(), DL, MVT::i64);
-  return DAG.getStore(Chain, DL, Off, OffPtr, MachinePointerInfo(SV, 8));
+  return DAG.getTruncStore(Chain, DL, Off, OffPtr, MachinePointerInfo(SV, 8),
+                           MVT::i32);
 }
 
 SDValue AlphaTargetLowering::LowerVACOPY(SDValue Op, SelectionDAG &DAG) const {
-  // The va_list is a { base, offset } pair, so both quadwords must be copied;
-  // the default expansion copies only a single pointer.
+  // The va_list is a { char *base; int offset; } pair, so both fields must be
+  // copied; the default expansion copies only a single pointer.
   SDLoc DL(Op);
   SDValue Chain = Op.getOperand(0);
   SDValue DstPtr = Op.getOperand(1);
@@ -594,13 +596,14 @@ SDValue AlphaTargetLowering::LowerVACOPY(SDValue Op, SelectionDAG &DAG) const {
       DAG.getLoad(MVT::i64, DL, Chain, SrcPtr, MachinePointerInfo(SrcSV));
   Chain = Base.getValue(1);
   SDValue SrcOff = DAG.getMemBasePlusOffset(SrcPtr, TypeSize::getFixed(8), DL);
-  SDValue Off =
-      DAG.getLoad(MVT::i64, DL, Chain, SrcOff, MachinePointerInfo(SrcSV, 8));
+  SDValue Off = DAG.getExtLoad(ISD::ZEXTLOAD, DL, MVT::i64, Chain, SrcOff,
+                               MachinePointerInfo(SrcSV, 8), MVT::i32);
   Chain = Off.getValue(1);
 
   Chain = DAG.getStore(Chain, DL, Base, DstPtr, MachinePointerInfo(DstSV));
   SDValue DstOff = DAG.getMemBasePlusOffset(DstPtr, TypeSize::getFixed(8), DL);
-  return DAG.getStore(Chain, DL, Off, DstOff, MachinePointerInfo(DstSV, 8));
+  return DAG.getTruncStore(Chain, DL, Off, DstOff, MachinePointerInfo(DstSV, 8),
+                           MVT::i32);
 }
 
 SDValue AlphaTargetLowering::LowerVAARG(SDValue Op, SelectionDAG &DAG) const {
@@ -613,9 +616,15 @@ SDValue AlphaTargetLowering::LowerVAARG(SDValue Op, SelectionDAG &DAG) const {
   SDValue Base =
       DAG.getLoad(MVT::i64, DL, Chain, VAList, MachinePointerInfo(SV));
   Chain = Base.getValue(1);
+  // __offset is an int, so this is a four-byte access widened into a register;
+  // i32 is not a legal type here.  It is widened with a zero extension rather
+  // than a sign extension: the offset starts at the named arguments' size and
+  // only grows, so it is never negative, and the two agree on every value it
+  // can hold.  Zero-extending lets a va_arg that follows its own va_start fold
+  // the offset into the load's displacement.
   SDValue OffPtr = DAG.getMemBasePlusOffset(VAList, TypeSize::getFixed(8), DL);
-  SDValue Offset =
-      DAG.getLoad(MVT::i64, DL, Chain, OffPtr, MachinePointerInfo(SV, 8));
+  SDValue Offset = DAG.getExtLoad(ISD::ZEXTLOAD, DL, MVT::i64, Chain, OffPtr,
+                                  MachinePointerInfo(SV, 8), MVT::i32);
   Chain = Offset.getValue(1);
 
   // Integer arguments are at base + offset; floating-point arguments in a
@@ -630,13 +639,13 @@ SDValue AlphaTargetLowering::LowerVAARG(SDValue Op, SelectionDAG &DAG) const {
     Addr = DAG.getSelect(DL, MVT::i64, InReg, FPAddr, Addr);
   }
 
-  // Advance the offset by one 8-byte slot.
   // An argument occupies whole 8-byte slots, so a type wider than a register
   // -- X_floating, __int128 -- advances the offset by more than one.
   uint64_t Slots = alignTo(VT.getStoreSize(), 8);
   SDValue NextOff = DAG.getNode(ISD::ADD, DL, MVT::i64, Offset,
                                 DAG.getConstant(Slots, DL, MVT::i64));
-  Chain = DAG.getStore(Chain, DL, NextOff, OffPtr, MachinePointerInfo(SV, 8));
+  Chain = DAG.getTruncStore(Chain, DL, NextOff, OffPtr,
+                            MachinePointerInfo(SV, 8), MVT::i32);
 
   // A register slot holds what LowerFormalArguments saved there with an stt,
   // which is the T_floating form of the value whatever its type; a stack slot

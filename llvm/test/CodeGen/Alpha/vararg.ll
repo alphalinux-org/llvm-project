@@ -60,6 +60,9 @@ define i64 @many(i64 %a, i64 %b, i64 %c, i64 %d, i64 %e, i64 %f, i64 %g,
 ; CHECK-DAG:   stt {{\$f[0-9]+}}, 24($30)
 ; CHECK-DAG:   lda [[BASE:\$[0-9]+]], 64($30)
 ; CHECK-DAG:   stq [[BASE]], 0($30)
+; The offset the va_list is left holding has moved on by one slot.
+; CHECK-DAG:   lda [[OFF:\$[0-9]+]], 16($31)
+; CHECK-DAG:   stl [[OFF]], 8($30)
 define double @double_arg(i32 %n, ...) {
   %ap = alloca [2 x i64], align 8
   call void @llvm.va_start(ptr %ap)

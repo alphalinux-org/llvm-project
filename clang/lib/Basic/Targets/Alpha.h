@@ -55,7 +55,9 @@ public:
   }
 
   BuiltinVaListKind getBuiltinVaListKind() const override {
-    return TargetInfo::VoidPtrBuiltinVaList;
+    // struct { char *__base; int __offset; }, matching the back end's
+    // {base, offset} va_list and the GCC/OSF ABI.
+    return TargetInfo::AlphaABIBuiltinVaList;
   }
 
   bool hasFeature(StringRef Feature) const override {
