@@ -1,0 +1,40 @@
+//===--- Alpha.cpp - Implement Alpha target feature support ---------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// This file implements Alpha TargetInfo objects.
+//
+//===----------------------------------------------------------------------===//
+
+#include "Alpha.h"
+#include "clang/Basic/MacroBuilder.h"
+
+using namespace clang;
+using namespace clang::targets;
+
+const char *const AlphaTargetInfo::GCCRegNames[] = {
+    "$0",   "$1",   "$2",   "$3",   "$4",   "$5",   "$6",   "$7",
+    "$8",   "$9",   "$10",  "$11",  "$12",  "$13",  "$14",  "$15",
+    "$16",  "$17",  "$18",  "$19",  "$20",  "$21",  "$22",  "$23",
+    "$24",  "$25",  "$26",  "$27",  "$28",  "$29",  "$30",  "$31",
+    "$f0",  "$f1",  "$f2",  "$f3",  "$f4",  "$f5",  "$f6",  "$f7",
+    "$f8",  "$f9",  "$f10", "$f11", "$f12", "$f13", "$f14", "$f15",
+    "$f16", "$f17", "$f18", "$f19", "$f20", "$f21", "$f22", "$f23",
+    "$f24", "$f25", "$f26", "$f27", "$f28", "$f29", "$f30", "$f31"};
+
+ArrayRef<const char *> AlphaTargetInfo::getGCCRegNames() const {
+  return llvm::ArrayRef(GCCRegNames);
+}
+
+void AlphaTargetInfo::getTargetDefines(const LangOptions &Opts,
+                                       MacroBuilder &Builder) const {
+  Builder.defineMacro("__alpha__");
+  Builder.defineMacro("__alpha");
+  Builder.defineMacro("__alpha_ev4__");
+  Builder.defineMacro("_LP64");
+  Builder.defineMacro("__LP64__");
+}
