@@ -1,0 +1,50 @@
+# RUN: llc -mtriple=alpha-unknown-linux-gnu -run-pass=branch-folder %s -o - \
+# RUN:   | FileCheck %s
+
+# A block can end in three terminators: two conditional branches and an
+# unconditional one.  analyzeBranch has to refuse it.  Reporting it as an
+# ordinary two-way block hands back only the second condition, and the branch
+# folder then calls removeBranch -- which erases at most two -- followed by
+# insertBranch, which puts two back.  The first branch's edge is lost, so the
+# block stops branching to %bb.1 at all.
+#
+# Selection does not produce this shape from IR, which is why it takes a .mir
+# test to reach.  It arises after a pass merges blocks or threads an edge.
+
+--- |
+  define i64 @three(i64 %a, i64 %b) {
+  entry:
+    ret i64 0
+  }
+...
+---
+name:            three
+tracksRegLiveness: true
+body:             |
+  bb.0.entry:
+    successors: %bb.1, %bb.2, %bb.3
+    liveins: $r16, $r17
+
+    BEQ $r16, %bb.1
+    BNE $r17, %bb.2
+    BR %bb.3
+
+  bb.1:
+    $r0 = LDA 1, $r31
+    RET implicit $r0
+
+  bb.2:
+    $r0 = LDA 2, $r31
+    RET implicit $r0
+
+  bb.3:
+    $r0 = LDA 3, $r31
+    RET implicit $r0
+...
+
+# All three edges survive: both conditional branches are still there, in order,
+# and the unconditional one still reaches the third block.
+# CHECK-LABEL: name: three
+# CHECK: BEQ $r16, %bb.1
+# CHECK: BNE $r17, %bb.2
+# CHECK: BR %bb.3
