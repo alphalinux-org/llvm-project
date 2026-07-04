@@ -34,6 +34,10 @@
 // RUN: FileCheck %s --check-prefix=SPARC-V9
 // SPARC-V9: target datalayout = "E-m:e-i64:64-i128:128-n32:64-S128"
 
+// RUN: %clang_cc1 -triple alpha-unknown-linux-gnu -emit-llvm -o - %s | \
+// RUN:     FileCheck %s --check-prefix=ALPHA
+// ALPHA: target datalayout = "e-m:e-p:64:64-i64:64-i128:128-n64-S128"
+
 // RUN: %clang_cc1 -triple mipsel-linux-gnu -o - -emit-llvm %s |     \
 // RUN: FileCheck %s -check-prefix=MIPS-32EL
 // RUN: %clang_cc1 -triple mipsisa32r6el-linux-gnu -o - -emit-llvm %s |     \
