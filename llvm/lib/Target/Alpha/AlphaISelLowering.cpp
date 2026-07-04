@@ -220,6 +220,10 @@ const char *AlphaTargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "AlphaISD::CALL_DIRECT";
   case AlphaISD::CALL_DIRECT_LOCAL:
     return "AlphaISD::CALL_DIRECT_LOCAL";
+  case AlphaISD::CALL_TLSGD:
+    return "AlphaISD::CALL_TLSGD";
+  case AlphaISD::CALL_TLSLDM:
+    return "AlphaISD::CALL_TLSLDM";
   case AlphaISD::DIVCALL:
     return "AlphaISD::DIVCALL";
   case AlphaISD::GPREL_HI:
@@ -526,7 +530,8 @@ SDValue AlphaTargetLowering::LowerGlobalTLSAddress(SDValue Op,
     SDValue Ops[] = {Chain, DAG.getRegister(Alpha::R16, MVT::i64),
                      DAG.getRegister(Alpha::R27, MVT::i64),
                      DAG.getRegisterMask(Mask), Glue};
-    Chain = DAG.getNode(AlphaISD::CALL, DL, {MVT::Other, MVT::Glue}, Ops);
+    Chain = DAG.getNode(IsGD ? AlphaISD::CALL_TLSGD : AlphaISD::CALL_TLSLDM, DL,
+                        {MVT::Other, MVT::Glue}, Ops);
     Glue = Chain.getValue(1);
     Chain = DAG.getCALLSEQ_END(Chain, 0, 0, Glue, DL);
     Glue = Chain.getValue(1);
