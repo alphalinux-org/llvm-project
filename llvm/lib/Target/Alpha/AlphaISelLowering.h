@@ -44,8 +44,16 @@ enum NodeType : unsigned {
   GPREL_HI,
   GPREL_LO,
 
+  // Conditional branches that test a register against zero: equal, not-equal,
+  // the signed relations, and the low-bit tests.
+  BR_EQ,
+  BR_NE,
+  BR_LT,
+  BR_LE,
+  BR_GT,
+  BR_GE,
+
   // The thread pointer, read from the PALcode unique value (call_pal rduniq).
-  THREAD_POINTER,
 
   // Thread-pointer-relative address parts for local-exec TLS, materialized
   // with ldah !tprelhi and lda !tprello.
@@ -165,6 +173,7 @@ private:
   SDValue LowerGlobalTLSAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerJumpTable(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerBR_CC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBR_JT(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerDivRem(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerVASTART(SDValue Op, SelectionDAG &DAG) const;
