@@ -32,6 +32,14 @@ def FeatureSafeBWA : SubtargetFeature<"safe-bwa", "HasSafeBWA", "true",
 // gcc's -msmall-data (the default is -mlarge-data, i.e. GOT/literal).
 def FeatureSmallData : SubtargetFeature<"small-data", "HasSmallData", "true",
     "Address global data GP-relative instead of through the GOT">;
+
+// Build every wide integer constant with code instead of loading it from the
+// constant pool.  This is gcc's -mbuild-constants; the dynamic loader needs it
+// because it must relocate itself before it can reach its own data segment.
+def FeatureBuildConstants
+    : SubtargetFeature<"build-constants", "HasBuildConstants", "true",
+                       "Materialize wide constants inline instead of loading "
+                       "them from the constant pool">;
 // Pre-BWX byte/word store variants: plain read-modify-write vs. lock-based.
 def UnsafeBWStore
     : Predicate<"!Subtarget->hasBWX() && !Subtarget->hasSafeBWA()">;
