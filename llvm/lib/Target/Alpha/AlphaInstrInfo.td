@@ -1281,3 +1281,23 @@ def : Pat<(brind GPRC:$r), (JMP GPRC:$r)>;
 // into Rc (bis $31, Rb, Rc); clr zeros Rc.  (nop is the def above.)
 def : InstAlias<"mov $src, $dst", (BIS GPRC:$dst, R31, GPRC:$src)>;
 def : InstAlias<"clr $dst", (BIS GPRC:$dst, R31, R31)>;
+
+// or is another name for bis.
+def : InstAlias<"or $Ra, $Rb, $Rc", (BIS GPRC:$Rc, GPRC:$Ra, GPRC:$Rb)>;
+
+// Integer negate/sign-extend/complement, each with $31 as the first source.
+def : InstAlias<"negq $src, $dst", (SUBQ GPRC:$dst, R31, GPRC:$src)>;
+def : InstAlias<"sextl $src, $dst", (ADDL GPRC:$dst, R31, GPRC:$src)>;
+def : InstAlias<"not $src, $dst", (ORNOT GPRC:$dst, R31, GPRC:$src)>;
+
+// Floating-point copies built from cpys/cpysn: fmov copies, fneg flips the
+// sign, fabs forces it positive with $f31, fnop discards into $f31, fclr
+// zeroes by copying $f31 to itself, and negs/negt negate by subtracting from
+// $f31.
+def : InstAlias<"fmov $src, $dst", (CPYS FPRC:$dst, FPRC:$src, FPRC:$src)>;
+def : InstAlias<"fneg $src, $dst", (CPYSN FPRC:$dst, FPRC:$src, FPRC:$src)>;
+def : InstAlias<"fabs $src, $dst", (CPYS FPRC:$dst, F31, FPRC:$src)>;
+def : InstAlias<"fnop", (CPYS F31, F31, F31)>;
+def : InstAlias<"fclr $dst", (CPYS FPRC:$dst, F31, F31)>;
+def : InstAlias<"negs $src, $dst", (SUBS FPRC:$dst, F31, FPRC:$src)>;
+def : InstAlias<"negt $src, $dst", (SUBT FPRC:$dst, F31, FPRC:$src)>;
