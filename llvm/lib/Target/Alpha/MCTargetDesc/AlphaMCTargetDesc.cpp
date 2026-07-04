@@ -10,6 +10,7 @@
 #include "AlphaInstPrinter.h"
 #include "AlphaMCAsmInfo.h"
 #include "TargetInfo/AlphaTargetInfo.h"
+#include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
@@ -30,7 +31,11 @@ using namespace llvm;
 static MCAsmInfo *createAlphaMCAsmInfo(const MCRegisterInfo &MRI,
                                        const Triple &TT,
                                        const MCTargetOptions &Options) {
-  return new AlphaMCAsmInfo(TT, Options);
+  MCAsmInfo *MAI = new AlphaMCAsmInfo(TT, Options);
+  // At function entry the canonical frame address is the stack pointer.
+  unsigned SP = MRI.getDwarfRegNum(Alpha::R30, /*isEH=*/true);
+  MAI->addInitialFrameState(MCCFIInstruction::cfiDefCfa(nullptr, SP, 0));
+  return MAI;
 }
 
 static MCInstrInfo *createAlphaMCInstrInfo() {
