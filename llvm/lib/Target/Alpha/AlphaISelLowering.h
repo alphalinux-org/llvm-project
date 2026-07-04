@@ -52,6 +52,10 @@ enum NodeType : unsigned {
   // Initial-exec TLS: the thread-pointer-relative offset loaded from the GOT
   // with ldq !gottprel.
   GOTTPREL,
+
+  // General-dynamic TLS: the address of the tlsgd descriptor (lda !tlsgd)
+  // passed to __tls_get_addr.
+  TLSGD,
 };
 } // namespace AlphaISD
 
