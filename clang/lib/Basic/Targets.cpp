@@ -18,6 +18,7 @@
 #include "Targets/ARC.h"
 #include "Targets/ARM.h"
 #include "Targets/AVR.h"
+#include "Targets/Alpha.h"
 #include "Targets/BPF.h"
 #include "Targets/CSKY.h"
 #include "Targets/DirectX.h"
@@ -115,6 +116,14 @@ std::unique_ptr<TargetInfo> AllocateTarget(const llvm::Triple &Triple,
   switch (Triple.getArch()) {
   default:
     return nullptr;
+
+  case llvm::Triple::alpha:
+    switch (os) {
+    case llvm::Triple::Linux:
+      return std::make_unique<LinuxTargetInfo<AlphaTargetInfo>>(Triple, Opts);
+    default:
+      return std::make_unique<AlphaTargetInfo>(Triple, Opts);
+    }
 
   case llvm::Triple::arc:
     return std::make_unique<ARCTargetInfo>(Triple, Opts);
