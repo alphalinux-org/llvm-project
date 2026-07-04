@@ -214,6 +214,82 @@ def UMULH : ALU_rr<0x13, 0x30, "umulh", mulhu>;
 def AND   : ALU_rr<0x11, 0x00, "and",   and>;
 def XOR   : ALU_rr<0x11, 0x40, "xor",   xor>;
 
+//===----------------------------------------------------------------------===//
+// Instructions exposed to C through the __builtin_alpha_* intrinsics.
+//===----------------------------------------------------------------------===//
+
+// cmpbge compares the eight bytes of two registers; zap/zapnot clear or keep
+// bytes selected by a mask; umulh is the high half of an unsigned multiply.
+def CMPBGE : ALU_rr<0x10, 0x0f, "cmpbge", int_alpha_cmpbge>;
+def ZAP    : ALU_rr<0x12, 0x30, "zap",    int_alpha_zap>;
+def ZAPNOT : ALU_rr<0x12, 0x31, "zapnot", int_alpha_zapnot>;
+
+// Byte/word/longword extract, insert and mask, high halves and the longword
+// forms.  The byte and word low forms already exist for the pre-BWX access
+// sequences and are routed to their intrinsics at the end of this file.
+def EXTLL : ALU_rr<0x12, 0x26, "extll", int_alpha_extll>;
+def EXTQL : ALU_rr<0x12, 0x36, "extql", int_alpha_extql>;
+def EXTWH : ALU_rr<0x12, 0x5a, "extwh", int_alpha_extwh>;
+def EXTLH : ALU_rr<0x12, 0x6a, "extlh", int_alpha_extlh>;
+def EXTQH : ALU_rr<0x12, 0x7a, "extqh", int_alpha_extqh>;
+def INSLL : ALU_rr<0x12, 0x2b, "insll", int_alpha_insll>;
+def INSQL : ALU_rr<0x12, 0x3b, "insql", int_alpha_insql>;
+def INSWH : ALU_rr<0x12, 0x57, "inswh", int_alpha_inswh>;
+def INSLH : ALU_rr<0x12, 0x67, "inslh", int_alpha_inslh>;
+def INSQH : ALU_rr<0x12, 0x77, "insqh", int_alpha_insqh>;
+def MSKLL : ALU_rr<0x12, 0x22, "mskll", int_alpha_mskll>;
+def MSKQL : ALU_rr<0x12, 0x32, "mskql", int_alpha_mskql>;
+def MSKWH : ALU_rr<0x12, 0x52, "mskwh", int_alpha_mskwh>;
+def MSKLH : ALU_rr<0x12, 0x62, "msklh", int_alpha_msklh>;
+def MSKQH : ALU_rr<0x12, 0x72, "mskqh", int_alpha_mskqh>;
+
+// Motion video instructions (MVI, enabled by the mvi feature): packed byte/word min and max, the sum
+// of absolute byte differences, and pack/unpack between bytes and wider lanes.
+let Predicates = [HasMVI] in {
+def MINSB8 : ALU_rr<0x1c, 0x38, "minsb8", int_alpha_minsb8>;
+def MINSW4 : ALU_rr<0x1c, 0x39, "minsw4", int_alpha_minsw4>;
+def MINUB8 : ALU_rr<0x1c, 0x3a, "minub8", int_alpha_minub8>;
+def MINUW4 : ALU_rr<0x1c, 0x3b, "minuw4", int_alpha_minuw4>;
+def MAXUB8 : ALU_rr<0x1c, 0x3c, "maxub8", int_alpha_maxub8>;
+def MAXUW4 : ALU_rr<0x1c, 0x3d, "maxuw4", int_alpha_maxuw4>;
+def MAXSB8 : ALU_rr<0x1c, 0x3e, "maxsb8", int_alpha_maxsb8>;
+def MAXSW4 : ALU_rr<0x1c, 0x3f, "maxsw4", int_alpha_maxsw4>;
+def PERR   : ALU_rr<0x1c, 0x31, "perr",   int_alpha_perr>;
+
+// The pack/unpack forms take a single source in Rb with Ra fixed to $31.
+class MVIUnary<bits<7> func, string mnem, SDPatternOperator node>
+    : OForm<0x1c, func, (outs GPRC:$Rc), (ins GPRC:$Rb), mnem # " $Rb, $Rc",
+            [(set i64:$Rc, (node i64:$Rb))]> {
+  let Ra = 31;
+}
+def UNPKBW : MVIUnary<0x34, "unpkbw", int_alpha_unpkbw>;
+def UNPKBL : MVIUnary<0x35, "unpkbl", int_alpha_unpkbl>;
+def PKWB   : MVIUnary<0x36, "pkwb",   int_alpha_pkwb>;
+def PKLB   : MVIUnary<0x37, "pklb",   int_alpha_pklb>;
+} // Predicates = [HasMVI]
+
+// amask clears the feature bits its argument names that the processor
+// implements, reporting which are absent.  Ra is fixed to $31.
+let hasSideEffects = 0 in
+def AMASK : OForm<0x11, 0x61, (outs GPRC:$Rc), (ins GPRC:$Rb), "amask $Rb, $Rc",
+                  [(set i64:$Rc, (int_alpha_amask i64:$Rb))]> {
+  let Ra = 31;
+}
+
+// implver reports the processor implementation version as a small constant.
+// It is encoded as an operate with $31 and a literal of 1.
+let hasSideEffects = 0 in
+def IMPLVER : AlphaInst<(outs GPRC:$Rc), (ins), "implver $Rc",
+                        [(set i64:$Rc, (int_alpha_implver))]> {
+  bits<5> Rc;
+  let Opcode = 0x11;
+  let Inst{25-21} = 31;
+  let Inst{20-13} = 1;
+  let Inst{12} = 1;
+  let Inst{11-5} = 0x6c;
+  let Inst{4-0} = Rc;
+}
+
 // Scaled add/subtract: `s4addq $Ra, $Rb, $Rc` computes $Rc = $Ra*4 + $Rb (s8
 // scales by 8); useful for array-index address arithmetic.
 let hasSideEffects = 0 in {
@@ -1300,3 +1376,35 @@ def : InstAlias<"fabs $src, $dst", (CPYS FPRC:$dst, F31, FPRC:$src)>;
 def : InstAlias<"fnop", (CPYS F31, F31, F31)>;
 def : InstAlias<"negs $src, $dst", (SUBS FPRC:$dst, F31, FPRC:$src)>;
 def : InstAlias<"negt $src, $dst", (SUBT FPRC:$dst, F31, FPRC:$src)>;
+
+// __builtin_alpha_umulh reuses the umulh instruction (also the mulhu pattern).
+def : Pat<(int_alpha_umulh i64:$a, i64:$b), (UMULH GPRC:$a, GPRC:$b)>;
+
+// rpcc reads the process cycle counter into Ra (Rb is $31), so it stays
+// outside the side-effect-free block above.
+let hasSideEffects = 1, mayLoad = 0, mayStore = 0 in
+def RPCC : AlphaInst<(outs GPRC:$Ra), (ins), "rpcc $Ra",
+                     [(set i64:$Ra, (int_alpha_rpcc))]> {
+  bits<5> Ra;
+  let Opcode = 0x18;
+  let Inst{25-21} = Ra;
+  let Inst{20-16} = 31;
+  let Inst{15-0} = 0xc000;
+}
+
+// Route the byte/word extract, insert and mask intrinsics to the low-form
+// instructions that already exist for the pre-BWX access sequences.
+def : Pat<(int_alpha_extbl i64:$a, i64:$b), (EXTBL GPRC:$a, GPRC:$b)>;
+def : Pat<(int_alpha_extwl i64:$a, i64:$b), (EXTWL GPRC:$a, GPRC:$b)>;
+def : Pat<(int_alpha_insbl i64:$a, i64:$b), (INSBL GPRC:$a, GPRC:$b)>;
+def : Pat<(int_alpha_inswl i64:$a, i64:$b), (INSWL GPRC:$a, GPRC:$b)>;
+def : Pat<(int_alpha_mskbl i64:$a, i64:$b), (MSKBL GPRC:$a, GPRC:$b)>;
+def : Pat<(int_alpha_mskwl i64:$a, i64:$b), (MSKWL GPRC:$a, GPRC:$b)>;
+
+// The count intrinsics reuse the CIX instructions (also the generic ctpop/
+// ctlz/cttz patterns), so they select only when the cix feature is enabled.
+let Predicates = [HasCIX] in {
+def : Pat<(int_alpha_ctpop i64:$x), (CTPOP GPRC:$x)>;
+def : Pat<(int_alpha_ctlz i64:$x),  (CTLZ GPRC:$x)>;
+def : Pat<(int_alpha_cttz i64:$x),  (CTTZ GPRC:$x)>;
+}
