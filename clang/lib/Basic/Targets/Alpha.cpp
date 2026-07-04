@@ -58,4 +58,10 @@ void AlphaTargetInfo::getTargetDefines(const LangOptions &Opts,
   Builder.defineMacro("__alpha_ev4__");
   Builder.defineMacro("_LP64");
   Builder.defineMacro("__LP64__");
+  // Match GCC (config/alpha/alpha.h): -mieee defines _IEEE_FP, and
+  // -mieee-with-inexact also _IEEE_FP_INEXACT.
+  if (HasIEEE)
+    Builder.defineMacro("_IEEE_FP");
+  if (HasIEEEInexact)
+    Builder.defineMacro("_IEEE_FP_INEXACT");
 }
