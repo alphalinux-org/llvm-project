@@ -145,3 +145,11 @@ class MbrForm<bits<2> sub, dag outs, dag ins, string asmstr, list<dag> pattern>
   let Inst{15-14} = sub;
   let Inst{13-0} = hint;
 }
+
+// PALcode call: opcode 0x00 with a 26-bit function code (e.g. rduniq = 0x9e,
+// which reads the thread's unique value into $0).
+class PalForm<bits<26> func, dag outs, dag ins, string asmstr,
+              list<dag> pattern> : AlphaInst<outs, ins, asmstr, pattern> {
+  let Opcode = 0x00;
+  let Inst{25-0} = func;
+}

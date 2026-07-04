@@ -25,6 +25,10 @@ enum Fixups {
   // The ldah of an ldgp pair (R_ALPHA_GPDISP); its addend is the byte distance
   // to the matching lda.
   fixup_alpha_gpdisp,
+  // The high/low 16-bit thread-pointer-relative displacements for local-exec
+  // TLS (R_ALPHA_TPRELHI/LO).
+  fixup_alpha_tprelhi,
+  fixup_alpha_tprello,
 
   fixup_alpha_invalid,
   NumTargetFixupKinds = fixup_alpha_invalid - FirstTargetFixupKind
@@ -42,6 +46,10 @@ inline StringRef getSpecifierName(unsigned Kind) {
     return "gprellow";
   case fixup_alpha_gpdisp:
     return "gpdisp";
+  case fixup_alpha_tprelhi:
+    return "tprelhi";
+  case fixup_alpha_tprello:
+    return "tprello";
   default:
     return "";
   }

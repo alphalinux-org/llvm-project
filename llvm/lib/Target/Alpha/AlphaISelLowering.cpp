@@ -71,6 +71,7 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
 
   // Global addresses are loaded from the GOT; constant pools are GP-relative.
   setOperationAction(ISD::GlobalAddress, MVT::i64, Custom);
+  setOperationAction(ISD::GlobalTLSAddress, MVT::i64, Custom);
   setOperationAction(ISD::ConstantPool, MVT::i64, Custom);
 
   // Unsigned integer/floating conversions expand through the signed ones.
@@ -195,6 +196,10 @@ const char *AlphaTargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "AlphaISD::GPREL_HI";
   case AlphaISD::GPREL_LO:
     return "AlphaISD::GPREL_LO";
+  case AlphaISD::TPREL_HI:
+    return "AlphaISD::TPREL_HI";
+  case AlphaISD::TPREL_LO:
+    return "AlphaISD::TPREL_LO";
   }
   return nullptr;
 }
@@ -214,6 +219,8 @@ SDValue AlphaTargetLowering::LowerOperation(SDValue Op,
     return Op;
   case ISD::GlobalAddress:
     return LowerGlobalAddress(Op, DAG);
+  case ISD::GlobalTLSAddress:
+    return LowerGlobalTLSAddress(Op, DAG);
   case ISD::ConstantPool:
     return LowerConstantPool(Op, DAG);
   case ISD::JumpTable:
@@ -323,6 +330,28 @@ SDValue AlphaTargetLowering::LowerGlobalAddress(SDValue Op,
     return DAG.getNode(AlphaISD::GPREL_LO, DL, MVT::i64, TGA, Hi);
   }
   return DAG.getNode(AlphaISD::LITERAL, DL, MVT::i64, TGA);
+}
+
+SDValue AlphaTargetLowering::LowerGlobalTLSAddress(SDValue Op,
+                                                   SelectionDAG &DAG) const {
+  auto *N = cast<GlobalAddressSDNode>(Op);
+  SDLoc DL(Op);
+  const GlobalValue *GV = N->getGlobal();
+  TLSModel::Model Model = getTargetMachine().getTLSModel(GV);
+
+  // Read the thread pointer from the PALcode unique value (call_pal rduniq).
+  // The result is fixed in $0, so glue the copy to the call.
+  SDValue RdUniq = SDValue(DAG.getMachineNode(Alpha::RDUNIQ, DL, MVT::Glue), 0);
+  SDValue TP =
+      DAG.getCopyFromReg(DAG.getEntryNode(), DL, Alpha::R0, MVT::i64, RdUniq);
+
+  // Only local-exec is implemented: the offset from the thread pointer is a
+  // link-time constant formed with ldah !tprelhi / lda !tprello.
+  if (Model != TLSModel::LocalExec)
+    report_fatal_error("only local-exec TLS is supported on Alpha");
+  SDValue TGA = DAG.getTargetGlobalAddress(GV, DL, MVT::i64, N->getOffset());
+  SDValue Hi = DAG.getNode(AlphaISD::TPREL_HI, DL, MVT::i64, TGA, TP);
+  return DAG.getNode(AlphaISD::TPREL_LO, DL, MVT::i64, TGA, Hi);
 }
 
 SDValue AlphaTargetLowering::LowerConstantPool(SDValue Op,
