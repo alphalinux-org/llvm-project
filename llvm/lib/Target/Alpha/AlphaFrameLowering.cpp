@@ -155,12 +155,35 @@ void AlphaFrameLowering::emitEpilogue(MachineFunction &MF,
   MachineBasicBlock::iterator MBBI = MBB.getFirstTerminator();
   DebugLoc DL = MBBI != MBB.end() ? MBBI->getDebugLoc() : DebugLoc();
 
+  MachineFrameInfo &MFI = MF.getFrameInfo();
+  const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+  bool NeedsCFI =
+      StackSize != 0 || hasFP(MF) || !MFI.getCalleeSavedInfo().empty();
+
+  // Insert a CFI directive at Pos (which is the position *after* the
+  // instruction whose effect it describes), so an asynchronous unwind from any
+  // point in the epilogue observes the correct state.
+  auto insertCFI = [&](MachineBasicBlock::iterator Pos,
+                       const MCCFIInstruction &Inst) {
+    if (!NeedsCFI)
+      return;
+    unsigned Idx = MF.addFrameInst(Inst);
+    BuildMI(MBB, Pos, DL, TII.get(TargetOpcode::CFI_INSTRUCTION))
+        .addCFIIndex(Idx)
+        .setMIFlag(MachineInstr::FrameDestroy);
+  };
+
   if (hasFP(MF)) {
     // Restore $30 from the frame pointer (undoing any variable allocation),
     // then restore the caller's $15 and deallocate the fixed frame.  All of
     // that follows the callee-saved reloads, which PEI placed above this point
     // and which still reach their slots through $15.
     copyReg(MBB, MBBI, DL, TII, Alpha::R30, Alpha::R15);
+    // $30 now holds the frame bottom (still equal to $15), so re-anchor the CFA
+    // to $30 before $15 is clobbered by its reload.
+    insertCFI(MBBI,
+              MCCFIInstruction::cfiDefCfa(
+                  nullptr, TRI->getDwarfRegNum(Alpha::R30, true), StackSize));
 
     // $30 now equals the frame bottom, so reach the save slot through it (the
     // caller's $15 is about to be restored, so it cannot be the base).
@@ -170,9 +193,45 @@ void AlphaFrameLowering::emitEpilogue(MachineFunction &MF,
     BuildMI(MBB, MBBI, DL, TII.get(Alpha::LDQ), Alpha::R15)
         .addReg(Alpha::R30)
         .addImm(Off);
+    insertCFI(MBBI, MCCFIInstruction::createRestore(
+                        nullptr, TRI->getDwarfRegNum(Alpha::R15, true)));
   }
 
+  // Mark each callee-saved register restored.  Prologue/epilogue insertion puts
+  // the reloads immediately before this point, so one position after all of
+  // them describes every one: a .cfi_restore that arrives late is still correct
+  // -- until it does, the unwinder reads the save slot, which still holds the
+  // value -- whereas searching backwards for a definition of the register
+  // matches any definition rather than the reload, and finds none at all when
+  // there is no reload to find.
+  for (const CalleeSavedInfo &CSI : MFI.getCalleeSavedInfo())
+    insertCFI(MBBI, MCCFIInstruction::createRestore(
+                        nullptr, TRI->getDwarfRegNum(CSI.getReg(), true)));
+
   adjustStack(MBB, MBBI, DL, TII, StackSize);
+  // The frame is gone: the CFA is the stack pointer with no offset.
+  insertCFI(MBBI, MCCFIInstruction::cfiDefCfaOffset(nullptr, 0));
+}
+
+void AlphaFrameLowering::resetCFIToInitialState(MachineBasicBlock &MBB) const {
+  // Emit the CFI that returns the unwind state to what it was at function
+  // entry: the CFA is the stack pointer, and every callee-saved register holds
+  // its original value.  The CFIFixup pass uses this when a block that follows
+  // an epilogue in layout order still needs the no-frame state.
+  MachineFunction &MF = *MBB.getParent();
+  const AlphaInstrInfo &TII = *MF.getSubtarget<AlphaSubtarget>().getInstrInfo();
+  const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+  DebugLoc DL;
+  auto emitCFI = [&](const MCCFIInstruction &Inst) {
+    unsigned Idx = MF.addFrameInst(Inst);
+    BuildMI(MBB, MBB.begin(), DL, TII.get(TargetOpcode::CFI_INSTRUCTION))
+        .addCFIIndex(Idx);
+  };
+  emitCFI(MCCFIInstruction::cfiDefCfa(
+      nullptr, TRI->getDwarfRegNum(Alpha::R30, true), 0));
+  for (const CalleeSavedInfo &CSI : MF.getFrameInfo().getCalleeSavedInfo())
+    emitCFI(MCCFIInstruction::createSameValue(
+        nullptr, TRI->getDwarfRegNum(CSI.getReg(), true)));
 }
 
 bool AlphaFrameLowering::hasReservedCallFrame(const MachineFunction &MF) const {
