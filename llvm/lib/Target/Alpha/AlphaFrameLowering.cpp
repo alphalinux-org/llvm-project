@@ -13,6 +13,8 @@
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/MC/MCDwarf.h"
 #include "llvm/Support/ErrorHandling.h"
 
 using namespace llvm;
@@ -86,21 +88,49 @@ void AlphaFrameLowering::emitPrologue(MachineFunction &MF,
 
   adjustStack(MBB, MBBI, DL, TII, -(int64_t)StackSize);
 
+  // Position for the frame-setup save and the CFI, after the callee-save
+  // spills.
+  MachineBasicBlock::iterator Pos =
+      skipFrameInstrs(MBBI, MBB, /*IsSetup=*/true);
+  const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+
+  auto emitCFI = [&](const MCCFIInstruction &Inst) {
+    unsigned Idx = MF.addFrameInst(Inst);
+    BuildMI(MBB, Pos, DL, TII.get(TargetOpcode::CFI_INSTRUCTION))
+        .addCFIIndex(Idx)
+        .setMIFlag(MachineInstr::FrameSetup);
+  };
+
   if (hasFP(MF)) {
     // After the frame is allocated and the callee-saved registers spilled, save
     // the caller's $15 and set $15 to the current stack pointer.  Later
     // references to fixed frame slots use $15, which stays put while variable
     // stack allocations move $30.  The save itself must address the slot
     // through $30, since $15 is not the frame pointer yet.
-    MachineBasicBlock::iterator Save =
-        skipFrameInstrs(MBBI, MBB, /*IsSetup=*/true);
     int FPSlot = AFI->getFramePointerSaveIndex();
-    int64_t Off = MFI.getObjectOffset(FPSlot) + (int64_t)StackSize;
-    BuildMI(MBB, Save, DL, TII.get(Alpha::STQ))
+    int64_t FPOff = MFI.getObjectOffset(FPSlot);
+    BuildMI(MBB, Pos, DL, TII.get(Alpha::STQ))
         .addReg(Alpha::R15)
         .addReg(Alpha::R30)
-        .addImm(Off);
-    copyReg(MBB, Save, DL, TII, Alpha::R15, Alpha::R30);
+        .addImm(FPOff + (int64_t)StackSize)
+        .setMIFlag(MachineInstr::FrameSetup);
+    copyReg(MBB, Pos, DL, TII, Alpha::R15, Alpha::R30);
+  }
+
+  // Describe the frame for the unwinder: the CFA offset, each saved register,
+  // and, with a frame pointer, that the CFA is now anchored to $15.
+  if (StackSize)
+    emitCFI(MCCFIInstruction::cfiDefCfaOffset(nullptr, StackSize));
+  for (const CalleeSavedInfo &CSI : MFI.getCalleeSavedInfo())
+    emitCFI(MCCFIInstruction::createOffset(
+        nullptr, TRI->getDwarfRegNum(CSI.getReg(), true),
+        MFI.getObjectOffset(CSI.getFrameIdx())));
+  if (hasFP(MF)) {
+    unsigned DwarfFP = TRI->getDwarfRegNum(Alpha::R15, true);
+    emitCFI(MCCFIInstruction::createOffset(
+        nullptr, DwarfFP,
+        MFI.getObjectOffset(AFI->getFramePointerSaveIndex())));
+    emitCFI(MCCFIInstruction::createDefCfaRegister(nullptr, DwarfFP));
   }
 }
 
