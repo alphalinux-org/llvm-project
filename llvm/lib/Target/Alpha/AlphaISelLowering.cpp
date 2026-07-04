@@ -150,6 +150,10 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   for (MVT VT : {MVT::i8, MVT::i16})
     setLoadExtAction(ISD::SEXTLOAD, MVT::i64, VT, Expand);
 
+  // A boolean occupies a byte in memory; extend an i1 load through an i8 load.
+  for (auto Ext : {ISD::EXTLOAD, ISD::ZEXTLOAD, ISD::SEXTLOAD})
+    setLoadExtAction(Ext, MVT::i64, MVT::i1, Promote);
+
   computeRegisterProperties(STI.getRegisterInfo());
 }
 
