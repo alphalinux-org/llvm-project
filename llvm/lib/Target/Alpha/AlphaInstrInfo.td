@@ -64,6 +64,16 @@ def AlphaDivCall : SDNode<"AlphaISD::DIVCALL", SDTNone,
 def AlphaGprelHi : SDNode<"AlphaISD::GPREL_HI", SDTIntBinOp>;
 def AlphaGprelLo : SDNode<"AlphaISD::GPREL_LO", SDTIntBinOp>;
 
+// Conditional branches that test a single register against zero: equal,
+// not-equal, the signed relations, and the low-bit tests.
+def SDTAlphaCondBr : SDTypeProfile<0, 2, [SDTCisVT<0, i64>, SDTCisVT<1, OtherVT>]>;
+def AlphaBrEQ : SDNode<"AlphaISD::BR_EQ", SDTAlphaCondBr, [SDNPHasChain]>;
+def AlphaBrNE : SDNode<"AlphaISD::BR_NE", SDTAlphaCondBr, [SDNPHasChain]>;
+def AlphaBrLT : SDNode<"AlphaISD::BR_LT", SDTAlphaCondBr, [SDNPHasChain]>;
+def AlphaBrLE : SDNode<"AlphaISD::BR_LE", SDTAlphaCondBr, [SDNPHasChain]>;
+def AlphaBrGT : SDNode<"AlphaISD::BR_GT", SDTAlphaCondBr, [SDNPHasChain]>;
+def AlphaBrGE : SDNode<"AlphaISD::BR_GE", SDTAlphaCondBr, [SDNPHasChain]>;
+
 // Local-exec TLS: the thread pointer (call_pal rduniq) plus a link-time
 // constant offset formed with ldah !tprelhi / lda !tprello.  The thread pointer
 // itself is materialized in C++ (RDUNIQ then a copy of $0).
@@ -1131,13 +1141,32 @@ let isBranch = 1, isTerminator = 1, isBarrier = 1, Ra = 31 in
 def BR : BForm<0x30, (outs), (ins brtarget:$target), "br $$31, $target",
                [(br bb:$target)]>;
 
-// Conditional branches test a register against zero.
+// Conditional branches test a register against zero.  The relational forms
+// carry a signed interpretation of the register value.
 let isBranch = 1, isTerminator = 1 in {
 def BEQ : BForm<0x39, (outs), (ins GPRC:$Ra, brtarget:$target),
-                "beq $Ra, $target", []>;
+                "beq $Ra, $target", [(AlphaBrEQ GPRC:$Ra, bb:$target)]>;
 def BNE : BForm<0x3d, (outs), (ins GPRC:$Ra, brtarget:$target),
                 "bne $Ra, $target", [(brcond GPRC:$Ra, bb:$target)]>;
+def BLT : BForm<0x3a, (outs), (ins GPRC:$Ra, brtarget:$target),
+                "blt $Ra, $target", [(AlphaBrLT GPRC:$Ra, bb:$target)]>;
+def BLE : BForm<0x3b, (outs), (ins GPRC:$Ra, brtarget:$target),
+                "ble $Ra, $target", [(AlphaBrLE GPRC:$Ra, bb:$target)]>;
+def BGE : BForm<0x3e, (outs), (ins GPRC:$Ra, brtarget:$target),
+                "bge $Ra, $target", [(AlphaBrGE GPRC:$Ra, bb:$target)]>;
+def BGT : BForm<0x3f, (outs), (ins GPRC:$Ra, brtarget:$target),
+                "bgt $Ra, $target", [(AlphaBrGT GPRC:$Ra, bb:$target)]>;
+def BLBC : BForm<0x38, (outs), (ins GPRC:$Ra, brtarget:$target),
+                 "blbc $Ra, $target", []>;
+def BLBS : BForm<0x3c, (outs), (ins GPRC:$Ra, brtarget:$target),
+                 "blbs $Ra, $target", []>;
 }
+def : Pat<(AlphaBrNE GPRC:$Ra, bb:$target), (BNE GPRC:$Ra, bb:$target)>;
+// A low-bit test folds the mask into blbs/blbc (branch on low bit set/clear).
+def : Pat<(AlphaBrNE (and GPRC:$Ra, 1), bb:$target),
+          (BLBS GPRC:$Ra, bb:$target)>;
+def : Pat<(AlphaBrEQ (and GPRC:$Ra, 1), bb:$target),
+          (BLBC GPRC:$Ra, bb:$target)>;
 
 // Indirect branch through a register (used for jump tables).
 let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1,

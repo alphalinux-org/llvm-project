@@ -47,9 +47,10 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
     setOperationAction(ISD::SELECT_CC, VT, Expand);
   }
 
-  // Only BRCOND (branch on a 0/1 register) is supported; expand BR_CC into
-  // SETCC + BRCOND, and there are no jump tables yet.
-  setOperationAction(ISD::BR_CC, MVT::i64, Expand);
+  // Integer BR_CC is custom-lowered so that a comparison against zero becomes a
+  // single test-and-branch (beq/bne/blt/ble/bgt/bge).  Floating-point BR_CC is
+  // expanded into an fcmp (a 0/1 result) followed by bne.
+  setOperationAction(ISD::BR_CC, MVT::i64, Custom);
   setOperationAction(ISD::BR_CC, MVT::f32, Expand);
   setOperationAction(ISD::BR_CC, MVT::f64, Expand);
   // Jump tables are emitted as GP-relative offset tables and dispatched with a
@@ -196,6 +197,18 @@ const char *AlphaTargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "AlphaISD::GPREL_HI";
   case AlphaISD::GPREL_LO:
     return "AlphaISD::GPREL_LO";
+  case AlphaISD::BR_EQ:
+    return "AlphaISD::BR_EQ";
+  case AlphaISD::BR_NE:
+    return "AlphaISD::BR_NE";
+  case AlphaISD::BR_LT:
+    return "AlphaISD::BR_LT";
+  case AlphaISD::BR_LE:
+    return "AlphaISD::BR_LE";
+  case AlphaISD::BR_GT:
+    return "AlphaISD::BR_GT";
+  case AlphaISD::BR_GE:
+    return "AlphaISD::BR_GE";
   case AlphaISD::TPREL_HI:
     return "AlphaISD::TPREL_HI";
   case AlphaISD::TPREL_LO:
@@ -235,6 +248,8 @@ SDValue AlphaTargetLowering::LowerOperation(SDValue Op,
     return LowerConstantPool(Op, DAG);
   case ISD::JumpTable:
     return LowerJumpTable(Op, DAG);
+  case ISD::BR_CC:
+    return LowerBR_CC(Op, DAG);
   case ISD::BR_JT:
     return LowerBR_JT(Op, DAG);
   case ISD::VASTART:
@@ -442,6 +457,66 @@ SDValue AlphaTargetLowering::LowerJumpTable(SDValue Op,
   SDValue GP = DAG.getRegister(Alpha::R29, MVT::i64);
   SDValue Hi = DAG.getNode(AlphaISD::GPREL_HI, DL, MVT::i64, TJT, GP);
   return DAG.getNode(AlphaISD::GPREL_LO, DL, MVT::i64, TJT, Hi);
+}
+
+SDValue AlphaTargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
+  SDValue Chain = Op.getOperand(0);
+  ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(1))->get();
+  SDValue LHS = Op.getOperand(2);
+  SDValue RHS = Op.getOperand(3);
+  SDValue Dest = Op.getOperand(4);
+  SDLoc DL(Op);
+
+  // A signed comparison whose branch reduces to testing LHS against zero is a
+  // single test-and-branch.  The middle end canonicalizes the "or equal"
+  // relations against zero to a strict comparison against +/-1 (x >= 0 becomes
+  // x > -1, x > 0 becomes x >= 1, and so on), so recognize those forms too.
+  if (auto *C = dyn_cast<ConstantSDNode>(RHS)) {
+    int64_t V = C->getSExtValue();
+    unsigned Opc = 0;
+    if (V == 0) {
+      switch (CC) {
+      case ISD::SETEQ:
+        Opc = AlphaISD::BR_EQ;
+        break;
+      case ISD::SETNE:
+        Opc = AlphaISD::BR_NE;
+        break;
+      case ISD::SETLT:
+        Opc = AlphaISD::BR_LT;
+        break;
+      case ISD::SETLE:
+        Opc = AlphaISD::BR_LE;
+        break;
+      case ISD::SETGT:
+        Opc = AlphaISD::BR_GT;
+        break;
+      case ISD::SETGE:
+        Opc = AlphaISD::BR_GE;
+        break;
+      default:
+        break;
+      }
+    } else if (V == 1) {
+      if (CC == ISD::SETGE) // x >= 1  <=>  x > 0
+        Opc = AlphaISD::BR_GT;
+      else if (CC == ISD::SETLT) // x < 1   <=>  x <= 0
+        Opc = AlphaISD::BR_LE;
+    } else if (V == -1) {
+      if (CC == ISD::SETGT) // x > -1  <=>  x >= 0
+        Opc = AlphaISD::BR_GE;
+      else if (CC == ISD::SETLE) // x <= -1 <=>  x < 0
+        Opc = AlphaISD::BR_LT;
+    }
+    if (Opc)
+      return DAG.getNode(Opc, DL, MVT::Other, Chain, LHS, Dest);
+  }
+
+  // Otherwise compute the 0/1 comparison result and branch if it is nonzero.
+  // Emit the branch as a target node rather than ISD::BRCOND: a BRCOND of a
+  // SETCC would be folded straight back into BR_CC and lowered again forever.
+  SDValue Cond = DAG.getSetCC(DL, MVT::i64, LHS, RHS, CC);
+  return DAG.getNode(AlphaISD::BR_NE, DL, MVT::Other, Chain, Cond, Dest);
 }
 
 SDValue AlphaTargetLowering::LowerBR_JT(SDValue Op, SelectionDAG &DAG) const {
