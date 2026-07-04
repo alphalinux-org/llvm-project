@@ -297,6 +297,8 @@ createTargetCodeGenInfo(CodeGenModule &CGM) {
     return createSparcV8TargetCodeGenInfo(CGM);
   case llvm::Triple::sparcv9:
     return createSparcV9TargetCodeGenInfo(CGM);
+  case llvm::Triple::alpha:
+    return createAlphaTargetCodeGenInfo(CGM);
   case llvm::Triple::xcore:
     return createXCoreTargetCodeGenInfo(CGM);
   case llvm::Triple::arc:
