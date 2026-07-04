@@ -69,6 +69,17 @@ public:
                                 const MCSubtargetInfo &STI) const {
     return getSymEncoding(MI, OpNo, Fixups, Alpha::fixup_alpha_gprelhigh);
   }
+  // The jsr hint field: emit an R_ALPHA_HINT relocation for the call target so
+  // the linker can fill in the branch-prediction displacement.
+  unsigned getHintEncoding(const MCInst &MI, unsigned OpNo,
+                           SmallVectorImpl<MCFixup> &Fixups,
+                           const MCSubtargetInfo &STI) const {
+    const MCOperand &MO = MI.getOperand(OpNo);
+    if (MO.isExpr())
+      Fixups.push_back(MCFixup::create(0, MO.getExpr(),
+                                       MCFixupKind(Alpha::fixup_alpha_hint)));
+    return 0;
+  }
   unsigned getTlsldmEncoding(const MCInst &MI, unsigned OpNo,
                              SmallVectorImpl<MCFixup> &Fixups,
                              const MCSubtargetInfo &STI) const {
@@ -213,6 +224,25 @@ void AlphaMCCodeEmitter::encodeInstruction(const MCInst &MI,
   case Alpha::JSR: {
     // jsr $26, ($27) followed by an ldgp reload from the return address.
     uint32_t Bits = getBinaryCodeForInstr(MI, Fixups, STI);
+    support::endian::write(CB, Bits, llvm::endianness::little);
+    return emitLdgp(Alpha::R26, CB, Fixups, STI);
+  }
+  case Alpha::JSRd:
+  case Alpha::JSRdl: {
+    // A direct jsr.  JSRd (external callee) also fills the hint field with an
+    // R_ALPHA_HINT while encoding its operand.  Both forms emit a lituse_jsr
+    // relocation (addend 3) marking the jsr as a use of the GOT literal so the
+    // linker can relax a dso-local call; JSRdl carries only that, since a hint
+    // would inhibit the relaxation.  The ldgp reload follows as for JSR.
+    uint32_t Bits = getBinaryCodeForInstr(MI, Fixups, STI);
+    // The lituse_jsr relocation is section-relative with the use type (3) in
+    // its addend, independent of the callee, so reference the text section.
+    MCSymbol *TextSym = Ctx.getOrCreateSymbol(".text");
+    const MCExpr *Use =
+        MCBinaryExpr::createAdd(MCSymbolRefExpr::create(TextSym, Ctx),
+                                MCConstantExpr::create(3, Ctx), Ctx);
+    Fixups.push_back(
+        MCFixup::create(0, Use, MCFixupKind(Alpha::fixup_alpha_lituse_jsr)));
     support::endian::write(CB, Bits, llvm::endianness::little);
     return emitLdgp(Alpha::R26, CB, Fixups, STI);
   }
