@@ -1036,6 +1036,38 @@ def LDS : MForm<0x22, (outs FPRC:$Ra), (ins memri:$addr), "lds $Ra, $addr",
                 [(set f32:$Ra, (load ADDRri:$addr))]>;
 }
 
+// Software-directed prefetch: a load whose destination is R31 or F31 brings a
+// cache line in without producing a result (21264 HRM section 2.6).  ldl and
+// lds leave the line under the normal (evict-last) replacement pointer; ldq and
+// ldt set it to be evicted next, for data with no temporal locality.  lds/ldt
+// (to F31) request the line for write (prefetch with modify intent).
+let mayLoad = 1, hasSideEffects = 0, Ra = 31 in {
+def PREFR   : MForm<0x28, (outs), (ins memri:$addr), "ldl $$31, $addr", []>;
+def PREFREN : MForm<0x29, (outs), (ins memri:$addr), "ldq $$31, $addr", []>;
+def PREFW   : MForm<0x22, (outs), (ins memri:$addr), "lds $$f31, $addr", []>;
+def PREFWEN : MForm<0x23, (outs), (ins memri:$addr), "ldt $$f31, $addr", []>;
+}
+
+// Select the prefetch flavor from the read/write and locality operands of the
+// llvm.prefetch intrinsic.  A normal prefetch (any locality) needs 21264-class
+// hardware; the evict-next hint for locality 0 needs the 21364, and otherwise
+// falls back to a normal prefetch.  On earlier processors no pattern matches and
+// the prefetch is dropped, since a load to R31/F31 there can fault.
+class PrefFrag<int Write, bit EvictNext>
+    : PatFrag<(ops node:$ptr, node:$rw, node:$loc, node:$cache),
+              (prefetch node:$ptr, node:$rw, node:$loc, node:$cache), [{
+  return N->getConstantOperandVal(2) == }] # Write #
+         !if(EvictNext, [{ && N->getConstantOperandVal(3) == 0; }], [{ ; }])>;
+
+let Predicates = [HasPrefetch] in {
+def : Pat<(PrefFrag<0, 0> ADDRri:$addr, timm, timm, timm), (PREFR memri:$addr)>;
+def : Pat<(PrefFrag<1, 0> ADDRri:$addr, timm, timm, timm), (PREFW memri:$addr)>;
+}
+let Predicates = [HasPrefetchEvictNext], AddedComplexity = 10 in {
+def : Pat<(PrefFrag<0, 1> ADDRri:$addr, timm, timm, timm), (PREFREN memri:$addr)>;
+def : Pat<(PrefFrag<1, 1> ADDRri:$addr, timm, timm, timm), (PREFWEN memri:$addr)>;
+}
+
 // An i32 load with don't-care high bits can use the sign-extending ldl; a
 // zero-extending load clears the high half with zapnot.
 def : Pat<(i64 (extloadi32 ADDRri:$addr)), (LDL memri:$addr)>;
