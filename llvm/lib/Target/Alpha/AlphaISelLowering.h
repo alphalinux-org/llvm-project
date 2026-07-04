@@ -56,6 +56,13 @@ enum NodeType : unsigned {
   // General-dynamic TLS: the address of the tlsgd descriptor (lda !tlsgd)
   // passed to __tls_get_addr.
   TLSGD,
+
+  // Local-dynamic TLS: the module descriptor (lda !tlsldm) passed to
+  // __tls_get_addr, and the module-relative address parts (ldah !dtprelhi /
+  // lda !dtprello).
+  TLSLDM,
+  DTPREL_HI,
+  DTPREL_LO,
 };
 } // namespace AlphaISD
 

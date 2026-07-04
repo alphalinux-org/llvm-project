@@ -204,6 +204,12 @@ const char *AlphaTargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "AlphaISD::GOTTPREL";
   case AlphaISD::TLSGD:
     return "AlphaISD::TLSGD";
+  case AlphaISD::TLSLDM:
+    return "AlphaISD::TLSLDM";
+  case AlphaISD::DTPREL_HI:
+    return "AlphaISD::DTPREL_HI";
+  case AlphaISD::DTPREL_LO:
+    return "AlphaISD::DTPREL_LO";
   }
   return nullptr;
 }
@@ -345,13 +351,17 @@ SDValue AlphaTargetLowering::LowerGlobalTLSAddress(SDValue Op,
 
   SDValue TGA = DAG.getTargetGlobalAddress(GV, DL, MVT::i64, N->getOffset());
 
-  if (Model == TLSModel::GeneralDynamic) {
-    // Pass the tlsgd descriptor (lda !tlsgd) in $16 to __tls_get_addr, which
-    // returns the variable's address in $0.
+  if (Model == TLSModel::GeneralDynamic || Model == TLSModel::LocalDynamic) {
+    // Pass a TLS descriptor in $16 to __tls_get_addr.  General-dynamic passes
+    // the tlsgd descriptor and gets the variable's address back in $0;
+    // local-dynamic passes the tlsldm descriptor and gets the module's TLS
+    // base, to which the variable's dtprel offset is then added.
+    bool IsGD = Model == TLSModel::GeneralDynamic;
     MachineFunction &MF = DAG.getMachineFunction();
     MF.getInfo<AlphaMachineFunctionInfo>()->setUsesGP();
 
-    SDValue Arg = DAG.getNode(AlphaISD::TLSGD, DL, MVT::i64, TGA);
+    SDValue Arg = DAG.getNode(IsGD ? AlphaISD::TLSGD : AlphaISD::TLSLDM, DL,
+                              MVT::i64, TGA);
     SDValue Callee =
         DAG.getNode(AlphaISD::LITERAL, DL, MVT::i64,
                     DAG.getTargetExternalSymbol("__tls_get_addr", MVT::i64));
@@ -372,7 +382,14 @@ SDValue AlphaTargetLowering::LowerGlobalTLSAddress(SDValue Op,
     Glue = Chain.getValue(1);
     Chain = DAG.getCALLSEQ_END(Chain, 0, 0, Glue, DL);
     Glue = Chain.getValue(1);
-    return DAG.getCopyFromReg(Chain, DL, Alpha::R0, MVT::i64, Glue);
+    SDValue Ret = DAG.getCopyFromReg(Chain, DL, Alpha::R0, MVT::i64, Glue);
+
+    if (IsGD)
+      return Ret;
+
+    // Local-dynamic: add the variable's module-relative offset to the base.
+    SDValue Hi = DAG.getNode(AlphaISD::DTPREL_HI, DL, MVT::i64, TGA, Ret);
+    return DAG.getNode(AlphaISD::DTPREL_LO, DL, MVT::i64, TGA, Hi);
   }
 
   // The two models left both start from the thread pointer, read from the
@@ -392,10 +409,8 @@ SDValue AlphaTargetLowering::LowerGlobalTLSAddress(SDValue Op,
   }
 
   // Local-exec: the offset from the thread pointer is a link-time constant
-  // formed with ldah !tprelhi / lda !tprello.  (Local-dynamic is not yet
-  // implemented; it is only ever chosen as an optimization of general-dynamic.)
-  if (Model != TLSModel::LocalExec)
-    report_fatal_error("local-dynamic TLS is not yet supported on Alpha");
+  // formed with ldah !tprelhi / lda !tprello.
+  assert(Model == TLSModel::LocalExec && "unexpected TLS model");
 
   SDValue Hi = DAG.getNode(AlphaISD::TPREL_HI, DL, MVT::i64, TGA, TP);
   return DAG.getNode(AlphaISD::TPREL_LO, DL, MVT::i64, TGA, Hi);
