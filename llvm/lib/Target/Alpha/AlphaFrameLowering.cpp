@@ -13,6 +13,10 @@
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/MC/MCDwarf.h"
+#include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/TargetOptions.h"
 #include "llvm/Support/ErrorHandling.h"
 
 using namespace llvm;
@@ -42,6 +46,28 @@ static void copyReg(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
   BuildMI(MBB, MBBI, DL, TII.get(Alpha::BIS), Dst)
       .addReg(Alpha::R31)
       .addReg(Src);
+}
+
+// Skip past the callee-save spills the prolog/epilog inserter placed at the top
+// of the entry block before this runs.  It does not flag them, so they are
+// recognized by the frame indices they address; the frame index operands are
+// still there, since they are replaced by a later part of the same pass.
+static MachineBasicBlock::iterator
+skipCSRSpills(MachineBasicBlock::iterator MBBI, MachineBasicBlock &MBB,
+              const MachineFrameInfo &MFI) {
+  auto IsCSRSpill = [&](const MachineInstr &MI) {
+    if (!MI.mayStore())
+      return false;
+    for (const MachineOperand &MO : MI.operands())
+      if (MO.isFI())
+        for (const CalleeSavedInfo &CSI : MFI.getCalleeSavedInfo())
+          if (CSI.getFrameIdx() == MO.getIndex())
+            return true;
+    return false;
+  };
+  while (MBBI != MBB.end() && IsCSRSpill(*MBBI))
+    ++MBBI;
+  return MBBI;
 }
 
 void AlphaFrameLowering::determineCalleeSaves(MachineFunction &MF,
@@ -75,21 +101,50 @@ void AlphaFrameLowering::emitPrologue(MachineFunction &MF,
 
   adjustStack(MBB, MBBI, DL, TII, -(int64_t)StackSize);
 
+  const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+
+  // Insert a CFI directive at Pos, which is the position *after* the
+  // instruction whose effect it describes, so an asynchronous unwind from any
+  // point in the prologue observes the correct state.
+  auto emitCFI = [&](MachineBasicBlock::iterator Pos,
+                     const MCCFIInstruction &Inst) {
+    unsigned Idx = MF.addFrameInst(Inst);
+    BuildMI(MBB, Pos, DL, TII.get(TargetOpcode::CFI_INSTRUCTION))
+        .addCFIIndex(Idx)
+        .setMIFlag(MachineInstr::FrameSetup);
+  };
+
+  if (StackSize)
+    emitCFI(MBBI, MCCFIInstruction::cfiDefCfaOffset(nullptr, StackSize));
+
   if (hasFP(MF)) {
     // Save the caller's $15 and set $15 to the current stack pointer, before
     // the callee-save spills rather than after them: those address their slots
     // through $15, which stays put while variable stack allocations move $30.
     // The save itself must address its slot through $30, since $15 is not the
     // frame pointer yet.
-    MachineBasicBlock::iterator Save = MBBI;
     int FPSlot = AFI->getFramePointerSaveIndex();
-    int64_t Off = MFI.getObjectOffset(FPSlot) + (int64_t)StackSize;
-    BuildMI(MBB, Save, DL, TII.get(Alpha::STQ))
+    int64_t FPOff = MFI.getObjectOffset(FPSlot);
+    unsigned DwarfFP = TRI->getDwarfRegNum(Alpha::R15, true);
+    BuildMI(MBB, MBBI, DL, TII.get(Alpha::STQ))
         .addReg(Alpha::R15)
         .addReg(Alpha::R30)
-        .addImm(Off);
-    copyReg(MBB, Save, DL, TII, Alpha::R15, Alpha::R30);
+        .addImm(FPOff + (int64_t)StackSize)
+        .setMIFlag(MachineInstr::FrameSetup);
+    emitCFI(MBBI, MCCFIInstruction::createOffset(nullptr, DwarfFP, FPOff));
+    copyReg(MBB, MBBI, DL, TII, Alpha::R15, Alpha::R30);
+    emitCFI(MBBI, MCCFIInstruction::createDefCfaRegister(nullptr, DwarfFP));
   }
+
+  // Describe each callee-saved register once they have all been stored.  A
+  // rule that arrives late is still correct -- until it does, the unwinder
+  // reads the value out of the register, which still holds it -- but one that
+  // arrives early sends it to a slot that has not been written.
+  MachineBasicBlock::iterator Pos = skipCSRSpills(MBBI, MBB, MFI);
+  for (const CalleeSavedInfo &CSI : MFI.getCalleeSavedInfo())
+    emitCFI(Pos, MCCFIInstruction::createOffset(
+                     nullptr, TRI->getDwarfRegNum(CSI.getReg(), true),
+                     MFI.getObjectOffset(CSI.getFrameIdx())));
 }
 
 void AlphaFrameLowering::emitEpilogue(MachineFunction &MF,
