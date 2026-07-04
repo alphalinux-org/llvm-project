@@ -1516,15 +1516,33 @@ AlphaTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
     break;
   }
 
-  // MOVi2f/MOVf2i reinterpret the 64 bits of a value by bouncing them through
-  // an 8-byte stack slot, since Alpha has no direct integer/FP register move.
+  // MOVi2f/MOVf2i reinterpret the 64 bits of a value.  The FIX extension moves
+  // them directly with itoft/ftoit; otherwise they bounce through an 8-byte
+  // stack slot, since Alpha has otherwise no integer/FP register move.
   MachineFunction &MF = *MBB->getParent();
   const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
   const DebugLoc &DL = MI.getDebugLoc();
-  int FI =
-      MF.getFrameInfo().CreateStackObject(8, Align(8), /*isSpillSlot=*/false);
   Register Dst = MI.getOperand(0).getReg();
   Register Src = MI.getOperand(1).getReg();
+
+  if (Subtarget.hasFIX()) {
+    unsigned Opc =
+        MI.getOpcode() == Alpha::MOVi2f ? Alpha::ITOFT : Alpha::FTOIT;
+    BuildMI(*MBB, MI, DL, TII.get(Opc), Dst).addReg(Src);
+    MI.eraseFromParent();
+    return MBB;
+  }
+
+  // The store and its load are adjacent, so one slot serves every move in the
+  // function rather than the frame growing by eight bytes per bitcast (and per
+  // sitofp/fptosi, which are built on these).
+  auto *FuncInfo = MF.getInfo<AlphaMachineFunctionInfo>();
+  int FI = FuncInfo->getBitcastSlotIndex();
+  if (FI == -1) {
+    FI =
+        MF.getFrameInfo().CreateStackObject(8, Align(8), /*isSpillSlot=*/false);
+    FuncInfo->setBitcastSlotIndex(FI);
+  }
 
   unsigned StoreOpc, LoadOpc;
   switch (MI.getOpcode()) {
