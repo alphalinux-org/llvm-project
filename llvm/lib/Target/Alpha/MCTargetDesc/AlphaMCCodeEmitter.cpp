@@ -18,6 +18,7 @@
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
+#include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/EndianStream.h"
 
@@ -257,6 +258,13 @@ void AlphaMCCodeEmitter::encodeInstruction(const MCInst &MI,
     break;
   }
   uint32_t Bits = getBinaryCodeForInstr(MI, Fixups, STI);
+  // Under -mieee, add the software-completion trap qualifier to floating-point
+  // instructions by setting the trap bits in their function field.
+  if (unsigned TrapClass = MCII.get(MI.getOpcode()).TSFlags & 0x7)
+    Bits |=
+        Alpha::getFPTrapFuncBits(TrapClass, STI.hasFeature(Alpha::FeatureIEEE),
+                                 STI.hasFeature(Alpha::FeatureIEEEInexact))
+        << 5;
   support::endian::write(CB, Bits, llvm::endianness::little);
 }
 

@@ -455,6 +455,14 @@ class FSign<bits<11> func, dag ins, string asmstr, list<dag> pattern>
   let Inst{15-5} = func;
   let Inst{4-0} = Rc;
 }
+
+// A plain register move: cpys Rb, Rb, Rc.
+class FMov<list<dag> pat> : FSign<0x020, (ins FPRC:$Rb), "cpys $Rb, $Rb, $Rc",
+                                  pat> {
+  bits<5> Rb;
+  let fa = Rb;
+  let fb = Rb;
+}
 // fabs: cpys $f31, Rb, Rc.
 class FAbs<list<dag> pat> : FSign<0x020, (ins FPRC:$Rb), "cpys $$f31, $Rb, $Rc",
                                   pat> {
@@ -489,7 +497,9 @@ let isCodeGenOnly = 1 in def FCPYST : FCpys<[(set f64:$Rc, (fcopysign f64:$Ra, f
 class FP_rr<bits<11> func, string mnem, ValueType vt, SDPatternOperator node>
     : FForm<0x16, func, (outs FPRC:$Rc), (ins FPRC:$Ra, FPRC:$Rb),
             mnem # " $Ra, $Rb, $Rc",
-            [(set vt:$Rc, (node vt:$Ra, vt:$Rb))]>;
+            [(set vt:$Rc, (node vt:$Ra, vt:$Rb))]> {
+  let TrapClass = 1;  // Arithmetic: su / sui.
+}
 
 def ADDS : FP_rr<0x080, "adds", f32, fadd>;
 def ADDT : FP_rr<0x0a0, "addt", f64, fadd>;
@@ -505,7 +515,9 @@ def DIVT : FP_rr<0x0a3, "divt", f64, fdiv>;
 // f64 values use, so the same instructions serve both.
 class CMPT_rr<bits<11> func, string mnem>
     : FForm<0x16, func, (outs FPRC:$Rc), (ins FPRC:$Ra, FPRC:$Rb),
-            mnem # " $Ra, $Rb, $Rc", []>;
+            mnem # " $Ra, $Rb, $Rc", []> {
+  let TrapClass = 2;  // Compare: su only.
+}
 def CMPTEQ : CMPT_rr<0x0a5, "cmpteq">;
 def CMPTLT : CMPT_rr<0x0a6, "cmptlt">;
 def CMPTLE : CMPT_rr<0x0a7, "cmptle">;
@@ -523,20 +535,33 @@ class FP_r<bits<6> opc, bits<11> func, string mnem, list<dag> pat>
   let Ra = 31;
 }
 // Precision conversions between S_floating (f32) and T_floating (f64).
-def CVTST : FP_r<0x16, 0x2ac, "cvtst", [(set f64:$Rc, (fpextend f32:$Rb))]>;
+// A float loaded with lds is already held in T_floating form, so widening one
+// to double is a register move.  cvtst would fault on an infinity or a NaN
+// unless it asks for software completion, so it is only used under -mieee,
+// where it also handles a denormal properly.  GCC makes the same split.
+let TrapClass = 5 in
+def CVTST : FP_r<0x16, 0x2ac, "cvtst", []>;
+let isCodeGenOnly = 1, Predicates = [NotIEEE] in
+def FPEXTST : FMov<[(set f64:$Rc, (fpextend f32:$Rb))]>;
+let TrapClass = 1 in  // T-to-S convert is arithmetic: su / sui.
 def CVTTS : FP_r<0x16, 0x0ac, "cvtts", [(set f32:$Rc, (fpround f64:$Rb))]>;
 
 // Square root, from the FIX extension (ev6).
-let Predicates = [HasFIX], hasSideEffects = 0 in {
+let Predicates = [HasFIX], hasSideEffects = 0, TrapClass = 1 in {
 def SQRTS : FP_r<0x14, 0x08b, "sqrts", [(set f32:$Rc, (fsqrt f32:$Rb))]>;
 def SQRTT : FP_r<0x14, 0x0ab, "sqrtt", [(set f64:$Rc, (fsqrt f64:$Rb))]>;
 }
 
 // Integer/floating conversions on values held in floating-point registers.
+// Integer-to-float can only raise inexact, so it takes the sui qualifier only.
+let TrapClass = 4 in {
 def CVTQT : FP_r<0x16, 0x0be, "cvtqt", []>;
 def CVTQS : FP_r<0x16, 0x0bc, "cvtqs", []>;
+}
 // cvttq/c: convert T-floating to quadword with chopped (round-toward-zero)
-// rounding, matching C's fp-to-integer truncation semantics.
+// rounding, matching C's fp-to-integer truncation semantics.  Float-to-int
+// takes the sv / svi qualifier.
+let TrapClass = 3 in
 def CVTTQ : FP_r<0x16, 0x02f, "cvttq/c", []>;
 
 // Move the floating-point control register to/from a floating register.  The
@@ -577,6 +602,11 @@ def LDAHm : MForm<0x09, (outs GPRC:$Ra), (ins memri:$addr), "ldah $Ra, $addr",
 }
 
 } // hasSideEffects = 0, mayLoad = 0, mayStore = 0
+
+// Under -mieee the widening goes through cvtst, whose /s form is completed in
+// software; without it the register move above is used instead.
+let Predicates = [HasIEEE] in
+def : Pat<(f64 (fpextend f32:$Rb)), (CVTST $Rb)>;
 
 // Materialize a small signed constant with `lda $Rc, imm($31)`.
 def : Pat<(i64 immSExt16:$imm), (LDA immSExt16:$imm, R31)>;

@@ -61,6 +61,7 @@ public:
   }
 
   bool hasBWX() const { return HasBWX; }
+  bool hasIEEE() const { return HasIEEE; }
   bool hasMVI() const { return HasMVI; }
   bool hasFIX() const { return HasFIX; }
   bool hasCIX() const { return HasCIX; }

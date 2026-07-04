@@ -57,3 +57,18 @@ def FeatureCIX : SubtargetFeature<"cix", "HasCIX", "true",
                                   "cttz, ctpop)">;
 def HasCIX : Predicate<"Subtarget->hasCIX()">,
              AssemblerPredicate<(all_of FeatureCIX)>;
+
+// IEEE floating-point conformance (-mieee): arithmetic gets the software-
+// completion trap qualifier (/su) so denormals and exceptional values are
+// handled correctly.  -mieee-with-inexact adds inexact tracking (/sui).
+def FeatureIEEE : SubtargetFeature<"ieee", "HasIEEE", "true",
+                                   "Generate IEEE-conformant floating point "
+                                   "with software completion (-mieee)">;
+def FeatureIEEEInexact
+    : SubtargetFeature<"ieee-with-inexact", "HasIEEEInexact", "true",
+                       "IEEE floating point that also tracks the inexact flag "
+                       "(-mieee-with-inexact)", [FeatureIEEE]>;
+
+// -mieee: floating point traps are completed in software.
+def HasIEEE : Predicate<"Subtarget->hasIEEE()">;
+def NotIEEE : Predicate<"!Subtarget->hasIEEE()">;

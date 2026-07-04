@@ -17,12 +17,20 @@
 class AlphaInst<dag outs, dag ins, string asmstr, list<dag> pattern>
     : Instruction {
   field bits<32> Inst;
-  // A placeholder for fields an instruction does not set, so the disassembler
-  // decoder tables can be generated once real encodings exist.
+  // The bits the decoder is allowed to ignore when matching this instruction:
+  // a set bit there makes the decoder accept either value in that position and
+  // report the result as a soft failure rather than refusing it.  Alpha needs
+  // none of that -- every encoding here is exact -- so the mask is zero.
   field bits<32> SoftFail = 0;
 
   let Namespace = "Alpha";
   let Size = 4;
+
+  // Floating-point trap-mode class, consulted by the code emitter and printer
+  // to add software-completion (/su, /sui, /sv, ...) qualifiers under -mieee.
+  // 0 none, 1 arithmetic, 2 compare, 3 float-to-int, 4 int-to-float.
+  bits<3> TrapClass = 0;
+  let TSFlags{2-0} = TrapClass;
 
   bits<6> Opcode = 0;
   let Inst{31-26} = Opcode;
