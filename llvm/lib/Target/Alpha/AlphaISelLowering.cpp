@@ -21,6 +21,7 @@
 #include "llvm/IR/GlobalIFunc.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/IntrinsicsAlpha.h"
 #include "llvm/Support/ErrorHandling.h"
 
 using namespace llvm;
@@ -78,6 +79,22 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   setOperationAction(ISD::STACKSAVE, MVT::Other, Expand);
   setOperationAction(ISD::STACKRESTORE, MVT::Other, Expand);
   setOperationAction(ISD::ConstantPool, MVT::i64, Custom);
+
+  // Alpha has no misaligned load/store; a misaligned word/long/quad access is
+  // custom-lowered to an ldq_u + extract / insert + stq_u sequence.  Word and
+  // longword accesses reach this path as extending loads and truncating stores,
+  // since i16 and i32 are not legal register types.
+  setOperationAction(ISD::LOAD, MVT::i64, Custom);
+  setOperationAction(ISD::STORE, MVT::i64, Custom);
+  for (MVT VT : {MVT::i16, MVT::i32}) {
+    setLoadExtAction(ISD::EXTLOAD, MVT::i64, VT, Custom);
+    setLoadExtAction(ISD::ZEXTLOAD, MVT::i64, VT, Custom);
+    setTruncStoreAction(MVT::i64, VT, Custom);
+  }
+  // Only the longword has a sign-extending load of its own; a signed word load
+  // is expanded further down into an extending load and a sign-extension, so
+  // asking for it here would be overwritten there.
+  setLoadExtAction(ISD::SEXTLOAD, MVT::i64, MVT::i32, Custom);
 
   // Unsigned integer/floating conversions expand through the signed ones.
   setOperationAction(ISD::UINT_TO_FP, MVT::i64, Expand);
@@ -239,6 +256,104 @@ const char *AlphaTargetLowering::getTargetNodeName(unsigned Opcode) const {
   return nullptr;
 }
 
+namespace {
+// The extract/insert/mask intrinsics for a misaligned access of the given byte
+// width (2, 4 or 8): the low form works on the first quadword, the high form on
+// the second.
+struct UnalignedOps {
+  Intrinsic::ID ExtL, ExtH, InsL, InsH, MskL, MskH;
+};
+} // namespace
+
+static UnalignedOps getUnalignedOps(unsigned Bytes) {
+  switch (Bytes) {
+  case 2:
+    return {Intrinsic::alpha_extwl, Intrinsic::alpha_extwh,
+            Intrinsic::alpha_inswl, Intrinsic::alpha_inswh,
+            Intrinsic::alpha_mskwl, Intrinsic::alpha_mskwh};
+  case 4:
+    return {Intrinsic::alpha_extll, Intrinsic::alpha_extlh,
+            Intrinsic::alpha_insll, Intrinsic::alpha_inslh,
+            Intrinsic::alpha_mskll, Intrinsic::alpha_msklh};
+  default: // 8
+    return {Intrinsic::alpha_extql, Intrinsic::alpha_extqh,
+            Intrinsic::alpha_insql, Intrinsic::alpha_insqh,
+            Intrinsic::alpha_mskql, Intrinsic::alpha_mskqh};
+  }
+}
+
+// Emit one of the extract/insert/mask byte intrinsics, op(Data, Ptr).
+static SDValue emitByteOp(SelectionDAG &DAG, const SDLoc &dl, Intrinsic::ID Id,
+                          SDValue Data, SDValue Ptr) {
+  return DAG.getNode(ISD::INTRINSIC_WO_CHAIN, dl, MVT::i64,
+                     DAG.getTargetConstant(Id, dl, MVT::i32), Data, Ptr);
+}
+
+// Load the aligned quadword containing an address with ldq_u.
+static SDValue emitLdqU(SelectionDAG &DAG, const SDLoc &dl, SDValue Chain,
+                        SDValue Ptr, MachineMemOperand::Flags Flags) {
+  SDVTList VTs = DAG.getVTList(MVT::i64, MVT::Other);
+  return DAG.getMemIntrinsicNode(AlphaISD::LDQ_U, dl, VTs, {Chain, Ptr},
+                                 MVT::i64, MachinePointerInfo(), Align(8),
+                                 Flags | MachineMemOperand::MOLoad);
+}
+
+SDValue AlphaTargetLowering::LowerLOAD(SDValue Op, SelectionDAG &DAG) const {
+  LoadSDNode *LD = cast<LoadSDNode>(Op);
+  EVT MemVT = LD->getMemoryVT();
+  unsigned Bytes = MemVT.getStoreSize();
+  // A byte is inherently aligned; leave aligned accesses to the default path.
+  if (Bytes < 2 || LD->getAlign().value() >= Bytes)
+    return SDValue();
+
+  SDLoc dl(Op);
+  SDValue Chain = LD->getChain();
+  SDValue Ptr = LD->getBasePtr();
+  auto Flags = LD->isVolatile() ? MachineMemOperand::MOVolatile
+                                : MachineMemOperand::MONone;
+  SDValue PtrHi = DAG.getNode(ISD::ADD, dl, MVT::i64, Ptr,
+                              DAG.getConstant(Bytes - 1, dl, MVT::i64));
+  SDValue Lo = emitLdqU(DAG, dl, Chain, Ptr, Flags);
+  SDValue Hi = emitLdqU(DAG, dl, Chain, PtrHi, Flags);
+  UnalignedOps Ops = getUnalignedOps(Bytes);
+  SDValue Val =
+      DAG.getNode(ISD::OR, dl, MVT::i64, emitByteOp(DAG, dl, Ops.ExtL, Lo, Ptr),
+                  emitByteOp(DAG, dl, Ops.ExtH, Hi, Ptr));
+  // The extract zero-fills above the field, so sign-extend for a sextload.
+  if (LD->getExtensionType() == ISD::SEXTLOAD)
+    Val = DAG.getNode(ISD::SIGN_EXTEND_INREG, dl, MVT::i64, Val,
+                      DAG.getValueType(MemVT));
+  SDValue NewChain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other,
+                                 Lo.getValue(1), Hi.getValue(1));
+  return DAG.getMergeValues({Val, NewChain}, dl);
+}
+
+SDValue AlphaTargetLowering::LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
+  StoreSDNode *ST = cast<StoreSDNode>(Op);
+  EVT MemVT = ST->getMemoryVT();
+  unsigned Bytes = MemVT.getStoreSize();
+  if (Bytes < 2 || ST->getAlign().value() >= Bytes)
+    return SDValue();
+
+  SDLoc dl(Op);
+  SDValue Chain = ST->getChain();
+  SDValue Ptr = ST->getBasePtr();
+  SDValue Val = ST->getValue();
+  // A misaligned store reads the one or two quadwords the field falls in,
+  // splices the field into them and writes them back.  That has to stay
+  // indivisible -- one instruction, and then one bundle: two such stores can
+  // fall in one quadword, and if one's reads are hoisted above the other's
+  // write-backs the field written first is lost.  The node carries the store's
+  // memory operand, so it has to be built as a memory node: instruction
+  // selection reads it back off the node to give it to the instruction it
+  // builds, and casting the result of getNode to MemSDNode is undefined
+  // behaviour -- there is nothing behind it to read.
+  return DAG.getMemIntrinsicNode(
+      AlphaISD::USTORE, dl, DAG.getVTList(MVT::Other),
+      {Chain, Val, Ptr, DAG.getConstant(Bytes, dl, MVT::i64)}, MemVT,
+      ST->getMemOperand());
+}
+
 SDValue AlphaTargetLowering::LowerOperation(SDValue Op,
                                             SelectionDAG &DAG) const {
   switch (Op.getOpcode()) {
@@ -277,6 +392,10 @@ SDValue AlphaTargetLowering::LowerOperation(SDValue Op,
   case ISD::SREM:
   case ISD::UREM:
     return LowerDivRem(Op, DAG);
+  case ISD::LOAD:
+    return LowerLOAD(Op, DAG);
+  case ISD::STORE:
+    return LowerSTORE(Op, DAG);
   default:
     llvm_unreachable("unexpected operation to lower");
   }

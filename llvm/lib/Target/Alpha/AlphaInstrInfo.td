@@ -77,6 +77,21 @@ def AlphaDivCall : SDNode<"AlphaISD::DIVCALL", SDTNone,
 def AlphaGprelHi : SDNode<"AlphaISD::GPREL_HI", SDTIntBinOp>;
 def AlphaGprelLo : SDNode<"AlphaISD::GPREL_LO", SDTIntBinOp>;
 
+// Unaligned quadword load/store, ignoring the low three address bits.
+def SDT_AlphaLdqU : SDTypeProfile<1, 1, [SDTCisVT<0, i64>, SDTCisPtrTy<1>]>;
+def SDT_AlphaStqU : SDTypeProfile<0, 2, [SDTCisVT<0, i64>, SDTCisPtrTy<1>]>;
+def AlphaLdqU : SDNode<"AlphaISD::LDQ_U", SDT_AlphaLdqU,
+                       [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
+// Misaligned store: value, pointer, byte width.
+def SDT_AlphaUStore
+    : SDTypeProfile<0, 3, [SDTCisVT<0, i64>, SDTCisPtrTy<1>, SDTCisVT<2, i64>]>;
+def AlphaUStore : SDNode<"AlphaISD::USTORE", SDT_AlphaUStore,
+                         [SDNPHasChain, SDNPMayStore, SDNPMayLoad,
+                          SDNPMemOperand]>;
+
+def AlphaStqU : SDNode<"AlphaISD::STQ_U", SDT_AlphaStqU,
+                       [SDNPHasChain, SDNPMayStore, SDNPMemOperand]>;
+
 // Conditional branches that test a single register against zero: equal,
 // not-equal, the signed relations, and the low-bit tests.
 def SDTAlphaCondBr : SDTypeProfile<0, 2, [SDTCisVT<0, i64>, SDTCisVT<1, OtherVT>]>;
@@ -999,7 +1014,7 @@ def : Pat<(i64 (extloadi16 ADDRri:$addr)), (LDWU memri:$addr)>;
 // ignores the low three address bits.
 let mayLoad = 1, hasSideEffects = 0 in
 def LDQ_U : MFormZ<0x0b, (outs GPRC:$Ra), (ins memzGPR:$base),
-                   "ldq_u $Ra, $base", []>;
+                   "ldq_u $Ra, $base", [(set i64:$Ra, (AlphaLdqU i64:$base))]>;
 let hasSideEffects = 0 in {
 def EXTBL : OForm<0x12, 0x06, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
                   "extbl $Ra, $Rb, $Rc", []>;
@@ -1030,7 +1045,7 @@ def MSKWL : OForm<0x12, 0x12, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
 }
 let mayStore = 1, hasSideEffects = 0 in
 def STQ_U : MFormZ<0x0f, (outs), (ins GPRC:$Ra, memzGPR:$base),
-                   "stq_u $Ra, $base", []>;
+                   "stq_u $Ra, $base", [(AlphaStqU i64:$Ra, i64:$base)]>;
 // bic with an 8-bit literal, used to align an address down to a quadword.
 let hasSideEffects = 0 in
 def BICi : OFormL<0x11, 0x08, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
@@ -1056,6 +1071,20 @@ def RMW_STOREI8 : AlphaPseudo<(outs GPRC:$t1, GPRC:$t2),
 def RMW_STOREI16 : AlphaPseudo<(outs GPRC:$t1, GPRC:$t2),
                                (ins GPRC:$val, GPRC:$addr), "", []>;
 }
+
+// A misaligned store updates the one or two quadwords the field falls in, and
+// has to stay indivisible for the same reason the byte store does: two of them
+// can land in one quadword, and interleaving the reads with the writes loses
+// whichever field was written first.  The four scratch registers are outputs so
+// the allocator provides them.
+// Eleven instructions after expansion; see RMW_STOREI8 above for why the size
+// has to say so before the expansion happens.
+let mayLoad = 1, mayStore = 1, hasSideEffects = 0, Size = 44,
+    Constraints = "@earlyclobber $t1,@earlyclobber $t2,@earlyclobber $t3,"
+                  "@earlyclobber $t4" in
+def RMW_USTORE : AlphaPseudo<(outs GPRC:$t1, GPRC:$t2, GPRC:$t3, GPRC:$t4),
+                             (ins GPRC:$val, GPRC:$addr, i64imm:$bytes), "",
+                             []>;
 
 // Lock-based byte/word store: the read-modify-write is done with an
 // ldq_l/stq_c loop by a custom inserter.  Used for -msafe-bwa and, always, for

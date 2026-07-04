@@ -130,6 +130,39 @@ void AlphaDAGToDAGISel::Select(SDNode *Node) {
     }
   }
 
+  // A misaligned store carries four scratch registers, which a pattern cannot
+  // describe, so build the instruction here.
+  if (Node->getOpcode() == AlphaISD::USTORE) {
+    SDLoc DL(Node);
+    auto *Mem = cast<MemSDNode>(Node);
+    SDValue Ops[] = {
+        Node->getOperand(1), Node->getOperand(2),
+        CurDAG->getTargetConstant(
+            cast<ConstantSDNode>(Node->getOperand(3))->getZExtValue(), DL,
+            MVT::i64),
+        Node->getOperand(0)};
+    MachineSDNode *Store = CurDAG->getMachineNode(
+        Alpha::RMW_USTORE, DL,
+        {MVT::i64, MVT::i64, MVT::i64, MVT::i64, MVT::Other}, Ops);
+    // The expansion reads the one or two quadwords the field falls in before
+    // writing them back, so the access is a load as well as a store and covers
+    // the whole of both quadwords -- and it keeps whatever the original store
+    // said about being volatile.  Described against no particular object, as
+    // the byte store above is, since which quadwords are touched is not known
+    // until run time.
+    MachineFunction &MF = CurDAG->getMachineFunction();
+    auto Flags = Mem->isVolatile() ? MachineMemOperand::MOVolatile
+                                   : MachineMemOperand::MONone;
+    CurDAG->setNodeMemRefs(
+        Store, {MF.getMachineMemOperand(MachinePointerInfo(),
+                                        Flags | MachineMemOperand::MOLoad |
+                                            MachineMemOperand::MOStore,
+                                        16, Align(8))});
+    ReplaceUses(SDValue(Node, 0), SDValue(Store, 4));
+    CurDAG->RemoveDeadNode(Node);
+    return;
+  }
+
   // Materialize a frame-index address with lda; the displacement (0) follows
   // the base so eliminateFrameIndex can rewrite it.
   if (Node->getOpcode() == ISD::FrameIndex) {

@@ -36,3 +36,19 @@ define i64 @loadi8_sext(ptr %p) {
   %r = sext i8 %v to i64
   ret i64 %r
 }
+
+
+; A misaligned word is the case the extract exists for.  The field can straddle
+; two quadwords, so both are loaded and the halves spliced with extwl/extwh; a
+; naturally aligned one needs a single load.
+; CHECK-LABEL: u16_unaligned:
+; CHECK-DAG:   ldq_u
+; CHECK-DAG:   ldq_u
+; CHECK-DAG:   extwl
+; CHECK-DAG:   extwh
+; CHECK-DAG:   bis
+define i64 @u16_unaligned(ptr %p) {
+  %v = load i16, ptr %p, align 1
+  %z = zext i16 %v to i64
+  ret i64 %z
+}
