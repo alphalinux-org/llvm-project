@@ -40,6 +40,9 @@ AlphaTargetMachine::AlphaTargetMachine(const Target &T, const Triple &TT,
                                getEffectiveRelocModel(JIT, RM),
                                getEffectiveCodeModel(CM, CodeModel::Small), OL),
       TLOF(std::make_unique<TargetLoweringObjectFileELF>()) {
+  // Reconcile call-frame information across blocks so unwinding is correct at
+  // any point, including within epilogues (see resetCFIToInitialState).
+  setCFIFixup(true);
   initAsmInfo();
 }
 
