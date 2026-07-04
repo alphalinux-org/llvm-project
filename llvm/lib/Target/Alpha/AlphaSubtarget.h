@@ -65,6 +65,8 @@ public:
   bool hasMVI() const { return HasMVI; }
   bool hasFIX() const { return HasFIX; }
   bool hasCIX() const { return HasCIX; }
+  bool hasPrefetch() const { return HasPrefetch; }
+  bool hasPrefetchEvictNext() const { return HasPrefetchEvictNext; }
   bool hasSafeBWA() const { return HasSafeBWA; }
   bool hasSmallData() const { return HasSmallData; }
   bool hasBuildConstants() const { return HasBuildConstants; }

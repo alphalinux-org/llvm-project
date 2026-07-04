@@ -69,6 +69,21 @@ def FeatureIEEEInexact
                        "IEEE floating point that also tracks the inexact flag "
                        "(-mieee-with-inexact)", [FeatureIEEE]>;
 
+// Software-directed prefetch (a load to R31/F31) is architecturally defined
+// only on the 21264 and later; on earlier processors such a load is an ordinary
+// load that can fault.  The evict-next hint (ldq/ldt to R31/F31) is defined only
+// on the 21364 and later; elsewhere those localities use a normal prefetch.
+def FeaturePrefetch
+    : SubtargetFeature<"prefetch", "HasPrefetch", "true",
+                       "Support software-directed prefetch (21264 and later)">;
+def HasPrefetch : Predicate<"Subtarget->hasPrefetch()">;
+
+def FeaturePrefetchEvictNext
+    : SubtargetFeature<"prefetch-evict-next", "HasPrefetchEvictNext", "true",
+                       "Support the evict-next prefetch hint (21364 and later)",
+                       [FeaturePrefetch]>;
+def HasPrefetchEvictNext : Predicate<"Subtarget->hasPrefetchEvictNext()">;
+
 // -mieee: floating point traps are completed in software.
 def HasIEEE : Predicate<"Subtarget->hasIEEE()">;
 def NotIEEE : Predicate<"!Subtarget->hasIEEE()">;
