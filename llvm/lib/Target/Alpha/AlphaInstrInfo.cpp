@@ -106,6 +106,171 @@ void AlphaInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
       .setMIFlag(Flags);
 }
 
+//===----------------------------------------------------------------------===//
+// Branch analysis.
+//===----------------------------------------------------------------------===//
+
+// The conditional branches test a single register against zero.  Cond is
+// { branch opcode, tested register }.
+static bool isCondBranchOpcode(unsigned Opc) {
+  switch (Opc) {
+  case Alpha::BEQ:
+  case Alpha::BNE:
+  case Alpha::BLT:
+  case Alpha::BLE:
+  case Alpha::BGT:
+  case Alpha::BGE:
+  case Alpha::BLBC:
+  case Alpha::BLBS:
+    return true;
+  default:
+    return false;
+  }
+}
+
+// The opcode that branches on the opposite condition, or 0 if none.
+static unsigned getReversedBranchOpcode(unsigned Opc) {
+  switch (Opc) {
+  case Alpha::BEQ:
+    return Alpha::BNE;
+  case Alpha::BNE:
+    return Alpha::BEQ;
+  case Alpha::BLT:
+    return Alpha::BGE;
+  case Alpha::BGE:
+    return Alpha::BLT;
+  case Alpha::BLE:
+    return Alpha::BGT;
+  case Alpha::BGT:
+    return Alpha::BLE;
+  case Alpha::BLBC:
+    return Alpha::BLBS;
+  case Alpha::BLBS:
+    return Alpha::BLBC;
+  default:
+    return 0;
+  }
+}
+
+bool AlphaInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
+                                   MachineBasicBlock *&TBB,
+                                   MachineBasicBlock *&FBB,
+                                   SmallVectorImpl<MachineOperand> &Cond,
+                                   bool AllowModify) const {
+  MachineBasicBlock::iterator I = MBB.getLastNonDebugInstr();
+  if (I == MBB.end() || !isUnpredicatedTerminator(*I))
+    return false; // Falls through, no terminators to analyze.
+
+  // An unconditional branch to the layout successor is redundant; dropping it
+  // is what lets a caller that asked for it see through to the fallthrough.
+  if (AllowModify) {
+    while (I != MBB.end() && I->getOpcode() == Alpha::BR &&
+           MBB.isLayoutSuccessor(I->getOperand(0).getMBB())) {
+      I->eraseFromParent();
+      I = MBB.getLastNonDebugInstr();
+      if (I == MBB.end() || !isUnpredicatedTerminator(*I))
+        return false;
+    }
+  }
+
+  MachineInstr *LastInst = &*I;
+  unsigned LastOpc = LastInst->getOpcode();
+
+  bool HasSecond = I != MBB.begin() && isUnpredicatedTerminator(*std::prev(I));
+  MachineInstr *SecondLast = HasSecond ? &*std::prev(I) : nullptr;
+
+  if (!HasSecond) {
+    if (LastOpc == Alpha::BR) {
+      TBB = LastInst->getOperand(0).getMBB();
+      return false;
+    }
+    if (isCondBranchOpcode(LastOpc)) {
+      TBB = LastInst->getOperand(1).getMBB();
+      Cond.push_back(MachineOperand::CreateImm(LastOpc));
+      Cond.push_back(LastInst->getOperand(0));
+      return false;
+    }
+    return true; // Indirect or otherwise unanalyzable.
+  }
+
+  if (isCondBranchOpcode(SecondLast->getOpcode()) && LastOpc == Alpha::BR) {
+    // Only if there is no third one.  A block ending beq / bne / br is not a
+    // two-way block: reporting it as one loses the first branch's edge, since
+    // removeBranch erases at most two and insertBranch then puts back two.
+    MachineBasicBlock::iterator Second = std::prev(I);
+    if (Second != MBB.begin() && isUnpredicatedTerminator(*std::prev(Second)))
+      return true;
+    TBB = SecondLast->getOperand(1).getMBB();
+    Cond.push_back(MachineOperand::CreateImm(SecondLast->getOpcode()));
+    Cond.push_back(SecondLast->getOperand(0));
+    FBB = LastInst->getOperand(0).getMBB();
+    return false;
+  }
+
+  return true;
+}
+
+unsigned AlphaInstrInfo::removeBranch(MachineBasicBlock &MBB,
+                                      int *BytesRemoved) const {
+  if (BytesRemoved)
+    *BytesRemoved = 0;
+  MachineBasicBlock::iterator I = MBB.getLastNonDebugInstr();
+  unsigned Count = 0;
+  while (I != MBB.end() && Count < 2) {
+    unsigned Opc = I->getOpcode();
+    if (Opc != Alpha::BR && !isCondBranchOpcode(Opc))
+      break;
+    I->eraseFromParent();
+    if (BytesRemoved)
+      *BytesRemoved += 4;
+    ++Count;
+    I = MBB.getLastNonDebugInstr();
+  }
+  return Count;
+}
+
+unsigned AlphaInstrInfo::insertBranch(
+    MachineBasicBlock &MBB, MachineBasicBlock *TBB, MachineBasicBlock *FBB,
+    ArrayRef<MachineOperand> Cond, const DebugLoc &DL, int *BytesAdded) const {
+  if (BytesAdded)
+    *BytesAdded = 0;
+  assert(TBB && "insertBranch must not be told to insert a fallthrough");
+  assert((Cond.size() == 2 || Cond.empty()) &&
+         "Alpha branch conditions have one opcode and one register");
+
+  // Unconditional branch.
+  if (Cond.empty()) {
+    assert(!FBB && "Unconditional branch has no false target");
+    BuildMI(&MBB, DL, get(Alpha::BR)).addMBB(TBB);
+    if (BytesAdded)
+      *BytesAdded += 4;
+    return 1;
+  }
+
+  // Conditional branch: Cond = { opcode, register }.
+  unsigned Opc = Cond[0].getImm();
+  BuildMI(&MBB, DL, get(Opc)).add(Cond[1]).addMBB(TBB);
+  if (BytesAdded)
+    *BytesAdded += 4;
+  if (!FBB)
+    return 1;
+
+  BuildMI(&MBB, DL, get(Alpha::BR)).addMBB(FBB);
+  if (BytesAdded)
+    *BytesAdded += 4;
+  return 2;
+}
+
+bool AlphaInstrInfo::reverseBranchCondition(
+    SmallVectorImpl<MachineOperand> &Cond) const {
+  assert(Cond.size() == 2 && "Invalid Alpha branch condition");
+  unsigned Rev = getReversedBranchOpcode(Cond[0].getImm());
+  if (!Rev)
+    return true;
+  Cond[0].setImm(Rev);
+  return false;
+}
+
 bool AlphaInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   unsigned Opc = MI.getOpcode();
   if (Opc != Alpha::RMW_STOREI8 && Opc != Alpha::RMW_STOREI16)
