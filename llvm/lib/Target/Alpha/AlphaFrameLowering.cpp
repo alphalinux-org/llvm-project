@@ -32,14 +32,42 @@ static void adjustStack(MachineBasicBlock &MBB,
                         const AlphaInstrInfo &TII, int64_t Amount) {
   if (Amount == 0)
     return;
-  if (!isInt<16>(Amount))
-    report_fatal_error("Alpha stack frame larger than 32KiB is not supported");
-  BuildMI(MBB, MBBI, DL, TII.get(Alpha::LDA), Alpha::R30)
-      .addImm(Amount)
-      .addReg(Alpha::R30);
+  if (isInt<16>(Amount)) {
+    BuildMI(MBB, MBBI, DL, TII.get(Alpha::LDA), Alpha::R30)
+        .addImm(Amount)
+        .addReg(Alpha::R30);
+    return;
+  }
+  if (!isInt<32>(Amount))
+    reportFatalUsageError(
+        "Alpha stack frame larger than 2GiB is not supported");
+  // Build the amount in the $28 scratch and add it to the stack pointer.
+  int64_t Lo = (int16_t)Amount;
+  int64_t Hi = (Amount - Lo) >> 16;
+  BuildMI(MBB, MBBI, DL, TII.get(Alpha::LDA), Alpha::R28)
+      .addImm(Lo)
+      .addReg(Alpha::R31);
+  // Hi is never zero here: Amount did not fit in 16 bits, so it differs from
+  // its own low half.  It can be 0x8000, which does not fit ldah's signed
+  // 16-bit field -- an epilogue that tears down a frame close to 2GiB reaches
+  // it -- so split it in two the way eliminateFrameIndex does.
+  if (isInt<16>(Hi)) {
+    BuildMI(MBB, MBBI, DL, TII.get(Alpha::LDAH), Alpha::R28)
+        .addImm(Hi)
+        .addReg(Alpha::R28);
+  } else {
+    BuildMI(MBB, MBBI, DL, TII.get(Alpha::LDAH), Alpha::R28)
+        .addImm(Hi / 2)
+        .addReg(Alpha::R28);
+    BuildMI(MBB, MBBI, DL, TII.get(Alpha::LDAH), Alpha::R28)
+        .addImm(Hi / 2)
+        .addReg(Alpha::R28);
+  }
+  BuildMI(MBB, MBBI, DL, TII.get(Alpha::ADDQ), Alpha::R30)
+      .addReg(Alpha::R30)
+      .addReg(Alpha::R28);
 }
 
-// Copy one integer register to another with `bis $31, Src, Dst`.
 static void copyReg(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
                     const DebugLoc &DL, const AlphaInstrInfo &TII, Register Dst,
                     Register Src) {

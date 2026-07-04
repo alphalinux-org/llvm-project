@@ -9,9 +9,11 @@
 #include "AlphaRegisterInfo.h"
 #include "Alpha.h"
 #include "AlphaFrameLowering.h"
+#include "AlphaInstrInfo.h"
+#include "AlphaSubtarget.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/TargetFrameLowering.h"
-#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/Support/ErrorHandling.h"
 
 #define GET_REGINFO_TARGET_DESC
@@ -46,6 +48,9 @@ BitVector AlphaRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   // one for nothing.
   if (MF.getSubtarget().getFrameLowering()->hasFP(MF))
     Reserved.set(Alpha::R15);
+  // $28 is the assembler/codegen scratch ($at), used to build large stack
+  // offsets that do not fit a 16-bit displacement.
+  Reserved.set(Alpha::R28);
   return Reserved;
 }
 
@@ -69,8 +74,36 @@ bool AlphaRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
   int64_t Offset = TFI->getFrameIndexReference(MF, FI, FrameReg).getFixed() +
                    Inst.getOperand(FIOperandNum + 1).getImm();
 
-  if (!isInt<16>(Offset))
-    report_fatal_error("Alpha frame offset does not fit in 16 bits");
+  // A displacement that does not fit the 16-bit field is materialized into the
+  // $28 scratch: $28 = FrameReg + (high part), and the low part stays in the
+  // instruction's displacement.
+  if (!isInt<16>(Offset)) {
+    if (!isInt<32>(Offset))
+      reportFatalUsageError("Alpha frame offset does not fit in 32 bits");
+    const AlphaInstrInfo &TII =
+        *MF.getSubtarget<AlphaSubtarget>().getInstrInfo();
+    int64_t Lo = (int16_t)Offset;
+    int64_t Hi = (Offset - Lo) >> 16;
+    DebugLoc DL = Inst.getDebugLoc();
+    MachineBasicBlock &MBB = *Inst.getParent();
+    Register Scratch = Alpha::R28;
+    // ldah $28, Hi(FrameReg); a Hi of 0x8000 does not fit and is split in two.
+    if (isInt<16>(Hi)) {
+      BuildMI(MBB, Inst, DL, TII.get(Alpha::LDAH), Scratch)
+          .addImm(Hi)
+          .addReg(FrameReg);
+    } else {
+      BuildMI(MBB, Inst, DL, TII.get(Alpha::LDAH), Scratch)
+          .addImm(Hi / 2)
+          .addReg(FrameReg);
+      BuildMI(MBB, Inst, DL, TII.get(Alpha::LDAH), Scratch)
+          .addImm(Hi / 2)
+          .addReg(Scratch);
+    }
+    Inst.getOperand(FIOperandNum).ChangeToRegister(Scratch, /*isDef=*/false);
+    Inst.getOperand(FIOperandNum + 1).setImm(Lo);
+    return false;
+  }
 
   Inst.getOperand(FIOperandNum).ChangeToRegister(FrameReg, /*isDef=*/false);
   Inst.getOperand(FIOperandNum + 1).setImm(Offset);
