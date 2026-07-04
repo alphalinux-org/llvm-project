@@ -51,6 +51,19 @@ def AlphaCall : SDNode<"AlphaISD::CALL", SDTNone,
                        [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
                         SDNPVariadic]>;
 
+// A direct call: identical, but the leading operand is the callee symbol so the
+// jsr can carry the hint and lituse_jsr relocations.
+def SDT_AlphaCallDirect : SDTypeProfile<0, 1, [SDTCisVT<0, i64>]>;
+def AlphaCallDirect : SDNode<"AlphaISD::CALL_DIRECT", SDT_AlphaCallDirect,
+                             [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
+                              SDNPVariadic]>;
+
+// A direct call to a dso-local callee: the jsr carries only lituse_jsr, no
+// hint, so the linker may relax it to a bsr.
+def AlphaCallDirectLocal : SDNode<"AlphaISD::CALL_DIRECT_LOCAL", SDTNone,
+                                  [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
+                                   SDNPVariadic]>;
+
 // A call to a division millicode routine (__divq and friends): operands in
 // $24/$25, result in $27, entered through $23.  It clobbers only a few
 // registers, so it is modeled separately from a normal call.
@@ -716,6 +729,35 @@ let isCall = 1, Uses = [R27], Defs = [R26, R29], Size = 12,
     isCodeGenOnly = 1 in
 def JSR : MbrForm<0b01, (outs), (ins), "jsr $$26, ($$27)\n\tldgp $$29, 0($$26)",
                   [(AlphaCall)]> {
+  let Ra = 26;
+  let Rb = 27;
+}
+
+// The call target of a direct jsr, carried only to attach relocations: the
+// 14-bit hint field is filled from it (R_ALPHA_HINT) and a lituse_jsr
+// relocation is emitted alongside.
+def calltarget : Operand<i64> {
+  let EncoderMethod = "getHintEncoding";
+}
+
+// A direct call: same as JSR but tagged with the callee symbol.
+let isCall = 1, Uses = [R27], Defs = [R26, R29], isCodeGenOnly = 1 in
+def JSRd : MbrForm<0b01, (outs), (ins calltarget:$sym),
+                   "jsr $$26, ($$27)\n\tldgp $$29, 0($$26)", []> {
+  bits<14> sym;
+  let Ra = 26;
+  let Rb = 27;
+  let hint = sym;
+}
+def : Pat<(AlphaCallDirect tglobaladdr:$sym), (JSRd tglobaladdr:$sym)>;
+def : Pat<(AlphaCallDirect texternalsym:$sym), (JSRd texternalsym:$sym)>;
+
+// A dso-local direct call: only the lituse_jsr relocation, emitted in the code
+// emitter; no callee operand is needed since lituse references the text section.
+let isCall = 1, Uses = [R27], Defs = [R26, R29], isCodeGenOnly = 1 in
+def JSRdl : MbrForm<0b01, (outs), (ins),
+                    "jsr $$26, ($$27)\n\tldgp $$29, 0($$26)",
+                    [(AlphaCallDirectLocal)]> {
   let Ra = 26;
   let Rb = 27;
 }
