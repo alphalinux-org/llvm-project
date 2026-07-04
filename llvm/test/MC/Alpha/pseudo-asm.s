@@ -28,3 +28,26 @@
         ret     $31, ($26), 1
 # CHECK: jmp $31, ($27), 0               # encoding: [0x00,0x00,0xfb,0x6b]
         jmp     $31, ($27), 0
+
+# Integer and floating-point negate/copy pseudo-instructions built from a base
+# operate instruction with $31 / $f31.
+# CHECK: subq $31, $1, $2
+        negq    $1, $2
+# CHECK: addl $31, $1, $2
+        sextl   $1, $2
+# CHECK: ornot $31, $1, $2
+        not     $1, $2
+# CHECK: bis $1, $2, $3
+        or      $1, $2, $3
+# CHECK: cpys $f1, $f1, $f2
+        fmov    $f1, $f2
+# CHECK: cpysn $f1, $f1, $f2
+        fneg    $f1, $f2
+# CHECK: cpys $f31, $f1, $f2
+        fabs    $f1, $f2
+# CHECK: cpys $f31, $f31, $f31
+        fnop
+# CHECK: subs $f31, $f1, $f2
+        negs    $f1, $f2
+# CHECK: subt $f31, $f1, $f2
+        negt    $f1, $f2
