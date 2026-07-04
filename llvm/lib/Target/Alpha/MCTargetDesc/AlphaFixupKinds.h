@@ -29,6 +29,9 @@ enum Fixups {
   // TLS (R_ALPHA_TPRELHI/LO).
   fixup_alpha_tprelhi,
   fixup_alpha_tprello,
+  // A 16-bit GOT displacement to a thread-pointer-relative offset for
+  // initial-exec TLS (R_ALPHA_GOTTPREL).
+  fixup_alpha_gottprel,
 
   fixup_alpha_invalid,
   NumTargetFixupKinds = fixup_alpha_invalid - FirstTargetFixupKind
@@ -50,6 +53,8 @@ inline StringRef getSpecifierName(unsigned Kind) {
     return "tprelhi";
   case fixup_alpha_tprello:
     return "tprello";
+  case fixup_alpha_gottprel:
+    return "gottprel";
   default:
     return "";
   }
