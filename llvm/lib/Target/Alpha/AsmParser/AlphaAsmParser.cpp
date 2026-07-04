@@ -305,6 +305,7 @@ bool AlphaAsmParser::parseInstruction(ParseInstructionInfo &Info,
                         .Case("tprelhi", Alpha::fixup_alpha_tprelhi)
                         .Case("tprello", Alpha::fixup_alpha_tprello)
                         .Case("gottprel", Alpha::fixup_alpha_gottprel)
+                        .Case("tlsgd", Alpha::fixup_alpha_tlsgd)
                         .Default(0);
     if (!Spec)
       return Error(getLexer().getLoc(), "unknown relocation name");

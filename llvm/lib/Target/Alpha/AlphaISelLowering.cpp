@@ -202,6 +202,8 @@ const char *AlphaTargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "AlphaISD::TPREL_LO";
   case AlphaISD::GOTTPREL:
     return "AlphaISD::GOTTPREL";
+  case AlphaISD::TLSGD:
+    return "AlphaISD::TLSGD";
   }
   return nullptr;
 }
@@ -341,13 +343,45 @@ SDValue AlphaTargetLowering::LowerGlobalTLSAddress(SDValue Op,
   const GlobalValue *GV = N->getGlobal();
   TLSModel::Model Model = getTargetMachine().getTLSModel(GV);
 
-  // Read the thread pointer from the PALcode unique value (call_pal rduniq).
-  // The result is fixed in $0, so glue the copy to the call.
+  SDValue TGA = DAG.getTargetGlobalAddress(GV, DL, MVT::i64, N->getOffset());
+
+  if (Model == TLSModel::GeneralDynamic) {
+    // Pass the tlsgd descriptor (lda !tlsgd) in $16 to __tls_get_addr, which
+    // returns the variable's address in $0.
+    MachineFunction &MF = DAG.getMachineFunction();
+    MF.getInfo<AlphaMachineFunctionInfo>()->setUsesGP();
+
+    SDValue Arg = DAG.getNode(AlphaISD::TLSGD, DL, MVT::i64, TGA);
+    SDValue Callee =
+        DAG.getNode(AlphaISD::LITERAL, DL, MVT::i64,
+                    DAG.getTargetExternalSymbol("__tls_get_addr", MVT::i64));
+
+    SDValue Chain = DAG.getCALLSEQ_START(DAG.getEntryNode(), 0, 0, DL);
+    SDValue Glue;
+    Chain = DAG.getCopyToReg(Chain, DL, Alpha::R16, Arg, Glue);
+    Glue = Chain.getValue(1);
+    Chain = DAG.getCopyToReg(Chain, DL, Alpha::R27, Callee, Glue);
+    Glue = Chain.getValue(1);
+
+    const uint32_t *Mask =
+        Subtarget.getRegisterInfo()->getCallPreservedMask(MF, CallingConv::C);
+    SDValue Ops[] = {Chain, DAG.getRegister(Alpha::R16, MVT::i64),
+                     DAG.getRegister(Alpha::R27, MVT::i64),
+                     DAG.getRegisterMask(Mask), Glue};
+    Chain = DAG.getNode(AlphaISD::CALL, DL, {MVT::Other, MVT::Glue}, Ops);
+    Glue = Chain.getValue(1);
+    Chain = DAG.getCALLSEQ_END(Chain, 0, 0, Glue, DL);
+    Glue = Chain.getValue(1);
+    return DAG.getCopyFromReg(Chain, DL, Alpha::R0, MVT::i64, Glue);
+  }
+
+  // The two models left both start from the thread pointer, read from the
+  // PALcode unique value (call_pal rduniq).  The result is fixed in $0, so glue
+  // the copy to the call.  The models above do not come this way: they get the
+  // address from __tls_get_addr, which returns in that same register.
   SDValue RdUniq = SDValue(DAG.getMachineNode(Alpha::RDUNIQ, DL, MVT::Glue), 0);
   SDValue TP =
       DAG.getCopyFromReg(DAG.getEntryNode(), DL, Alpha::R0, MVT::i64, RdUniq);
-
-  SDValue TGA = DAG.getTargetGlobalAddress(GV, DL, MVT::i64, N->getOffset());
 
   if (Model == TLSModel::InitialExec) {
     // The offset from the thread pointer is loaded from the GOT
@@ -358,10 +392,10 @@ SDValue AlphaTargetLowering::LowerGlobalTLSAddress(SDValue Op,
   }
 
   // Local-exec: the offset from the thread pointer is a link-time constant
-  // formed with ldah !tprelhi / lda !tprello.
+  // formed with ldah !tprelhi / lda !tprello.  (Local-dynamic is not yet
+  // implemented; it is only ever chosen as an optimization of general-dynamic.)
   if (Model != TLSModel::LocalExec)
-    report_fatal_error("only local-exec and initial-exec TLS are supported on "
-                       "Alpha");
+    report_fatal_error("local-dynamic TLS is not yet supported on Alpha");
 
   SDValue Hi = DAG.getNode(AlphaISD::TPREL_HI, DL, MVT::i64, TGA, TP);
   return DAG.getNode(AlphaISD::TPREL_LO, DL, MVT::i64, TGA, Hi);
