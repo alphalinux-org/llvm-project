@@ -10413,6 +10413,41 @@ CreateXtensaABIBuiltinVaListDecl(const ASTContext *Context) {
   return VaListTagTypedefDecl;
 }
 
+static TypedefDecl *CreateAlphaABIBuiltinVaListDecl(const ASTContext *Context) {
+  // typedef struct __va_list_tag {
+  RecordDecl *VaListTagDecl = Context->buildImplicitRecord("__va_list_tag");
+  VaListTagDecl->startDefinition();
+
+  //   char *__base;
+  //   int __offset;
+  // } __va_list_tag;
+  //
+  // __offset is int, not long.  __builtin_va_list is an ABI type, and gcc's
+  // alpha_build_builtin_va_list uses integer_type_node: a gcc va_start writes
+  // only four bytes at offset 8, so reading eight here picks up whatever
+  // follows.  The total size and alignment coincide either way, which is why
+  // the clang-to-glibc direction happens to work.
+  constexpr size_t NumFields = 2;
+  QualType FieldTypes[NumFields] = {Context->getPointerType(Context->CharTy),
+                                    Context->IntTy};
+  const char *FieldNames[NumFields] = {"__base", "__offset"};
+
+  for (unsigned i = 0; i < NumFields; ++i) {
+    FieldDecl *Field = FieldDecl::Create(
+        *Context, VaListTagDecl, SourceLocation(), SourceLocation(),
+        &Context->Idents.get(FieldNames[i]), FieldTypes[i], /*TInfo=*/nullptr,
+        /*BitWidth=*/nullptr,
+        /*Mutable=*/false, ICIS_NoInit);
+    Field->setAccess(AS_public);
+    VaListTagDecl->addDecl(Field);
+  }
+  VaListTagDecl->completeDefinition();
+  Context->VaListTagDecl = VaListTagDecl;
+  CanQualType VaListTagType = Context->getCanonicalTagType(VaListTagDecl);
+
+  return Context->buildImplicitTypedef(VaListTagType, "__builtin_va_list");
+}
+
 static TypedefDecl *CreateVaListDecl(const ASTContext *Context,
                                      TargetInfo::BuiltinVaListKind Kind) {
   switch (Kind) {
@@ -10434,6 +10469,8 @@ static TypedefDecl *CreateVaListDecl(const ASTContext *Context,
     return CreateHexagonBuiltinVaListDecl(Context);
   case TargetInfo::XtensaABIBuiltinVaList:
     return CreateXtensaABIBuiltinVaListDecl(Context);
+  case TargetInfo::AlphaABIBuiltinVaList:
+    return CreateAlphaABIBuiltinVaListDecl(Context);
   }
 
   llvm_unreachable("Unhandled __builtin_va_list type kind");
