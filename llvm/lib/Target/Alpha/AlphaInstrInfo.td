@@ -999,6 +999,25 @@ def : Pat<(atomic_store_64 GPRC:$val, ADDRri:$addr),
 def : Pat<(atomic_store_32 GPRC:$val, ADDRri:$addr),
           (STL GPRC:$val, memri:$addr)>;
 
+// A naturally aligned byte or word load is atomic too: the aligned quadword it
+// sits in is read atomically and the field extracted.
+let Predicates = [HasBWX] in {
+def : Pat<(i64 (atomic_load_azext_8 ADDRri:$addr)), (LDBU memri:$addr)>;
+def : Pat<(i64 (atomic_load_azext_16 ADDRri:$addr)), (LDWU memri:$addr)>;
+def : Pat<(i64 (atomic_load_sext_8 ADDRri:$addr)), (SEXTB (LDBU memri:$addr))>;
+def : Pat<(i64 (atomic_load_sext_16 ADDRri:$addr)), (SEXTW (LDWU memri:$addr))>;
+}
+let Predicates = [NotBWX] in {
+def : Pat<(i64 (atomic_load_azext_8 ADDRr:$a)),
+          (EXTBL (LDQ_U GPRC:$a), GPRC:$a)>;
+def : Pat<(i64 (atomic_load_azext_16 ADDRr:$a)),
+          (EXTWL (LDQ_U GPRC:$a), GPRC:$a)>;
+def : Pat<(i64 (atomic_load_sext_8 ADDRr:$a)),
+          (SRAi (SLLi (EXTBL (LDQ_U GPRC:$a), GPRC:$a), 56), 56)>;
+def : Pat<(i64 (atomic_load_sext_16 ADDRr:$a)),
+          (SRAi (SLLi (EXTWL (LDQ_U GPRC:$a), GPRC:$a), 48), 48)>;
+}
+
 // Load-locked / store-conditional, the primitives for atomic read-modify-write.
 // stq_c overwrites its source register with 1 on success or 0 on failure.
 let mayLoad = 1, hasSideEffects = 0 in {
