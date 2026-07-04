@@ -14,6 +14,7 @@
 #include "Alpha.h"
 #include "AlphaTargetMachine.h"
 #include "MCTargetDesc/AlphaInstPrinter.h"
+#include "MCTargetDesc/AlphaMCTargetDesc.h"
 #include "TargetInfo/AlphaTargetInfo.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
@@ -21,6 +22,7 @@
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCStreamer.h"
+#include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -39,6 +41,7 @@ public:
 
   StringRef getPassName() const override { return "Alpha Assembly Printer"; }
 
+  void emitStartOfAsmFile(Module &M) override;
   void emitInstruction(const MachineInstr *MI) override;
 
   bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
@@ -53,6 +56,28 @@ private:
 } // end anonymous namespace
 
 char AlphaAsmPrinter::ID = 0;
+
+// Emit a .arch directive so an external assembler accepts the extension
+// instructions we generate.  Choose the lowest architecture that covers the
+// enabled features; a higher one harmlessly accepts a superset.  Only textual
+// output needs this -- the integrated assembler encodes directly.
+void AlphaAsmPrinter::emitStartOfAsmFile(Module &M) {
+  if (!OutStreamer->hasRawTextSupport())
+    return;
+  const FeatureBitset &Features = TM.getMCSubtargetInfo().getFeatureBits();
+  // ev6 covers CIX as well as FIX: GNU as's alpha_cpus table gives the name
+  // AXP_OPCODE_CIX even though the 21264 part implements only the FIX half,
+  // because .arch says what the assembler accepts rather than what the part
+  // has.  Naming the part is -mcpu's job.
+  StringRef Arch = "ev4";
+  if (Features[Alpha::FeatureFIX] || Features[Alpha::FeatureCIX])
+    Arch = "ev6";
+  else if (Features[Alpha::FeatureMVI])
+    Arch = "pca56";
+  else if (Features[Alpha::FeatureBWX])
+    Arch = "ev56";
+  OutStreamer->emitRawText(Twine("\t.arch ") + Arch);
+}
 
 MCOperand AlphaAsmPrinter::lowerOperand(const MachineOperand &MO) const {
   switch (MO.getType()) {
