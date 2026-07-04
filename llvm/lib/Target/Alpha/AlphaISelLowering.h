@@ -43,6 +43,14 @@ enum NodeType : unsigned {
   // lda !gprellow.
   GPREL_HI,
   GPREL_LO,
+
+  // The thread pointer, read from the PALcode unique value (call_pal rduniq).
+  THREAD_POINTER,
+
+  // Thread-pointer-relative address parts for local-exec TLS, materialized
+  // with ldah !tprelhi and lda !tprello.
+  TPREL_HI,
+  TPREL_LO,
 };
 } // namespace AlphaISD
 
@@ -139,6 +147,7 @@ public:
 
 private:
   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerGlobalTLSAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerJumpTable(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBR_JT(SDValue Op, SelectionDAG &DAG) const;

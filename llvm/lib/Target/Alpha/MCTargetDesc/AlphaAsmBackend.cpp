@@ -29,8 +29,10 @@ static uint64_t adjustFixupValue(unsigned Kind, uint64_t Value) {
     return ((Value - 4) >> 2) & 0x1fffff;
   case Alpha::fixup_alpha_literal:
   case Alpha::fixup_alpha_gprellow:
+  case Alpha::fixup_alpha_tprello:
     return Value & 0xffff;
   case Alpha::fixup_alpha_gprelhigh:
+  case Alpha::fixup_alpha_tprelhi:
     return ((Value + 0x8000) >> 16) & 0xffff;
   }
 }
@@ -48,7 +50,8 @@ public:
     const static MCFixupKindInfo Infos[Alpha::NumTargetFixupKinds] = {
         {"fixup_alpha_braddr", 0, 21, 0},    {"fixup_alpha_literal", 0, 16, 0},
         {"fixup_alpha_gprelhigh", 0, 16, 0}, {"fixup_alpha_gprellow", 0, 16, 0},
-        {"fixup_alpha_gpdisp", 0, 16, 0},
+        {"fixup_alpha_gpdisp", 0, 16, 0},    {"fixup_alpha_tprelhi", 0, 16, 0},
+        {"fixup_alpha_tprello", 0, 16, 0},
     };
     if (mc::isRelocation(Kind))
       return {};
@@ -68,7 +71,9 @@ public:
     bool AlwaysReloc = Kind == MCFixupKind(Alpha::fixup_alpha_literal) ||
                        Kind == MCFixupKind(Alpha::fixup_alpha_gprelhigh) ||
                        Kind == MCFixupKind(Alpha::fixup_alpha_gprellow) ||
-                       Kind == MCFixupKind(Alpha::fixup_alpha_gpdisp);
+                       Kind == MCFixupKind(Alpha::fixup_alpha_gpdisp) ||
+                       Kind == MCFixupKind(Alpha::fixup_alpha_tprelhi) ||
+                       Kind == MCFixupKind(Alpha::fixup_alpha_tprello);
     maybeAddReloc(F, Fixup, Target, Value, AlwaysReloc ? false : IsResolved);
     if (mc::isRelocation(Kind) || AlwaysReloc)
       return;
