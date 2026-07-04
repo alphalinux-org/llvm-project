@@ -38,7 +38,7 @@ class AlphaSubtarget : public AlphaGenSubtargetInfo {
   AlphaInstrInfo InstrInfo;
   AlphaTargetLowering TLInfo;
   AlphaFrameLowering FrameLowering;
-  SelectionDAGTargetInfo TSInfo;
+  AlphaSelectionDAGInfo TSInfo;
 
   AlphaSubtarget &initializeSubtargetDependencies(StringRef CPU,
                                                   StringRef TuneCPU,

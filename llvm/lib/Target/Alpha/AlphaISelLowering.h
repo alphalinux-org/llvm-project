@@ -15,6 +15,7 @@
 #define LLVM_LIB_TARGET_ALPHA_ALPHAISELLOWERING_H
 
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
+#include "llvm/CodeGen/SelectionDAGTargetInfo.h"
 #include "llvm/CodeGen/TargetLowering.h"
 
 namespace llvm {
@@ -80,8 +81,34 @@ enum NodeType : unsigned {
   TLSLDM,
   DTPREL_HI,
   DTPREL_LO,
+
+  // Everything from here down carries a memory operand and is built with
+  // getMemIntrinsicNode, which only accepts an opcode the target claims as a
+  // memory one (see AlphaSelectionDAGInfo).  Keep them contiguous and keep the
+  // two bounds at the end of the list pointing at the first and last of them.
+
+  // Unaligned access primitives.  LDQ_U/STQ_U load/store the aligned quadword
+  // containing an address, ignoring its low three bits, used to build the
+  // ldq_u + extract / insert + stq_u sequences for misaligned loads and stores.
+  LDQ_U,
+  STQ_U,
+
+  // A misaligned store, kept whole until it is expanded into a bundle.
+  USTORE,
+
+  LAST_MEMORY_OPCODE = USTORE,
 };
 } // namespace AlphaISD
+
+// Without this a target is taken to have no memory opcodes at all, and
+// getMemIntrinsicNode refuses to build one of ours.
+class AlphaSelectionDAGInfo : public SelectionDAGTargetInfo {
+public:
+  bool isTargetMemoryOpcode(unsigned Opcode) const override {
+    return Opcode >= AlphaISD::LDQ_U &&
+           Opcode <= AlphaISD::LAST_MEMORY_OPCODE;
+  }
+};
 
 class AlphaTargetLowering : public TargetLowering {
 public:
@@ -210,6 +237,8 @@ private:
   SDValue LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerJumpTable(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerDYNAMIC_STACKALLOC(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerLOAD(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSTORE(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBR_CC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBR_JT(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerDivRem(SDValue Op, SelectionDAG &DAG) const;
