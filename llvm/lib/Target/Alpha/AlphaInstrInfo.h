@@ -79,6 +79,19 @@ public:
   bool expandPostRAPseudo(MachineInstr &MI) const override;
 };
 
+// Emit the ldah half of a displacement too wide for the 16-bit field: Scratch
+// = Base + (Offset's high half), with the signed 16-bit remainder returned for
+// the caller to put in the displacement of whatever it emits next.  Offset must
+// fit in 32 bits, which every caller checks for itself so that it can say which
+// limit was passed.
+//
+// A high half of 0x8000 does not fit ldah's own signed field -- a frame within
+// 32KB of 2GiB reaches it -- and is emitted as two ldah of 0x4000.
+int64_t emitHighDisp(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
+                     const DebugLoc &DL, const AlphaInstrInfo &TII,
+                     Register Scratch, Register Base, int64_t Offset,
+                     MachineInstr::MIFlag Flag = MachineInstr::NoFlags);
+
 } // end namespace llvm
 
 #endif // LLVM_LIB_TARGET_ALPHA_ALPHAINSTRINFO_H

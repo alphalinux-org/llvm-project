@@ -271,6 +271,32 @@ bool AlphaInstrInfo::reverseBranchCondition(
   return false;
 }
 
+// See the comment on the declaration in AlphaInstrInfo.h.
+int64_t llvm::emitHighDisp(MachineBasicBlock &MBB,
+                           MachineBasicBlock::iterator MBBI, const DebugLoc &DL,
+                           const AlphaInstrInfo &TII, Register Scratch,
+                           Register Base, int64_t Offset,
+                           MachineInstr::MIFlag Flag) {
+  int64_t Lo = (int16_t)Offset;
+  int64_t Hi = (Offset - Lo) >> 16;
+  if (isInt<16>(Hi)) {
+    BuildMI(MBB, MBBI, DL, TII.get(Alpha::LDAH), Scratch)
+        .addImm(Hi)
+        .addReg(Base)
+        .setMIFlag(Flag);
+  } else {
+    BuildMI(MBB, MBBI, DL, TII.get(Alpha::LDAH), Scratch)
+        .addImm(Hi / 2)
+        .addReg(Base)
+        .setMIFlag(Flag);
+    BuildMI(MBB, MBBI, DL, TII.get(Alpha::LDAH), Scratch)
+        .addImm(Hi / 2)
+        .addReg(Scratch)
+        .setMIFlag(Flag);
+  }
+  return Lo;
+}
+
 bool AlphaInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   unsigned Opc = MI.getOpcode();
   if (Opc != Alpha::RMW_STOREI8 && Opc != Alpha::RMW_STOREI16)

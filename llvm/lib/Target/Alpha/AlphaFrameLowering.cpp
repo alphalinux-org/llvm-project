@@ -32,14 +32,48 @@ static void adjustStack(MachineBasicBlock &MBB,
                         const AlphaInstrInfo &TII, int64_t Amount) {
   if (Amount == 0)
     return;
-  if (!isInt<16>(Amount))
-    report_fatal_error("Alpha stack frame larger than 32KiB is not supported");
-  BuildMI(MBB, MBBI, DL, TII.get(Alpha::LDA), Alpha::R30)
-      .addImm(Amount)
-      .addReg(Alpha::R30);
+  if (isInt<16>(Amount)) {
+    BuildMI(MBB, MBBI, DL, TII.get(Alpha::LDA), Alpha::R30)
+        .addImm(Amount)
+        .addReg(Alpha::R30);
+    return;
+  }
+  if (!isInt<32>(Amount))
+    reportFatalUsageError(
+        "Alpha stack frame larger than 2GiB is not supported");
+  // Build the amount in the $28 scratch and add it to the stack pointer.  The
+  // high half is never zero here: Amount did not fit in 16 bits, so it differs
+  // from its own low half.
+  BuildMI(MBB, MBBI, DL, TII.get(Alpha::LDA), Alpha::R28)
+      .addImm((int16_t)Amount)
+      .addReg(Alpha::R31);
+  emitHighDisp(MBB, MBBI, DL, TII, Alpha::R28, Alpha::R28, Amount);
+  BuildMI(MBB, MBBI, DL, TII.get(Alpha::ADDQ), Alpha::R30)
+      .addReg(Alpha::R30)
+      .addReg(Alpha::R28);
 }
 
-// Copy one integer register to another with `bis $31, Src, Dst`.
+// The base register a frame access should use for Offset, materializing the
+// part of it that does not fit the 16-bit displacement field into the $28
+// scratch and rewriting Offset to what is left.  The frame-pointer save slot
+// is the one frame access that does not go through eliminateFrameIndex, so it
+// has to split its own offset the way that does: a function whose frame is
+// large enough -- one 40KB by-value argument is enough at -O0 -- otherwise
+// emits `stq $15, 39960($30)` and the assembler rejects it.
+static Register materializeFrameBase(MachineBasicBlock &MBB,
+                                     MachineBasicBlock::iterator MBBI,
+                                     const DebugLoc &DL,
+                                     const AlphaInstrInfo &TII, Register Base,
+                                     int64_t &Offset,
+                                     MachineInstr::MIFlag Flag) {
+  if (isInt<16>(Offset))
+    return Base;
+  if (!isInt<32>(Offset))
+    reportFatalUsageError("Alpha frame offset does not fit in 32 bits");
+  Offset = emitHighDisp(MBB, MBBI, DL, TII, Alpha::R28, Base, Offset, Flag);
+  return Alpha::R28;
+}
+
 static void copyReg(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
                     const DebugLoc &DL, const AlphaInstrInfo &TII, Register Dst,
                     Register Src) {
@@ -126,10 +160,14 @@ void AlphaFrameLowering::emitPrologue(MachineFunction &MF,
     int FPSlot = AFI->getFramePointerSaveIndex();
     int64_t FPOff = MFI.getObjectOffset(FPSlot);
     unsigned DwarfFP = TRI->getDwarfRegNum(Alpha::R15, true);
+    int64_t StoreOff = FPOff + (int64_t)StackSize;
+    Register StoreBase =
+        materializeFrameBase(MBB, MBBI, DL, TII, Alpha::R30, StoreOff,
+                             MachineInstr::FrameSetup);
     BuildMI(MBB, MBBI, DL, TII.get(Alpha::STQ))
         .addReg(Alpha::R15)
-        .addReg(Alpha::R30)
-        .addImm(FPOff + (int64_t)StackSize)
+        .addReg(StoreBase)
+        .addImm(StoreOff)
         .setMIFlag(MachineInstr::FrameSetup);
     emitCFI(MBBI, MCCFIInstruction::createOffset(nullptr, DwarfFP, FPOff));
     copyReg(MBB, MBBI, DL, TII, Alpha::R15, Alpha::R30);
@@ -190,8 +228,10 @@ void AlphaFrameLowering::emitEpilogue(MachineFunction &MF,
     int FPSlot = AFI->getFramePointerSaveIndex();
     int64_t Off =
         MF.getFrameInfo().getObjectOffset(FPSlot) + (int64_t)StackSize;
+    Register LoadBase = materializeFrameBase(MBB, MBBI, DL, TII, Alpha::R30,
+                                             Off, MachineInstr::FrameDestroy);
     BuildMI(MBB, MBBI, DL, TII.get(Alpha::LDQ), Alpha::R15)
-        .addReg(Alpha::R30)
+        .addReg(LoadBase)
         .addImm(Off);
     insertCFI(MBBI, MCCFIInstruction::createRestore(
                         nullptr, TRI->getDwarfRegNum(Alpha::R15, true)));
