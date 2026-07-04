@@ -191,6 +191,10 @@ const char *AlphaTargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "AlphaISD::LITERAL";
   case AlphaISD::CALL:
     return "AlphaISD::CALL";
+  case AlphaISD::CALL_DIRECT:
+    return "AlphaISD::CALL_DIRECT";
+  case AlphaISD::CALL_DIRECT_LOCAL:
+    return "AlphaISD::CALL_DIRECT_LOCAL";
   case AlphaISD::DIVCALL:
     return "AlphaISD::DIVCALL";
   case AlphaISD::GPREL_HI:
@@ -585,14 +589,21 @@ SDValue AlphaTargetLowering::LowerCall(CallLoweringInfo &CLI,
   if (!MemOps.empty())
     Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other, MemOps);
 
+  // For a direct call the callee address is loaded from the GOT; remember the
+  // symbol so the jsr can carry its hint and lituse_jsr relocations.  A
+  // dso-local callee can be relaxed by the linker, so it takes only the
+  // lituse_jsr relocation (a hint on the jsr would inhibit that relaxation).
   SDValue Callee = CLI.Callee;
-  if (auto *G = dyn_cast<GlobalAddressSDNode>(Callee))
-    Callee =
-        DAG.getNode(AlphaISD::LITERAL, DL, MVT::i64,
-                    DAG.getTargetGlobalAddress(G->getGlobal(), DL, MVT::i64));
-  else if (auto *E = dyn_cast<ExternalSymbolSDNode>(Callee))
-    Callee = DAG.getNode(AlphaISD::LITERAL, DL, MVT::i64,
-                         DAG.getTargetExternalSymbol(E->getSymbol(), MVT::i64));
+  SDValue TargetSym;
+  bool IsLocal = false;
+  if (auto *G = dyn_cast<GlobalAddressSDNode>(Callee)) {
+    TargetSym = DAG.getTargetGlobalAddress(G->getGlobal(), DL, MVT::i64);
+    Callee = DAG.getNode(AlphaISD::LITERAL, DL, MVT::i64, TargetSym);
+    IsLocal = G->getGlobal()->isDSOLocal();
+  } else if (auto *E = dyn_cast<ExternalSymbolSDNode>(Callee)) {
+    TargetSym = DAG.getTargetExternalSymbol(E->getSymbol(), MVT::i64);
+    Callee = DAG.getNode(AlphaISD::LITERAL, DL, MVT::i64, TargetSym);
+  }
   // Otherwise the callee address is already a value; use it directly as the
   // procedure value for an indirect call.
   RegsToPass.emplace_back(Alpha::R27, Callee);
@@ -603,7 +614,14 @@ SDValue AlphaTargetLowering::LowerCall(CallLoweringInfo &CLI,
     Glue = Chain.getValue(1);
   }
 
+  // A direct external call passes the callee symbol as the first operand so the
+  // jsr is tagged with the hint and lituse_jsr relocations; a direct local call
+  // carries only lituse_jsr; an indirect call has neither.
+  bool IsDirect = TargetSym.getNode() != nullptr;
+  bool WithHint = IsDirect && !IsLocal;
   SmallVector<SDValue, 8> Ops(1, Chain);
+  if (WithHint)
+    Ops.push_back(TargetSym);
   for (auto &R : RegsToPass)
     Ops.push_back(DAG.getRegister(R.first, R.second.getValueType()));
 
@@ -613,7 +631,12 @@ SDValue AlphaTargetLowering::LowerCall(CallLoweringInfo &CLI,
   if (Glue.getNode())
     Ops.push_back(Glue);
 
-  Chain = DAG.getNode(AlphaISD::CALL, DL, {MVT::Other, MVT::Glue}, Ops);
+  unsigned CallOpc = AlphaISD::CALL;
+  if (WithHint)
+    CallOpc = AlphaISD::CALL_DIRECT;
+  else if (IsDirect)
+    CallOpc = AlphaISD::CALL_DIRECT_LOCAL;
+  Chain = DAG.getNode(CallOpc, DL, {MVT::Other, MVT::Glue}, Ops);
   Glue = Chain.getValue(1);
 
   Chain = DAG.getCALLSEQ_END(Chain, NumBytes, 0, Glue, DL);
