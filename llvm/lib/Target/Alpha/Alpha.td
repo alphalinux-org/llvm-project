@@ -34,9 +34,11 @@ def : ProcessorModel<"ev45",    Alpha21064Model, []>;
 def : ProcessorModel<"ev5",     Alpha21164Model, []>;
 def : ProcessorModel<"ev56",    Alpha21164Model, [FeatureBWX]>;
 def : ProcessorModel<"pca56",   Alpha21164Model, [FeatureBWX, FeatureMVI]>;
-def : ProcessorModel<"ev6",     Alpha21264Model, [FeatureBWX, FeatureMVI, FeatureFIX]>;
+def : ProcessorModel<"ev6",     Alpha21264Model,
+                     [FeatureBWX, FeatureMVI, FeatureFIX, FeaturePrefetch]>;
 def : ProcessorModel<"ev67",    Alpha21264Model,
-                     [FeatureBWX, FeatureMVI, FeatureFIX, FeatureCIX]>;
+                     [FeatureBWX, FeatureMVI, FeatureFIX, FeatureCIX,
+                      FeaturePrefetch]>;
 
 //===----------------------------------------------------------------------===//
 // Target declaration.
