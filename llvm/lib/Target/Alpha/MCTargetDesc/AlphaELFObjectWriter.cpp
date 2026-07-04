@@ -37,6 +37,9 @@ protected:
     case Alpha::fixup_alpha_tprello:
     case Alpha::fixup_alpha_gottprel:
     case Alpha::fixup_alpha_tlsgd:
+    case Alpha::fixup_alpha_tlsldm:
+    case Alpha::fixup_alpha_dtprelhi:
+    case Alpha::fixup_alpha_dtprello:
       if (auto *SA = const_cast<MCSymbol *>(Target.getAddSym()))
         static_cast<MCSymbolELF *>(SA)->setType(ELF::STT_TLS);
       break;
@@ -66,6 +69,12 @@ protected:
       return ELF::R_ALPHA_GOTTPREL;
     case Alpha::fixup_alpha_tlsgd:
       return ELF::R_ALPHA_TLSGD;
+    case Alpha::fixup_alpha_tlsldm:
+      return ELF::R_ALPHA_TLSLDM;
+    case Alpha::fixup_alpha_dtprelhi:
+      return ELF::R_ALPHA_DTPRELHI;
+    case Alpha::fixup_alpha_dtprello:
+      return ELF::R_ALPHA_DTPRELLO;
     default:
       reportError(Fixup.getLoc(), "unsupported relocation type");
       return ELF::R_ALPHA_NONE;
@@ -82,6 +91,9 @@ protected:
     case ELF::R_ALPHA_TPRELLO:
     case ELF::R_ALPHA_GOTTPREL:
     case ELF::R_ALPHA_TLSGD:
+    case ELF::R_ALPHA_TLSLDM:
+    case ELF::R_ALPHA_DTPRELHI:
+    case ELF::R_ALPHA_DTPRELLO:
       return true;
     default:
       return false;

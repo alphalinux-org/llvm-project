@@ -35,6 +35,11 @@ enum Fixups {
   // A 16-bit GOT displacement to the general-dynamic TLS descriptor passed to
   // __tls_get_addr (R_ALPHA_TLSGD).
   fixup_alpha_tlsgd,
+  // The local-dynamic module descriptor (R_ALPHA_TLSLDM) and the high/low
+  // module-relative offsets that follow it (R_ALPHA_DTPRELHI/LO).
+  fixup_alpha_tlsldm,
+  fixup_alpha_dtprelhi,
+  fixup_alpha_dtprello,
 
   fixup_alpha_invalid,
   NumTargetFixupKinds = fixup_alpha_invalid - FirstTargetFixupKind
