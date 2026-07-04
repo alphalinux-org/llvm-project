@@ -70,6 +70,11 @@ def AlphaGprelLo : SDNode<"AlphaISD::GPREL_LO", SDTIntBinOp>;
 def AlphaTprelHi : SDNode<"AlphaISD::TPREL_HI", SDTIntBinOp>;
 def AlphaTprelLo : SDNode<"AlphaISD::TPREL_LO", SDTIntBinOp>;
 
+// Initial-exec TLS: load the thread-pointer-relative offset from the GOT with
+// ldq !gottprel, then add it to the thread pointer.
+def SDTAlphaGotTprel : SDTypeProfile<1, 1, [SDTCisVT<0, i64>, SDTCisPtrTy<1>]>;
+def AlphaGotTprel : SDNode<"AlphaISD::GOTTPREL", SDTAlphaGotTprel>;
+
 //===----------------------------------------------------------------------===//
 // Operands and immediate predicates.
 //===----------------------------------------------------------------------===//
@@ -112,6 +117,7 @@ def gprelhigh_sym : SymOperand<"getGprelHighEncoding">;
 def gprellow_sym : SymOperand<"getGprelLowEncoding">;
 def tprelhi_sym : SymOperand<"getTprelHighEncoding">;
 def tprello_sym : SymOperand<"getTprelLowEncoding">;
+def gottprel_sym : SymOperand<"getGotTprelEncoding">;
 // Retained alias so existing definitions read naturally.
 def symbol : SymOperand<"getGprelLowEncoding">;
 
@@ -545,6 +551,14 @@ def : Pat<(AlphaTprelHi tglobaltlsaddr:$sym, GPRC:$base),
           (LDAHt tglobaltlsaddr:$sym, GPRC:$base)>;
 def : Pat<(AlphaTprelLo tglobaltlsaddr:$sym, GPRC:$base),
           (LDAt tglobaltlsaddr:$sym, GPRC:$base)>;
+
+// Initial-exec: load the tp-relative offset from the GOT (ldq !gottprel).
+let mayLoad = 1, hasSideEffects = 0, Uses = [R29], isCodeGenOnly = 1 in
+def LDQtp : MFormD<0x29, (outs GPRC:$Ra), (ins gottprel_sym:$disp),
+                   "ldq $Ra, $disp($$29)\t\t!gottprel", []> {
+  let Rb = 29;
+}
+def : Pat<(AlphaGotTprel tglobaltlsaddr:$sym), (LDQtp tglobaltlsaddr:$sym)>;
 
 // A load from a thread-pointer-relative address folds the !tprello low part
 // into the load displacement, as for the GP-relative case.
