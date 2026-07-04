@@ -7211,6 +7211,13 @@ def mno_max : Flag<["-"], "mno-max">, Group<m_alpha_Features_Group>;
 def mfix : Flag<["-"], "mfix">, Group<m_alpha_Features_Group>,
   HelpText<"Enable float/int conversion instructions (Alpha FIX)">;
 def mno_fix : Flag<["-"], "mno-fix">, Group<m_alpha_Features_Group>;
+def mieee : Flag<["-"], "mieee">, Group<m_alpha_Features_Group>,
+  HelpText<"Generate IEEE-conformant floating-point code with software "
+           "completion (Alpha)">;
+def mno_ieee : Flag<["-"], "mno-ieee">, Group<m_alpha_Features_Group>;
+def mieee_with_inexact : Flag<["-"], "mieee-with-inexact">,
+  Group<m_alpha_Features_Group>,
+  HelpText<"Like -mieee but also maintain the IEEE inexact flag (Alpha)">;
 
 // SPARC feature flags
 def mfpu : Flag<["-"], "mfpu">, Group<m_sparc_Features_Group>;
