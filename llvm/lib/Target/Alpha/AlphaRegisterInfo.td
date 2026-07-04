@@ -102,3 +102,8 @@ def FPRC : RegisterClass<"Alpha", [f64, f32], 64, (add
   (sequence "F%u", 2, 9),      // callee-saved
   (sequence "F%u", 16, 21),    // arguments
   F31)>;                       // zero (reserved)
+
+// Single-value-type views of the floating-point registers, used for inline
+// assembly so that an "f" operand gets an unambiguous register type.
+def F4RC : RegisterClass<"Alpha", [f32], 64, (add (sequence "F%u", 0, 31))>;
+def F8RC : RegisterClass<"Alpha", [f64], 64, (add (sequence "F%u", 0, 31))>;

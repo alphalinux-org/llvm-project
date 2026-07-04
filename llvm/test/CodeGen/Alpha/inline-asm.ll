@@ -34,3 +34,18 @@ define i64 @mem_disp(ptr %p) {
   %r = call i64 asm "ldq $0, $1", "=r,*m"(ptr elementtype(i64) %q)
   ret i64 %r
 }
+
+; The "f" constraint selects a floating-point register for both f32 and f64.
+; CHECK-LABEL: fp32:
+; CHECK:       adds $f16, $f16, $f0
+define float @fp32(float %x) {
+  %r = call float asm "adds $1,$1,$0", "=f,f"(float %x)
+  ret float %r
+}
+
+; CHECK-LABEL: fp64:
+; CHECK:       addt $f16, $f16, $f0
+define double @fp64(double %x) {
+  %r = call double asm "addt $1,$1,$0", "=f,f"(double %x)
+  ret double %r
+}
