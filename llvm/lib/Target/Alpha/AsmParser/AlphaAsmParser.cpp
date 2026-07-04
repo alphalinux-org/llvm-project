@@ -207,6 +207,29 @@ bool AlphaAsmParser::matchRegister(StringRef Name, MCRegister &Reg) {
 }
 
 ParseStatus AlphaAsmParser::parseDirective(AsmToken DirectiveID) {
+  // `.arch <name>` selects the instruction set; enable the features it implies
+  // so the extension instructions that follow assemble.
+  if (DirectiveID.getIdentifier() == ".arch") {
+    SMLoc Loc = getParser().getTok().getLoc();
+    StringRef Arch;
+    if (getParser().parseIdentifier(Arch))
+      return Error(Loc, "expected architecture name after .arch");
+    SmallVector<StringRef, 4> Feats;
+    if (Arch == "ev56")
+      Feats = {"bwx"};
+    else if (Arch == "pca56")
+      Feats = {"bwx", "mvi"};
+    else if (Arch == "ev6" || Arch == "ev67" || Arch == "ev68")
+      Feats = {"bwx", "cix", "fix", "mvi"};
+    else if (Arch != "ev4" && Arch != "ev45" && Arch != "ev5")
+      return Error(Loc, "unknown Alpha architecture '" + Arch + "'");
+    MCSubtargetInfo &STI = copySTI();
+    for (StringRef F : Feats)
+      STI.ApplyFeatureFlag(("+" + F).str());
+    setAvailableFeatures(ComputeAvailableFeatures(STI.getFeatureBits()));
+    return ParseStatus::Success;
+  }
+
   // `.set at`, `.set noat`, `.set macro`, `.set reorder`, and similar are
   // assembler mode pragmas that control features (the $28/$at temporary,
   // macro/reorder handling) we do not model; accept and ignore them.  A `.set`
