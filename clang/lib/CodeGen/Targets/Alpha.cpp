@@ -14,9 +14,10 @@ using namespace clang::CodeGen;
 
 //===----------------------------------------------------------------------===//
 // Alpha ABI Implementation.  The OSF/ELF convention passes the first six
-// integer arguments in $16-$21 and the first six floating-point arguments in
-// $f16-$f21; scalars wider than a register and small aggregates are handled by
-// the generic default ABI.
+// arguments in $16-$21 (integer) or $f16-$f21 (floating point), sharing one
+// slot index.  Aggregates are passed by value as a sequence of 8-byte pieces in
+// the integer registers (spilling to the stack once the registers run out) and
+// are returned in memory through a hidden pointer.
 //===----------------------------------------------------------------------===//
 
 namespace {
@@ -24,9 +25,31 @@ class AlphaABIInfo : public DefaultABIInfo {
 public:
   AlphaABIInfo(CodeGenTypes &CGT) : DefaultABIInfo(CGT) {}
 
+  ABIArgInfo classifyArgumentType(QualType Ty) const;
+  ABIArgInfo classifyReturnType(QualType Ty) const;
+  ABIArgInfo extendIntegerInRegister(QualType Ty) const;
+
+  void computeInfo(CGFunctionInfo &FI) const override {
+    if (!getCXXABI().classifyReturnType(FI))
+      FI.getReturnInfo() = classifyReturnType(FI.getReturnType());
+    for (auto &I : FI.arguments())
+      I.info = classifyArgumentType(I.type);
+  }
+
   RValue EmitVAArg(CodeGenFunction &CGF, Address VAListAddr, QualType Ty,
                    AggValueSlot Slot) const override;
 };
+
+// long double is the 128-bit X_floating format, which the ABI passes and
+// returns in memory (by an invisible reference / a hidden result pointer)
+// rather than in registers.  _Complex long double (TCmode) goes the same way,
+// matching GCC's alpha_pass_by_reference and alpha_return_in_memory.
+static bool isXFloating(const ASTContext &Ctx, QualType Ty) {
+  if (const auto *CT = Ty->getAs<ComplexType>())
+    return CT->getElementType()->isRealFloatingType() &&
+           Ctx.getTypeSize(CT->getElementType()) == 128;
+  return Ty->isRealFloatingType() && Ctx.getTypeSize(Ty) == 128;
+}
 
 class AlphaTargetCodeGenInfo : public TargetCodeGenInfo {
 public:
@@ -34,6 +57,89 @@ public:
       : TargetCodeGenInfo(std::make_unique<AlphaABIInfo>(CGT)) {}
 };
 } // end anonymous namespace
+
+// Extension rules for an integer narrower than a register, matching GCC's
+// alpha_promote_function_mode.  A 32-bit value is always sign-extended, even
+// when its type is unsigned: the hardware's 32-bit arithmetic produces a
+// sign-extended result, so that is the canonical register form.  Anything
+// narrower has no such instructions behind it and is extended according to the
+// signedness of its type, so _Bool, unsigned char and unsigned short are
+// zero-extended.  Getting _Bool wrong is particularly damaging, since a `true`
+// sign-extended to all-ones is not the 0/1 the rest of the world expects.
+ABIArgInfo AlphaABIInfo::extendIntegerInRegister(QualType Ty) const {
+  if (getContext().getTypeSize(Ty) == 32)
+    return ABIArgInfo::getSignExtend(Ty);
+  return ABIArgInfo::getExtend(Ty);
+}
+
+ABIArgInfo AlphaABIInfo::classifyReturnType(QualType Ty) const {
+  if (isXFloating(getContext(), Ty))
+    return getNaturalAlignIndirect(Ty, getDataLayout().getAllocaAddrSpace(),
+                                   /*ByVal=*/false);
+  // A complex float or complex double comes back in $f0/$f1: GCC judges a
+  // complex float type by the width of one part, not of the pair
+  // (alpha_return_in_memory), so only complex long double goes to memory, and
+  // isXFloating above has already caught that.
+  if (const auto *CT = Ty->getAs<ComplexType>())
+    if (CT->getElementType()->isRealFloatingType())
+      return ABIArgInfo::getDirect();
+  // An aggregate comes back in memory through a hidden pointer the caller
+  // passes in $16; only $0 and $f0 carry a returned value.
+  if (isAggregateTypeForABI(Ty))
+    return getNaturalAlignIndirect(Ty, getDataLayout().getAllocaAddrSpace(),
+                                   /*ByVal=*/false);
+  // Anything else too wide for a register is returned in memory as well:
+  // __int128, _Complex long, and so on.
+  if (getContext().getTypeSize(Ty) > 64)
+    return getNaturalAlignIndirect(Ty, getDataLayout().getAllocaAddrSpace(),
+                                   /*ByVal=*/false);
+  // Extend a sub-64-bit integer return value in the return register.
+  if (Ty->isIntegralOrEnumerationType() && getContext().getTypeSize(Ty) < 64)
+    return extendIntegerInRegister(Ty);
+  return DefaultABIInfo::classifyReturnType(Ty);
+}
+
+ABIArgInfo AlphaABIInfo::classifyArgumentType(QualType Ty) const {
+  Ty = useFirstFieldIfTransparentUnion(Ty);
+
+  // long double is passed by an invisible reference to a caller-made copy.
+  if (isXFloating(getContext(), Ty))
+    return getNaturalAlignIndirect(Ty, getDataLayout().getAllocaAddrSpace(),
+                                   /*ByVal=*/true);
+
+  // A complex float or complex double is passed as its two parts, in two
+  // consecutive floating-point argument registers, not packed into the integer
+  // registers the way an aggregate is.
+  if (const auto *CT = Ty->getAs<ComplexType>())
+    if (CT->getElementType()->isRealFloatingType())
+      return ABIArgInfo::getDirect();
+
+  if (isAggregateTypeForABI(Ty)) {
+    // Pass a non-trivial C++ record the way its special members require.
+    if (CGCXXABI::RecordArgABI RAA = getRecordArgABI(Ty, getCXXABI()))
+      return getNaturalAlignIndirect(Ty, getDataLayout().getAllocaAddrSpace(),
+                                     RAA == CGCXXABI::RAA_DirectInMemory);
+
+    uint64_t Size = getContext().getTypeSize(Ty);
+    if (Size == 0)
+      return ABIArgInfo::getIgnore();
+
+    // Pass the aggregate by value as N consecutive 64-bit quadwords; the
+    // calling convention places the first six in registers and the rest on the
+    // stack.
+    uint64_t NumRegs = (Size + 63) / 64;
+    llvm::Type *I64 = llvm::Type::getInt64Ty(getVMContext());
+    llvm::Type *Coerced =
+        NumRegs == 1 ? I64 : llvm::ArrayType::get(I64, NumRegs);
+    return ABIArgInfo::getDirect(Coerced);
+  }
+
+  // Extend a sub-64-bit integer argument in its argument register.
+  if (Ty->isIntegralOrEnumerationType() && getContext().getTypeSize(Ty) < 64)
+    return extendIntegerInRegister(Ty);
+
+  return DefaultABIInfo::classifyArgumentType(Ty);
+}
 
 RValue AlphaABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
                                QualType Ty, AggValueSlot Slot) const {
