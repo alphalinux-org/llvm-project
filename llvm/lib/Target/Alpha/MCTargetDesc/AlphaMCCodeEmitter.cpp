@@ -70,6 +70,21 @@ public:
                                 const MCSubtargetInfo &STI) const {
     return getSymEncoding(MI, OpNo, Fixups, Alpha::fixup_alpha_gprelhigh);
   }
+  unsigned getTlsldmEncoding(const MCInst &MI, unsigned OpNo,
+                             SmallVectorImpl<MCFixup> &Fixups,
+                             const MCSubtargetInfo &STI) const {
+    return getSymEncoding(MI, OpNo, Fixups, Alpha::fixup_alpha_tlsldm);
+  }
+  unsigned getDtprelHighEncoding(const MCInst &MI, unsigned OpNo,
+                                 SmallVectorImpl<MCFixup> &Fixups,
+                                 const MCSubtargetInfo &STI) const {
+    return getSymEncoding(MI, OpNo, Fixups, Alpha::fixup_alpha_dtprelhi);
+  }
+  unsigned getDtprelLowEncoding(const MCInst &MI, unsigned OpNo,
+                                SmallVectorImpl<MCFixup> &Fixups,
+                                const MCSubtargetInfo &STI) const {
+    return getSymEncoding(MI, OpNo, Fixups, Alpha::fixup_alpha_dtprello);
+  }
   unsigned getTlsgdEncoding(const MCInst &MI, unsigned OpNo,
                             SmallVectorImpl<MCFixup> &Fixups,
                             const MCSubtargetInfo &STI) const {

@@ -79,6 +79,13 @@ def AlphaGotTprel : SDNode<"AlphaISD::GOTTPREL", SDTAlphaGotTprel>;
 // (lda !tlsgd), passed to __tls_get_addr which returns the variable's address.
 def AlphaTlsgd : SDNode<"AlphaISD::TLSGD", SDTAlphaGotTprel>;
 
+// Local-dynamic TLS: the module descriptor (lda !tlsldm) passed to
+// __tls_get_addr for the module TLS base, plus the module-relative offset
+// formed with ldah !dtprelhi / lda !dtprello.
+def AlphaTlsldm : SDNode<"AlphaISD::TLSLDM", SDTAlphaGotTprel>;
+def AlphaDtprelHi : SDNode<"AlphaISD::DTPREL_HI", SDTIntBinOp>;
+def AlphaDtprelLo : SDNode<"AlphaISD::DTPREL_LO", SDTIntBinOp>;
+
 //===----------------------------------------------------------------------===//
 // Operands and immediate predicates.
 //===----------------------------------------------------------------------===//
@@ -123,6 +130,9 @@ def tprelhi_sym : SymOperand<"getTprelHighEncoding">;
 def tprello_sym : SymOperand<"getTprelLowEncoding">;
 def gottprel_sym : SymOperand<"getGotTprelEncoding">;
 def tlsgd_sym : SymOperand<"getTlsgdEncoding">;
+def tlsldm_sym : SymOperand<"getTlsldmEncoding">;
+def dtprelhi_sym : SymOperand<"getDtprelHighEncoding">;
+def dtprello_sym : SymOperand<"getDtprelLowEncoding">;
 // Retained alias so existing definitions read naturally.
 def symbol : SymOperand<"getGprelLowEncoding">;
 
@@ -572,6 +582,73 @@ def LDAtlsgd : MFormD<0x08, (outs GPRC:$Ra), (ins tlsgd_sym:$disp),
   let Rb = 29;
 }
 def : Pat<(AlphaTlsgd tglobaltlsaddr:$sym), (LDAtlsgd tglobaltlsaddr:$sym)>;
+
+// Local-dynamic: the module descriptor (lda !tlsldm), then the module-relative
+// offset (ldah !dtprelhi / lda !dtprello, folding the low part into loads).
+let hasSideEffects = 0, Uses = [R29], isCodeGenOnly = 1 in
+def LDAtlsldm : MFormD<0x08, (outs GPRC:$Ra), (ins tlsldm_sym:$disp),
+                       "lda $Ra, $disp($$29)\t\t!tlsldm", []> {
+  let Rb = 29;
+}
+def : Pat<(AlphaTlsldm tglobaltlsaddr:$sym), (LDAtlsldm tglobaltlsaddr:$sym)>;
+
+let hasSideEffects = 0, isCodeGenOnly = 1 in {
+def LDAHd : MFormD<0x09, (outs GPRC:$Ra), (ins dtprelhi_sym:$disp, GPRC:$Rb),
+                   "ldah $Ra, $disp($Rb)\t\t!dtprelhi", []>;
+def LDAd : MFormD<0x08, (outs GPRC:$Ra), (ins dtprello_sym:$disp, GPRC:$Rb),
+                  "lda $Ra, $disp($Rb)\t\t!dtprello", []>;
+}
+def : Pat<(AlphaDtprelHi tglobaltlsaddr:$sym, GPRC:$base),
+          (LDAHd tglobaltlsaddr:$sym, GPRC:$base)>;
+def : Pat<(AlphaDtprelLo tglobaltlsaddr:$sym, GPRC:$base),
+          (LDAd tglobaltlsaddr:$sym, GPRC:$base)>;
+
+let mayLoad = 1, hasSideEffects = 0, isCodeGenOnly = 1 in {
+def LDLd : MFormD<0x28, (outs GPRC:$Ra), (ins dtprello_sym:$disp, GPRC:$Rb),
+                  "ldl $Ra, $disp($Rb)\t\t!dtprello", []>;
+def LDQd : MFormD<0x29, (outs GPRC:$Ra), (ins dtprello_sym:$disp, GPRC:$Rb),
+                  "ldq $Ra, $disp($Rb)\t\t!dtprello", []>;
+def LDTd : MFormD<0x23, (outs FPRC:$Ra), (ins dtprello_sym:$disp, GPRC:$Rb),
+                  "ldt $Ra, $disp($Rb)\t\t!dtprello", []>;
+def LDSd : MFormD<0x22, (outs FPRC:$Ra), (ins dtprello_sym:$disp, GPRC:$Rb),
+                  "lds $Ra, $disp($Rb)\t\t!dtprello", []>;
+}
+let mayStore = 1, hasSideEffects = 0, isCodeGenOnly = 1 in {
+def STLd : MFormD<0x2c, (outs), (ins GPRC:$Ra, dtprello_sym:$disp, GPRC:$Rb),
+                  "stl $Ra, $disp($Rb)\t\t!dtprello", []>;
+def STQd : MFormD<0x2d, (outs), (ins GPRC:$Ra, dtprello_sym:$disp, GPRC:$Rb),
+                  "stq $Ra, $disp($Rb)\t\t!dtprello", []>;
+def STTd : MFormD<0x27, (outs), (ins FPRC:$Ra, dtprello_sym:$disp, GPRC:$Rb),
+                  "stt $Ra, $disp($Rb)\t\t!dtprello", []>;
+def STSd : MFormD<0x26, (outs), (ins FPRC:$Ra, dtprello_sym:$disp, GPRC:$Rb),
+                  "sts $Ra, $disp($Rb)\t\t!dtprello", []>;
+}
+let AddedComplexity = 20 in {
+def : Pat<(i64 (sextloadi32 (AlphaDtprelLo tglobaltlsaddr:$s, GPRC:$b))),
+          (LDLd tglobaltlsaddr:$s, GPRC:$b)>;
+// A longword load that is not sign-extending needs the same fold: an extending
+// load of don't-care high bits is the sign-extending instruction all the same,
+// and a zero-extending one is that instruction with the high bits cleared
+// afterwards.
+def : Pat<(i64 (extloadi32 (AlphaDtprelLo tglobaltlsaddr:$s, GPRC:$b))),
+          (LDLd tglobaltlsaddr:$s, GPRC:$b)>;
+def : Pat<(i64 (zextloadi32 (AlphaDtprelLo tglobaltlsaddr:$s, GPRC:$b))),
+          (ZAPNOTi (LDLd tglobaltlsaddr:$s, GPRC:$b), 15)>;
+def : Pat<(i64 (load (AlphaDtprelLo tglobaltlsaddr:$s, GPRC:$b))),
+          (LDQd tglobaltlsaddr:$s, GPRC:$b)>;
+def : Pat<(f64 (load (AlphaDtprelLo tglobaltlsaddr:$s, GPRC:$b))),
+          (LDTd tglobaltlsaddr:$s, GPRC:$b)>;
+def : Pat<(f32 (load (AlphaDtprelLo tglobaltlsaddr:$s, GPRC:$b))),
+          (LDSd tglobaltlsaddr:$s, GPRC:$b)>;
+def : Pat<(truncstorei32 GPRC:$v, (AlphaDtprelLo tglobaltlsaddr:$s, GPRC:$b)),
+          (STLd GPRC:$v, tglobaltlsaddr:$s, GPRC:$b)>;
+def : Pat<(store GPRC:$v, (AlphaDtprelLo tglobaltlsaddr:$s, GPRC:$b)),
+          (STQd GPRC:$v, tglobaltlsaddr:$s, GPRC:$b)>;
+def : Pat<(store f64:$v, (AlphaDtprelLo tglobaltlsaddr:$s, GPRC:$b)),
+          (STTd FPRC:$v, tglobaltlsaddr:$s, GPRC:$b)>;
+def : Pat<(store f32:$v, (AlphaDtprelLo tglobaltlsaddr:$s, GPRC:$b)),
+          (STSd FPRC:$v, tglobaltlsaddr:$s, GPRC:$b)>;
+}
 
 // A load from a thread-pointer-relative address folds the !tprello low part
 // into the load displacement, as for the GP-relative case.
