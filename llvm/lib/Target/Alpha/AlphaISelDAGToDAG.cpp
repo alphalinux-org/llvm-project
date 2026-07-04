@@ -43,6 +43,12 @@ public:
   // frame index) into (Base, Offset).
   bool SelectADDRri(SDValue Addr, SDValue &Base, SDValue &Offset);
 
+  // Add a 32-bit signed value to Base with ldah/lda (Base + (Hi << 16) + Lo).
+  SDValue buildConstant32(int32_t V32, SDValue Base, const SDLoc &DL);
+
+  // Materialize a 64-bit constant entirely in code (no constant pool).
+  SDNode *buildConstantInline(int64_t V, const SDLoc &DL);
+
   // Match any address as a single register operand.
   bool SelectAddrReg(SDValue Addr, SDValue &Reg) {
     Reg = Addr;
@@ -136,31 +142,27 @@ void AlphaDAGToDAGISel::Select(SDNode *Node) {
     return;
   }
 
-  // Materialize a constant that does not fit in the 16-bit `lda` displacement
-  // as an ldah/lda pair, when it decomposes into two 16-bit signed halves:
-  // V = (Hi << 16) + Lo.  16-bit constants are handled by a pattern; constants
-  // that need a third instruction (e.g. 0x7fffffff) are not supported yet.
+  // Materialize a constant that does not fit in the 16-bit `lda` displacement.
+  // 16-bit constants are handled by a pattern; a 32-bit constant is an ldah/lda
+  // pair (with the 0x8000 high half split into two ldah); wider constants go
+  // inline or, failing that, into the constant pool.
   if (Node->getOpcode() == ISD::Constant && Node->getValueType(0) == MVT::i64) {
     int64_t V = cast<ConstantSDNode>(Node)->getSExtValue();
-    int64_t Lo = static_cast<int16_t>(V);
-    int64_t Hi = (V - Lo) >> 16;
     SDLoc DL(Node);
-    if (!isInt<16>(V) && isInt<16>(Hi)) {
+    if (!isInt<16>(V) && isInt<32>(V)) {
       SDValue Zero = CurDAG->getRegister(Alpha::R31, MVT::i64);
-      SDNode *High = CurDAG->getMachineNode(
-          Alpha::LDAH, DL, MVT::i64,
-          CurDAG->getTargetConstant(Hi, DL, MVT::i64), Zero);
-      SDNode *Low = CurDAG->getMachineNode(
-          Alpha::LDA, DL, MVT::i64, CurDAG->getTargetConstant(Lo, DL, MVT::i64),
-          SDValue(High, 0));
-      ReplaceNode(Node, Low);
+      ReplaceNode(Node,
+                  buildConstant32(static_cast<int32_t>(V), Zero, DL).getNode());
       return;
     }
-    if (!isInt<16>(Hi)) {
-      // Anything the ldah/lda pair cannot build goes in the constant pool and
-      // is loaded GP-relative.  That is every constant wider than 32 bits, and
-      // also those whose high half is 0x8000, which the signed field of ldah
-      // cannot hold.
+    if (!isInt<32>(V)) {
+      // Build a wide constant inline (ldah/lda of each 32-bit half combined
+      // with a shift) when the constant pool must be avoided; otherwise place
+      // it in the pool and load it GP-relative.
+      if (Subtarget->hasBuildConstants()) {
+        ReplaceNode(Node, buildConstantInline(V, DL));
+        return;
+      }
       CurDAG->getMachineFunction()
           .getInfo<AlphaMachineFunctionInfo>()
           ->setUsesGP();
@@ -179,6 +181,63 @@ void AlphaDAGToDAGISel::Select(SDNode *Node) {
   }
 
   SelectCode(Node);
+}
+
+SDValue AlphaDAGToDAGISel::buildConstant32(int32_t V32, SDValue Base,
+                                           const SDLoc &DL) {
+  // Add a 32-bit signed value to Base with ldah/lda: Base + (Hi << 16) + Lo,
+  // where V32 = (Hi << 16) + Lo.  Hi lies in [-0x8000, 0x8000]; the +0x8000
+  // case does not fit ldah's signed field and is emitted as two ldah halves.
+  // Every caller passes a non-zero value, so at least one of the two halves
+  // below emits an instruction and the result is always a new node rather than
+  // Base itself.
+  assert(V32 != 0 && "buildConstant32 of zero would hand back Base unchanged");
+  int64_t Lo = static_cast<int16_t>(V32);
+  int64_t Hi = (static_cast<int64_t>(V32) - Lo) >> 16;
+  SDValue Cur = Base;
+  if (Hi != 0) {
+    if (isInt<16>(Hi)) {
+      Cur = SDValue(CurDAG->getMachineNode(
+                        Alpha::LDAH, DL, MVT::i64,
+                        CurDAG->getTargetConstant(Hi, DL, MVT::i64), Cur),
+                    0);
+    } else {
+      // Hi == 0x8000: split into two ldah of 0x4000.
+      for (int I = 0; I < 2; ++I)
+        Cur = SDValue(CurDAG->getMachineNode(
+                          Alpha::LDAH, DL, MVT::i64,
+                          CurDAG->getTargetConstant(Hi / 2, DL, MVT::i64), Cur),
+                      0);
+    }
+  }
+  if (Lo != 0)
+    Cur = SDValue(CurDAG->getMachineNode(
+                      Alpha::LDA, DL, MVT::i64,
+                      CurDAG->getTargetConstant(Lo, DL, MVT::i64), Cur),
+                  0);
+  return Cur;
+}
+
+SDNode *AlphaDAGToDAGISel::buildConstantInline(int64_t V, const SDLoc &DL) {
+  SDValue Zero = CurDAG->getRegister(Alpha::R31, MVT::i64);
+  // The subtraction is done unsigned: V - Lo32 overflows a signed 64-bit value
+  // for a V near INT64_MAX whose low half is negative, and the wrapped result
+  // is the one wanted.
+  uint64_t UV = static_cast<uint64_t>(V);
+  int32_t Lo32 = static_cast<int32_t>(UV);
+  int32_t Hi32 =
+      static_cast<int32_t>((UV - static_cast<uint64_t>(int64_t(Lo32))) >> 32);
+
+  // V = (Hi32 << 32) + Lo32.  Build the (adjusted) high half, shift it up, then
+  // add the low half; the sign of Lo32 is already accounted for in Hi32.
+  SDValue High = buildConstant32(Hi32, Zero, DL);
+  SDValue Shifted = SDValue(
+      CurDAG->getMachineNode(Alpha::SLLi, DL, MVT::i64, High,
+                             CurDAG->getTargetConstant(32, DL, MVT::i64)),
+      0);
+  if (Lo32 == 0)
+    return Shifted.getNode();
+  return buildConstant32(Lo32, Shifted, DL).getNode();
 }
 
 bool AlphaDAGToDAGISel::SelectADDRri(SDValue Addr, SDValue &Base,

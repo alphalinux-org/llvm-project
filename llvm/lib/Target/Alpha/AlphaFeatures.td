@@ -27,6 +27,14 @@ def HasMVI : Predicate<"Subtarget->hasMVI()">,
 // that they are safe against concurrent accesses to the same quadword.
 def FeatureSafeBWA : SubtargetFeature<"safe-bwa", "HasSafeBWA", "true",
     "Use a lock-based sequence for pre-BWX byte/word stores">;
+
+// Build every wide integer constant with code instead of loading it from the
+// constant pool.  This is gcc's -mbuild-constants; the dynamic loader needs it
+// because it must relocate itself before it can reach its own data segment.
+def FeatureBuildConstants
+    : SubtargetFeature<"build-constants", "HasBuildConstants", "true",
+                       "Materialize wide constants inline instead of loading "
+                       "them from the constant pool">;
 // Pre-BWX byte/word store variants: plain read-modify-write vs. lock-based.
 def UnsafeBWStore
     : Predicate<"!Subtarget->hasBWX() && !Subtarget->hasSafeBWA()">;
