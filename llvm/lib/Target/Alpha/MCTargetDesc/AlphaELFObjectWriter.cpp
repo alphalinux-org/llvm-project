@@ -75,6 +75,10 @@ protected:
       return ELF::R_ALPHA_DTPRELHI;
     case Alpha::fixup_alpha_dtprello:
       return ELF::R_ALPHA_DTPRELLO;
+    case Alpha::fixup_alpha_hint:
+      return ELF::R_ALPHA_HINT;
+    case Alpha::fixup_alpha_lituse_jsr:
+      return ELF::R_ALPHA_LITUSE;
     default:
       reportError(Fixup.getLoc(), "unsupported relocation type");
       return ELF::R_ALPHA_NONE;
@@ -82,9 +86,11 @@ protected:
   }
 
   bool needsRelocateWithSymbol(const MCValue &, unsigned Type) const override {
-    // The GOT/GP-relative and TLS relocations reference the symbol itself.
+    // The GP-relative and TLS relocations reference the symbol itself.  The GOT
+    // literal is left section-relative for a local symbol so the linker can
+    // pair it with a lituse_jsr and relax the call; an external symbol keeps
+    // its name because it has no local section to fold into.
     switch (Type) {
-    case ELF::R_ALPHA_LITERAL:
     case ELF::R_ALPHA_GPRELHIGH:
     case ELF::R_ALPHA_GPRELLOW:
     case ELF::R_ALPHA_TPRELHI:
@@ -94,6 +100,7 @@ protected:
     case ELF::R_ALPHA_TLSLDM:
     case ELF::R_ALPHA_DTPRELHI:
     case ELF::R_ALPHA_DTPRELLO:
+    case ELF::R_ALPHA_HINT:
       return true;
     default:
       return false;

@@ -40,6 +40,11 @@ enum Fixups {
   fixup_alpha_tlsldm,
   fixup_alpha_dtprelhi,
   fixup_alpha_dtprello,
+  // A jsr branch-prediction hint filled from the call target (R_ALPHA_HINT),
+  // and the paired use of a GOT literal by a jsr (R_ALPHA_LITUSE, addend 3)
+  // that lets the linker relax a local call.
+  fixup_alpha_hint,
+  fixup_alpha_lituse_jsr,
 
   fixup_alpha_invalid,
   NumTargetFixupKinds = fixup_alpha_invalid - FirstTargetFixupKind

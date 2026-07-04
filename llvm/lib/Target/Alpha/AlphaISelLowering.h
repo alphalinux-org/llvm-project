@@ -36,6 +36,14 @@ enum NodeType : unsigned {
   // A function call through the procedure value in $27.
   CALL,
 
+  // A direct call: like CALL, but carries the callee symbol so the jsr can be
+  // tagged with a branch-prediction hint and a lituse_jsr relocation.
+  CALL_DIRECT,
+
+  // A direct call to a dso-local callee: the jsr carries only the lituse_jsr
+  // relocation (no hint), which lets the linker relax the call to a bsr.
+  CALL_DIRECT_LOCAL,
+
   // A call to a division millicode routine (entered through $23).
   DIVCALL,
 
