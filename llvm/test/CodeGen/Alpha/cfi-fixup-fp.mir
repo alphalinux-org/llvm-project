@@ -1,0 +1,62 @@
+# RUN: llc -mtriple=alpha-unknown-linux-gnu -run-pass=cfi-fixup %s -o - | FileCheck %s
+
+# A block that needs no frame, laid out after one that still has it, gets the
+# entry state put back by resetCFIToInitialState.  $15 has to be in that reset:
+# it is reserved when it is the frame pointer, so it is saved through its own
+# slot and never appears in getCalleeSavedInfo(), and without it the
+# .cfi_def_cfa_register $15 rule from the prologue would still be standing in a
+# block where the frame is gone.
+--- |
+  define void @tail_out_of_frame(i64 %n) uwtable {
+  entry:
+    br label %ret
+  cold:
+    br label %ret
+  ret:
+    ret void
+  }
+...
+---
+name:            tail_out_of_frame
+alignment:       4
+tracksRegLiveness: true
+frameInfo:
+  stackSize:       16
+  maxAlignment:    8
+  adjustsStack:    true
+  hasCalls:        true
+  isCalleeSavedInfoValid: true
+stack:
+  - { id: 0, type: spill-slot, offset: -16, size: 8, alignment: 8 }
+  - { id: 1, type: spill-slot, offset: -8, size: 8, alignment: 8,
+      callee-saved-register: '$r26' }
+  # A variable-sized object is what makes hasFP true, and $15 the frame
+  # pointer, without depending on an option.
+  - { id: 2, type: variable-sized, offset: -16, alignment: 8 }
+# CHECK-LABEL: bb.2.ret:
+# CHECK-NEXT: CFI_INSTRUCTION same_value $r26
+# CHECK-NEXT: CFI_INSTRUCTION same_value $r15
+# CHECK-NEXT: CFI_INSTRUCTION def_cfa $r30, 0
+# CHECK-NEXT: RET
+body:             |
+  bb.0.entry:
+    successors: %bb.2, %bb.1
+    liveins: $r16, $r26, $r27
+
+    BEQ killed $r16, %bb.2
+
+  bb.1.cold:
+    liveins: $r26, $r29
+
+    $r30 = LDA -16, $r30
+    frame-setup CFI_INSTRUCTION def_cfa_offset 16
+    frame-setup STQ $r15, $r30, 0
+    frame-setup CFI_INSTRUCTION offset $r15, -16
+    $r15 = BIS $r31, $r30
+    frame-setup CFI_INSTRUCTION def_cfa_register $r15
+    STQ killed $r26, $r15, 8 :: (store (s64) into %stack.1)
+    frame-setup CFI_INSTRUCTION offset $r26, -8
+
+  bb.2.ret:
+    RET
+...

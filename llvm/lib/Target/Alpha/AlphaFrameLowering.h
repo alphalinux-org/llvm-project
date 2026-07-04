@@ -31,6 +31,8 @@ public:
   void determineCalleeSaves(MachineFunction &MF, BitVector &SavedRegs,
                             RegScavenger *RS) const override;
 
+  void resetCFIToInitialState(MachineBasicBlock &MBB) const override;
+
 protected:
   bool hasFPImpl(const MachineFunction &MF) const override;
 };
