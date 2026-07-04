@@ -45,6 +45,12 @@ enum NodeType : unsigned {
   // relocation (no hint), which lets the linker relax the call to a bsr.
   CALL_DIRECT_LOCAL,
 
+  // Calls to __tls_get_addr in the general- and local-dynamic TLS sequences.
+  // The jsr carries a lituse_tlsgd or lituse_tlsldm relocation, letting the
+  // linker relax the sequence to initial- or local-exec when possible.
+  CALL_TLSGD,
+  CALL_TLSLDM,
+
   // A call to a division millicode routine (entered through $23).
   DIVCALL,
 

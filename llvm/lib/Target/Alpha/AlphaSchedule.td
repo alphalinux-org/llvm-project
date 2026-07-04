@@ -152,6 +152,7 @@ multiclass AlphaInstRW {
   // A register-to-register copy is whatever it lowers to, and is gone before
   // any scheduler sees it; give it the cheapest operate class.
   def : InstRW<[Wr_IALU], (instrs COPY)>;
+  def : InstRW<[Wr_JSR], (instrs JSRtlsgd, JSRtlsldm)>;
 }
 
 //===----------------------------------------------------------------------===//

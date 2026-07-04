@@ -65,6 +65,15 @@ def AlphaCallDirectLocal : SDNode<"AlphaISD::CALL_DIRECT_LOCAL", SDTNone,
                                   [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
                                    SDNPVariadic]>;
 
+// Calls to __tls_get_addr in the general- and local-dynamic sequences.  The jsr
+// carries a lituse_tlsgd or lituse_tlsldm relocation so the linker can relax.
+def AlphaCallTlsgd : SDNode<"AlphaISD::CALL_TLSGD", SDTNone,
+                            [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
+                             SDNPVariadic]>;
+def AlphaCallTlsldm : SDNode<"AlphaISD::CALL_TLSLDM", SDTNone,
+                             [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
+                              SDNPVariadic]>;
+
 // A call to a division millicode routine (__divq and friends): operands in
 // $24/$25, result in $27, entered through $23.  It clobbers only a few
 // registers, so it is modeled separately from a normal call.
@@ -870,6 +879,24 @@ def JSRdl : MbrForm<0b01, (outs), (ins),
                     [(AlphaCallDirectLocal)]> {
   let Ra = 26;
   let Rb = 27;
+}
+
+// The jsr to __tls_get_addr in a general- or local-dynamic sequence.  Encoded
+// like JSR, but the code emitter attaches a lituse_tlsgd or lituse_tlsldm
+// relocation so the linker can relax the sequence.
+let isCall = 1, Uses = [R27], Defs = [R26, R29], isCodeGenOnly = 1 in {
+def JSRtlsgd : MbrForm<0b01, (outs), (ins),
+                       "jsr $$26, ($$27)\n\tldgp $$29, 0($$26)",
+                       [(AlphaCallTlsgd)]> {
+  let Ra = 26;
+  let Rb = 27;
+}
+def JSRtlsldm : MbrForm<0b01, (outs), (ins),
+                        "jsr $$26, ($$27)\n\tldgp $$29, 0($$26)",
+                        [(AlphaCallTlsldm)]> {
+  let Ra = 26;
+  let Rb = 27;
+}
 }
 
 // A bare jsr word (no ldgp reload); the assembler emits it for `jsr $Ra, ($Rb)`
