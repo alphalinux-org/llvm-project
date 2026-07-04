@@ -35,6 +35,11 @@ enum Fixups {
   // A 16-bit GOT displacement to the general-dynamic TLS descriptor passed to
   // __tls_get_addr (R_ALPHA_TLSGD).
   fixup_alpha_tlsgd,
+  // The local-dynamic module descriptor (R_ALPHA_TLSLDM) and the high/low
+  // module-relative offsets that follow it (R_ALPHA_DTPRELHI/LO).
+  fixup_alpha_tlsldm,
+  fixup_alpha_dtprelhi,
+  fixup_alpha_dtprello,
 
   fixup_alpha_invalid,
   NumTargetFixupKinds = fixup_alpha_invalid - FirstTargetFixupKind
@@ -60,6 +65,12 @@ inline StringRef getSpecifierName(unsigned Kind) {
     return "gottprel";
   case fixup_alpha_tlsgd:
     return "tlsgd";
+  case fixup_alpha_tlsldm:
+    return "tlsldm";
+  case fixup_alpha_dtprelhi:
+    return "dtprelhi";
+  case fixup_alpha_dtprello:
+    return "dtprello";
   default:
     return "";
   }
