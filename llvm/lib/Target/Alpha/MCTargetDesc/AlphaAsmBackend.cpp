@@ -31,6 +31,7 @@ static uint64_t adjustFixupValue(unsigned Kind, uint64_t Value) {
   case Alpha::fixup_alpha_gprellow:
   case Alpha::fixup_alpha_tprello:
   case Alpha::fixup_alpha_gottprel:
+  case Alpha::fixup_alpha_tlsgd:
     return Value & 0xffff;
   case Alpha::fixup_alpha_gprelhigh:
   case Alpha::fixup_alpha_tprelhi:
@@ -53,6 +54,7 @@ public:
         {"fixup_alpha_gprelhigh", 0, 16, 0}, {"fixup_alpha_gprellow", 0, 16, 0},
         {"fixup_alpha_gpdisp", 0, 16, 0},    {"fixup_alpha_tprelhi", 0, 16, 0},
         {"fixup_alpha_tprello", 0, 16, 0},   {"fixup_alpha_gottprel", 0, 16, 0},
+        {"fixup_alpha_tlsgd", 0, 16, 0},
     };
     if (mc::isRelocation(Kind))
       return {};
@@ -75,7 +77,8 @@ public:
                        Kind == MCFixupKind(Alpha::fixup_alpha_gpdisp) ||
                        Kind == MCFixupKind(Alpha::fixup_alpha_tprelhi) ||
                        Kind == MCFixupKind(Alpha::fixup_alpha_tprello) ||
-                       Kind == MCFixupKind(Alpha::fixup_alpha_gottprel);
+                       Kind == MCFixupKind(Alpha::fixup_alpha_gottprel) ||
+                       Kind == MCFixupKind(Alpha::fixup_alpha_tlsgd);
     maybeAddReloc(F, Fixup, Target, Value, AlwaysReloc ? false : IsResolved);
     if (mc::isRelocation(Kind) || AlwaysReloc)
       return;

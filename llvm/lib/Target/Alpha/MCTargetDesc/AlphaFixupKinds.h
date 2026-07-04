@@ -32,6 +32,9 @@ enum Fixups {
   // A 16-bit GOT displacement to a thread-pointer-relative offset for
   // initial-exec TLS (R_ALPHA_GOTTPREL).
   fixup_alpha_gottprel,
+  // A 16-bit GOT displacement to the general-dynamic TLS descriptor passed to
+  // __tls_get_addr (R_ALPHA_TLSGD).
+  fixup_alpha_tlsgd,
 
   fixup_alpha_invalid,
   NumTargetFixupKinds = fixup_alpha_invalid - FirstTargetFixupKind

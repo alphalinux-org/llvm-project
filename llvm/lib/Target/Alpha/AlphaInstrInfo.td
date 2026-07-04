@@ -77,6 +77,10 @@ def AlphaTprelLo : SDNode<"AlphaISD::TPREL_LO", SDTIntBinOp>;
 def SDTAlphaGotTprel : SDTypeProfile<1, 1, [SDTCisVT<0, i64>, SDTCisPtrTy<1>]>;
 def AlphaGotTprel : SDNode<"AlphaISD::GOTTPREL", SDTAlphaGotTprel>;
 
+// General-dynamic TLS: the address of the __tls_get_addr descriptor in the GOT
+// (lda !tlsgd), passed to __tls_get_addr which returns the variable's address.
+def AlphaTlsgd : SDNode<"AlphaISD::TLSGD", SDTAlphaGotTprel>;
+
 //===----------------------------------------------------------------------===//
 // Operands and immediate predicates.
 //===----------------------------------------------------------------------===//
@@ -120,6 +124,7 @@ def gprellow_sym : SymOperand<"getGprelLowEncoding">;
 def tprelhi_sym : SymOperand<"getTprelHighEncoding">;
 def tprello_sym : SymOperand<"getTprelLowEncoding">;
 def gottprel_sym : SymOperand<"getGotTprelEncoding">;
+def tlsgd_sym : SymOperand<"getTlsgdEncoding">;
 // Retained alias so existing definitions read naturally.
 def symbol : SymOperand<"getGprelLowEncoding">;
 
@@ -553,6 +558,14 @@ def LDQtp : MFormD<0x29, (outs GPRC:$Rc), (ins gottprel_sym:$disp),
   let Rb = 29;
 }
 def : Pat<(AlphaGotTprel tglobaltlsaddr:$sym), (LDQtp tglobaltlsaddr:$sym)>;
+
+// General-dynamic: form the address of the tlsgd descriptor (lda !tlsgd).
+let hasSideEffects = 0, Uses = [R29], isCodeGenOnly = 1 in
+def LDAtlsgd : MFormD<0x08, (outs GPRC:$Rc), (ins tlsgd_sym:$disp),
+                      "lda $Rc, $disp($$29)\t\t!tlsgd", []> {
+  let Rb = 29;
+}
+def : Pat<(AlphaTlsgd tglobaltlsaddr:$sym), (LDAtlsgd tglobaltlsaddr:$sym)>;
 
 // A load from a thread-pointer-relative address folds the !tprello low part
 // into the load displacement, as for the GP-relative case.
