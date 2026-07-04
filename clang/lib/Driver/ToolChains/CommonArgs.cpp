@@ -9,6 +9,7 @@
 #include "clang/Driver/CommonArgs.h"
 #include "Arch/AArch64.h"
 #include "Arch/ARM.h"
+#include "Arch/Alpha.h"
 #include "Arch/CSKY.h"
 #include "Arch/LoongArch.h"
 #include "Arch/M68k.h"
@@ -860,6 +861,9 @@ void tools::getTargetFeatures(const Driver &D, const llvm::Triple &Triple,
   std::vector<StringRef> Features;
   switch (Triple.getArch()) {
   default:
+    break;
+  case llvm::Triple::alpha:
+    alpha::getAlphaTargetFeatures(D, Args, Features);
     break;
   case llvm::Triple::mips:
   case llvm::Triple::mipsel:

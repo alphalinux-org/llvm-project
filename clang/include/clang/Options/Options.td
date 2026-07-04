@@ -218,6 +218,8 @@ def m_hexagon_Features_Group : OptionGroup<"<hexagon features group>">,
                                Group<m_Group>, DocName<"Hexagon">;
 def m_sparc_Features_Group : OptionGroup<"<sparc features group>">,
                                Group<m_Group>, DocName<"SPARC">;
+def m_alpha_Features_Group : OptionGroup<"<alpha features group>">,
+                               Group<m_Group>, DocName<"Alpha">;
 // The features added by this group will not be added to target features.
 // These are explicitly handled.
 def m_hexagon_Features_HVX_Group : OptionGroup<"<hexagon features group>">,
@@ -7189,8 +7191,16 @@ def mno_nvs : Flag<["-"], "mno-nvs">, Group<m_hexagon_Features_Group>,
 def mcabac: Flag<["-"], "mcabac">, Group<m_hexagon_Features_Group>,
   HelpText<"Enable CABAC instructions">;
 
-// SPARC feature flags
+// Alpha feature flags
 let Flags = [TargetSpecific] in {
+def mbuild_constants : Flag<["-"], "mbuild-constants">,
+  Group<m_alpha_Features_Group>,
+  HelpText<"Build wide integer constants with code instead of loading them "
+           "from the constant pool (Alpha)">;
+def mno_build_constants : Flag<["-"], "mno-build-constants">,
+  Group<m_alpha_Features_Group>;
+
+// SPARC feature flags
 def mfpu : Flag<["-"], "mfpu">, Group<m_sparc_Features_Group>;
 def mno_fpu : Flag<["-"], "mno-fpu">, Group<m_sparc_Features_Group>;
 def mfsmuld : Flag<["-"], "mfsmuld">, Group<m_sparc_Features_Group>;
