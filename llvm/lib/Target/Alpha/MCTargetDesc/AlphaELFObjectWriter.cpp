@@ -44,6 +44,10 @@ protected:
       return ELF::R_ALPHA_GPRELLOW;
     case Alpha::fixup_alpha_gpdisp:
       return ELF::R_ALPHA_GPDISP;
+    case Alpha::fixup_alpha_tprelhi:
+      return ELF::R_ALPHA_TPRELHI;
+    case Alpha::fixup_alpha_tprello:
+      return ELF::R_ALPHA_TPRELLO;
     default:
       reportError(Fixup.getLoc(), "unsupported relocation type");
       return ELF::R_ALPHA_NONE;
@@ -51,11 +55,13 @@ protected:
   }
 
   bool needsRelocateWithSymbol(const MCValue &, unsigned Type) const override {
-    // The GOT/GP-relative relocations reference the symbol itself.
+    // The GOT/GP-relative and TLS relocations reference the symbol itself.
     switch (Type) {
     case ELF::R_ALPHA_LITERAL:
     case ELF::R_ALPHA_GPRELHIGH:
     case ELF::R_ALPHA_GPRELLOW:
+    case ELF::R_ALPHA_TPRELHI:
+    case ELF::R_ALPHA_TPRELLO:
       return true;
     default:
       return false;

@@ -70,6 +70,16 @@ public:
                                 const MCSubtargetInfo &STI) const {
     return getSymEncoding(MI, OpNo, Fixups, Alpha::fixup_alpha_gprelhigh);
   }
+  unsigned getTprelHighEncoding(const MCInst &MI, unsigned OpNo,
+                                SmallVectorImpl<MCFixup> &Fixups,
+                                const MCSubtargetInfo &STI) const {
+    return getSymEncoding(MI, OpNo, Fixups, Alpha::fixup_alpha_tprelhi);
+  }
+  unsigned getTprelLowEncoding(const MCInst &MI, unsigned OpNo,
+                               SmallVectorImpl<MCFixup> &Fixups,
+                               const MCSubtargetInfo &STI) const {
+    return getSymEncoding(MI, OpNo, Fixups, Alpha::fixup_alpha_tprello);
+  }
   unsigned getGprelLowEncoding(const MCInst &MI, unsigned OpNo,
                                SmallVectorImpl<MCFixup> &Fixups,
                                const MCSubtargetInfo &STI) const {
