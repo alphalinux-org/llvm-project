@@ -380,7 +380,13 @@ public:
     //    int* __va_reg;
     //    int __va_ndx;
     //} va_list;
-    XtensaABIBuiltinVaList
+    XtensaABIBuiltinVaList,
+
+    // typedef struct __va_list_tag {
+    //    char *__base;
+    //    int __offset;
+    // } va_list;
+    AlphaABIBuiltinVaList
   };
 
 protected:
