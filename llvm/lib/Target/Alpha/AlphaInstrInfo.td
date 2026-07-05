@@ -162,6 +162,17 @@ def u8imm : Operand<i64>;
 // An immediate that fits in the 8-bit operate literal field.
 def immUExt8 : ImmLeaf<i64, [{ return isUInt<8>(Imm); }]>;
 
+// The 26-bit function code of a PALcode call (call_pal <n>).
+def PalFnAsmOperand : AsmOperandClass {
+  let Name = "PalFn";
+  let PredicateMethod = "isPalFn";
+  let RenderMethod = "addImmOperands";
+  let DiagnosticString = "PALcode function code must be a 26-bit unsigned value";
+}
+def palfn : Operand<i64> {
+  let ParserMatchClass = PalFnAsmOperand;
+}
+
 // A memory address: base register plus 16-bit signed displacement, printed as
 // `disp($base)`.
 def MemAsmOperand : AsmOperandClass {
@@ -819,6 +830,31 @@ defm : GprelFold<tglobaladdr>;
 // Read the thread pointer into $0 via the rduniq PALcall.
 let Defs = [R0], hasSideEffects = 1, isCodeGenOnly = 1 in
 def RDUNIQ : PalForm<0x9e, (outs), (ins), "call_pal 0x9e", []>;
+
+//===----------------------------------------------------------------------===//
+// PALcode calls (assembler support).
+//===----------------------------------------------------------------------===//
+
+// The general form: call_pal with an explicit 26-bit function code.  The kernel
+// invokes privileged PALcode this way, passing the function number by value.
+let hasSideEffects = 1 in
+def CALL_PAL : PalCallForm<(outs), (ins palfn:$func), "call_pal $func", []>;
+
+// The PALcode functions GNU as gives mnemonics of their own.  Each is just
+// call_pal with a fixed function code.  Function numbers below 0x80 are
+// privileged and only a kernel may issue them -- halt and draina here -- while
+// 0x80 and above are callable from user code.
+class PalAlias<string mnem, int func> : InstAlias<mnem, (CALL_PAL func)>;
+def : PalAlias<"halt",    0x0000>;
+def : PalAlias<"draina",  0x0002>;
+def : PalAlias<"bpt",     0x0080>;
+def : PalAlias<"bugchk",  0x0081>;
+def : PalAlias<"callsys", 0x0083>;
+def : PalAlias<"chmk",    0x0083>;
+def : PalAlias<"imb",     0x0086>;
+def : PalAlias<"rduniq",  0x009e>;
+def : PalAlias<"wruniq",  0x009f>;
+def : PalAlias<"gentrap", 0x00aa>;
 
 // Thread-pointer-relative address parts: ldah !tprelhi / lda !tprello, formed
 // against the thread pointer instead of the global pointer.

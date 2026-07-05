@@ -61,6 +61,14 @@ public:
   bool isReg() const override { return Kind == Register; }
   bool isImm() const override { return Kind == Immediate; }
   bool isMem() const override { return Kind == Memory; }
+  // The PALcode function code is a 26-bit field with nowhere to put anything
+  // wider: without this, `call_pal 0x10000000' would assemble to call_pal 0.
+  bool isPalFn() const {
+    if (Kind != Immediate)
+      return false;
+    const auto *CE = dyn_cast<MCConstantExpr>(Imm.Val);
+    return CE && isUInt<26>(CE->getValue());
+  }
 
   StringRef getToken() const {
     assert(Kind == Token);
@@ -175,6 +183,13 @@ class AlphaAsmParser : public MCTargetAsmParser {
   bool matchRegister(StringRef Name, MCRegister &Reg);
 
 public:
+  enum AlphaMatchResultTy {
+    Match_Dummy = FIRST_TARGET_MATCH_RESULT_TY,
+#define GET_OPERAND_DIAGNOSTIC_TYPES
+#include "AlphaGenAsmMatcher.inc"
+#undef GET_OPERAND_DIAGNOSTIC_TYPES
+  };
+
   AlphaAsmParser(const MCSubtargetInfo &STI, MCAsmParser &P,
                  const MCInstrInfo &MII)
       : MCTargetAsmParser(STI, MII) {
@@ -500,6 +515,14 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     return Error(IDLoc, "unrecognized instruction mnemonic");
   case Match_InvalidOperand:
     return Error(IDLoc, "invalid operand for instruction");
+  default:
+    if (const char *Diag = getMatchKindDiag((AlphaMatchResultTy)Result)) {
+      SMLoc Loc = IDLoc;
+      if (ErrorInfo != ~0ULL && ErrorInfo < Operands.size())
+        Loc = Operands[ErrorInfo]->getStartLoc();
+      return Error(Loc, Diag);
+    }
+    break;
   }
   return Error(IDLoc, "failed to match instruction");
 }
