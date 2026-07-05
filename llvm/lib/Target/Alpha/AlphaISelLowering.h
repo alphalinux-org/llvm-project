@@ -239,6 +239,36 @@ public:
   bool decomposeMulByConstant(LLVMContext &Context, EVT VT,
                               SDValue C) const override;
 
+  // Truncating an integer to a narrower one keeps the low bits already in the
+  // register, so it costs nothing.
+  bool isTruncateFree(Type *Ty1, Type *Ty2) const override {
+    if (!Ty1->isIntegerTy() || !Ty2->isIntegerTy())
+      return false;
+    unsigned From = Ty1->getPrimitiveSizeInBits();
+    unsigned To = Ty2->getPrimitiveSizeInBits();
+    return From > To && From <= 64;
+  }
+  bool isTruncateFree(EVT VT1, EVT VT2) const override {
+    if (!VT1.isInteger() || !VT2.isInteger())
+      return false;
+    unsigned From = VT1.getSizeInBits();
+    unsigned To = VT2.getSizeInBits();
+    return From > To && From <= 64;
+  }
+
+  // A value narrower than a register is held sign-extended (addl/ldl and the
+  // like sign-extend), so a sign extension is a single instruction while a zero
+  // extension needs an extra zapnot; prefer the sign extension.
+  // Only i32 -> i64.  A 32-bit value is held sign-extended, so widening one is
+  // free -- ldl and addl already produce that form -- while zero-extending it
+  // costs a zapnot.  Every narrower width goes the other way: an i1 is already
+  // 0 or 1 so zero-extending it is free where sign-extending costs a subq, and
+  // an i8 or i16 zero-extends with a single zapnot but sign-extends with sextb
+  // or sextw only when BWX is present, and with an sll/sra pair otherwise.
+  bool isSExtCheaperThanZExt(EVT FromTy, EVT ToTy) const override {
+    return FromTy == MVT::i32 && ToTy == MVT::i64;
+  }
+
   SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
                                bool IsVarArg,
                                const SmallVectorImpl<ISD::InputArg> &Ins,
