@@ -442,6 +442,17 @@ def CMPLE  : CMP_rr<0x6d, "cmple">;
 def CMPULT : CMP_rr<0x1d, "cmpult">;
 def CMPULE : CMP_rr<0x3d, "cmpule">;
 
+// Immediate form: compare against an 8-bit unsigned literal (so a comparison
+// against a small constant, in particular zero, needs no separate materialize).
+class CMP_ri<bits<7> func, string mnem>
+    : OFormL<0x10, func, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
+             mnem # " $Ra, $lit, $Rc", []>;
+def CMPEQi  : CMP_ri<0x2d, "cmpeq">;
+def CMPLTi  : CMP_ri<0x4d, "cmplt">;
+def CMPLEi  : CMP_ri<0x6d, "cmple">;
+def CMPULTi : CMP_ri<0x1d, "cmpult">;
+def CMPULEi : CMP_ri<0x3d, "cmpule">;
+
 // Conditional move: `cmovne $Ra, $Rb, $Rc` sets $Rc = $Rb when $Ra != 0,
 // leaving $Rc unchanged otherwise.  With $Rc preset to the false value this
 // implements `select`.
@@ -1114,8 +1125,7 @@ def : Pat<(sext_inreg GPRC:$x, i16), (SRAi (SLLi GPRC:$x, 48), 48)>;
 // setcc.  Conditions without a direct instruction are formed by swapping the
 // operands (gt/ge) or inverting equality (ne).
 def : Pat<(setcc GPRC:$a, GPRC:$b, SETEQ),  (CMPEQ  GPRC:$a, GPRC:$b)>;
-def : Pat<(setcc GPRC:$a, GPRC:$b, SETNE),  (XOR (CMPEQ GPRC:$a, GPRC:$b),
-                                                 (LDA 1, R31))>;
+def : Pat<(setcc GPRC:$a, GPRC:$b, SETNE),  (XORi (CMPEQ GPRC:$a, GPRC:$b), 1)>;
 def : Pat<(setcc GPRC:$a, GPRC:$b, SETLT),  (CMPLT  GPRC:$a, GPRC:$b)>;
 def : Pat<(setcc GPRC:$a, GPRC:$b, SETLE),  (CMPLE  GPRC:$a, GPRC:$b)>;
 def : Pat<(setcc GPRC:$a, GPRC:$b, SETGT),  (CMPLT  GPRC:$b, GPRC:$a)>;
@@ -1124,6 +1134,22 @@ def : Pat<(setcc GPRC:$a, GPRC:$b, SETULT), (CMPULT GPRC:$a, GPRC:$b)>;
 def : Pat<(setcc GPRC:$a, GPRC:$b, SETULE), (CMPULE GPRC:$a, GPRC:$b)>;
 def : Pat<(setcc GPRC:$a, GPRC:$b, SETUGT), (CMPULT GPRC:$b, GPRC:$a)>;
 def : Pat<(setcc GPRC:$a, GPRC:$b, SETUGE), (CMPULE GPRC:$b, GPRC:$a)>;
+
+// A comparison against a small unsigned constant (notably zero) folds the
+// constant into the compare instead of materializing it.
+def : Pat<(setcc GPRC:$a, immUExt8:$c, SETEQ),  (CMPEQi  GPRC:$a, immUExt8:$c)>;
+def : Pat<(setcc GPRC:$a, immUExt8:$c, SETNE),  (XORi (CMPEQi GPRC:$a, immUExt8:$c),
+                                                      1)>;
+def : Pat<(setcc GPRC:$a, immUExt8:$c, SETLT),  (CMPLTi  GPRC:$a, immUExt8:$c)>;
+def : Pat<(setcc GPRC:$a, immUExt8:$c, SETLE),  (CMPLEi  GPRC:$a, immUExt8:$c)>;
+def : Pat<(setcc GPRC:$a, immUExt8:$c, SETULT), (CMPULTi GPRC:$a, immUExt8:$c)>;
+def : Pat<(setcc GPRC:$a, immUExt8:$c, SETULE), (CMPULEi GPRC:$a, immUExt8:$c)>;
+
+// x > 0 swaps its operands to cmplt 0, x, putting zero in the first (register)
+// position where the immediate form cannot hold it; use the zero register.
+// (x >= 0 and unsigned x > 0 are canonicalized to a sign-bit test and x != 0
+// before selection, so they need no pattern here.)
+def : Pat<(setcc GPRC:$a, 0, SETGT), (CMPLT R31, GPRC:$a)>;
 
 // Ordered floating-point comparisons.  The compare leaves 2.0 or 0.0 in an FP
 // register; moving those bits to an integer register and shifting right by 62
