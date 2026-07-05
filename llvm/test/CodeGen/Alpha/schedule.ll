@@ -26,6 +26,24 @@ define i64 @imul_hide(i64 %a, i64 %b, i64 %c, i64 %d, i64 %e) {
   ret i64 %r
 }
 
+; A 32-bit multiply takes the multiplier just as a 64-bit one does, so the
+; scheduler starts it first rather than leaving it behind the independent adds.
+; An unmapped mull would be modelled as a one-cycle operate with no functional
+; unit, which is what that ordering would say.
+; CHECK-LABEL: imul32_hide:
+; CHECK:        %bb.0:
+; INORDER-NEXT: mull
+; INORDER-NEXT: addq
+; CHECK:        ret
+define i64 @imul32_hide(i32 %a, i32 %b, i64 %x, i64 %y) {
+  %m = mul i32 %a, %b
+  %s = sext i32 %m to i64
+  %p = add i64 %x, %y
+  %q = add i64 %p, %x
+  %r = add i64 %s, %q
+  ret i64 %r
+}
+
 ; CHECK-LABEL: fdiv_hide:
 ; CHECK:        %bb.0:
 ; INORDER-NEXT: divt
