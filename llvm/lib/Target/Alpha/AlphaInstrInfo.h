@@ -77,6 +77,13 @@ public:
   // instruction until here so that no other update of the same quadword can be
   // scheduled between its load and its store.
   bool expandPostRAPseudo(MachineInstr &MI) const override;
+
+  // The entry ldgp must stay the function's first instruction: its !gpdisp
+  // relocation assumes the procedure value ($27) equals the ldah's address, so
+  // nothing may be scheduled in front of it.
+  bool isSchedulingBoundary(const MachineInstr &MI,
+                            const MachineBasicBlock *MBB,
+                            const MachineFunction &MF) const override;
 };
 
 } // end namespace llvm

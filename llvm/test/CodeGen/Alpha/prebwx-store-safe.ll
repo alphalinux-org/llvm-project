@@ -8,8 +8,8 @@
 ; quadword.  The aligned address and positioned field are computed once.
 
 ; CHECK-LABEL: storei8:
-; CHECK:       bic $16, 7, [[A:\$[0-9]+]]
-; CHECK:       insbl $17, $16, [[I:\$[0-9]+]]
+; CHECK-DAG:   bic $16, 7, [[A:\$[0-9]+]]
+; CHECK-DAG:   insbl $17, $16, [[I:\$[0-9]+]]
 ; CHECK:       [[LOOP:\.LBB[0-9_]+]]:
 ; CHECK-NEXT:  ldq_l {{\$[0-9]+}}, 0([[A]])
 ; CHECK-NEXT:  mskbl {{\$[0-9]+}}, $16, {{\$[0-9]+}}
