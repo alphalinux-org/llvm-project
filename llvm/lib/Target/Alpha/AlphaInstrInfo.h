@@ -84,6 +84,12 @@ public:
   bool isSchedulingBoundary(const MachineInstr &MI,
                             const MachineBasicBlock *MBB,
                             const MachineFunction &MF) const override;
+
+  // Reassociate chains of these operations (via the machine combiner) to
+  // shorten the critical path on the out-of-order 21264.
+  bool useMachineCombiner() const override { return true; }
+  bool isAssociativeAndCommutative(const MachineInstr &Inst,
+                                   bool Invert) const override;
 };
 
 } // end namespace llvm
