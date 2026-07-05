@@ -1024,8 +1024,31 @@ def : FCmpPat<SETGT, vt, CMPTLT, (vt $y), (vt $x)>;
 def : FCmpPat<SETGE, vt, CMPTLE, (vt $y), (vt $x)>;
 }
 
-// Floating-point select: move the 0/1 condition into an FP register (its bits
-// are zero or non-zero) and use fcmovne to pick the true value.
+// A floating-point select whose condition is itself a floating-point comparison
+// feeds the comparison result (2.0 for true, 0.0 for false) straight into
+// fcmovne, which tests against zero -- no round trip through an integer register.
+class FSelPat<ValueType svt, CondCode cc, ValueType cvt, Instruction cmp,
+              dag a, dag b>
+    : Pat<(svt (select (i64 (setcc cvt:$x, cvt:$y, cc)), svt:$t, svt:$f)),
+          (FCMOVNE svt:$f, (cmp a, b), svt:$t)>;
+
+let AddedComplexity = 10 in
+foreach svt = [f32, f64] in
+foreach cvt = [f32, f64] in {
+def : FSelPat<svt, SETOEQ, cvt, CMPTEQ, (cvt $x), (cvt $y)>;
+def : FSelPat<svt, SETOLT, cvt, CMPTLT, (cvt $x), (cvt $y)>;
+def : FSelPat<svt, SETOLE, cvt, CMPTLE, (cvt $x), (cvt $y)>;
+def : FSelPat<svt, SETOGT, cvt, CMPTLT, (cvt $y), (cvt $x)>;
+def : FSelPat<svt, SETOGE, cvt, CMPTLE, (cvt $y), (cvt $x)>;
+def : FSelPat<svt, SETEQ, cvt, CMPTEQ, (cvt $x), (cvt $y)>;
+def : FSelPat<svt, SETLT, cvt, CMPTLT, (cvt $x), (cvt $y)>;
+def : FSelPat<svt, SETLE, cvt, CMPTLE, (cvt $x), (cvt $y)>;
+def : FSelPat<svt, SETGT, cvt, CMPTLT, (cvt $y), (cvt $x)>;
+def : FSelPat<svt, SETGE, cvt, CMPTLE, (cvt $y), (cvt $x)>;
+}
+
+// Otherwise move the 0/1 condition into an FP register (its bits are zero or
+// non-zero) and use fcmovne to pick the true value.
 def : Pat<(f32 (select GPRC:$c, FPRC:$t, FPRC:$f)),
           (FCMOVNE FPRC:$f, (MOVi2f GPRC:$c), FPRC:$t)>;
 def : Pat<(f64 (select GPRC:$c, FPRC:$t, FPRC:$f)),
