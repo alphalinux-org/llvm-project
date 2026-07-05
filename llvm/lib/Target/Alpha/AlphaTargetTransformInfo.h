@@ -51,6 +51,15 @@ public:
     return TTI::PSK_Software;
   }
 
+  // CoroSplit asks before it marks a symmetric transfer musttail, which is a
+  // guarantee selection has to be able to keep: an indirect callee runs on an
+  // unknown global pointer, so a tail jump to it is refused there and the
+  // musttail would be a fatal error.  Answering for the call site lets
+  // CoroSplit fall back to returning to the ramp function instead.
+  bool supportsTailCallFor(const CallBase *CB) const override {
+    return TLI->supportsTailCallFor(CB);
+  }
+
   // A switch lookup table is a table of values in .rodata indexed by the
   // switch operand.  Reaching it costs a gp-relative address -- an ldah/lda
   // pair -- before the load, which is three instructions before the branch

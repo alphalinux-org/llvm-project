@@ -37,6 +37,10 @@ enum NodeType : unsigned {
   // A function call through the procedure value in $27.
   CALL,
 
+  // A tail call: jump to the callee (procedure value in $27) without saving a
+  // return address, so it returns straight to our caller.
+  TC_RETURN,
+
   // A direct call: like CALL, but carries the callee symbol so the jsr can be
   // tagged with a branch-prediction hint and a lituse_jsr relocation.
   CALL_DIRECT,
@@ -272,7 +276,37 @@ public:
   SDValue LowerCall(CallLoweringInfo &CLI,
                     SmallVectorImpl<SDValue> &InVals) const override;
 
+  // Let CodeGenPrepare duplicate a return into a tail-marked call's block so
+  // the call lands in tail position; LowerCall applies the real eligibility
+  // checks.
+  bool mayBeEmittedAsTailCall(const CallInst *CI) const override {
+    return CI->isTailCall();
+  }
+
+  // True if a call in tail position could be selected as a tail jump.  This
+  // answers for the IR call site, before instruction selection makes the real
+  // decision in isEligibleForTailCallOptimization, so that CoroSplit can tell
+  // whether a symmetric transfer may be marked musttail.  It has to answer no
+  // wherever selection would, because a musttail call refused there is a fatal
+  // error rather than a missed optimization; answering no where selection
+  // would have said yes only costs the tail jump.
+  bool supportsTailCallFor(const CallBase *CB) const;
+
 private:
+  // A call in tail position can reuse the caller's frame and return slot when
+  // it passes nothing on the stack, passes nothing that lives in the frame we
+  // are about to tear down, shares the caller's C calling convention, and runs
+  // on the caller's global pointer.
+  bool isEligibleForTailCallOptimization(
+      CallingConv::ID CallerCC, CallingConv::ID CalleeCC, bool IsVarArg,
+      unsigned NumStackBytes, const SmallVectorImpl<ISD::OutputArg> &Outs,
+      SDValue Callee) const;
+
+  // True if a call to GV is known to run on this function's global pointer, so
+  // that a tail jump to it returns to our caller with $29 still holding the
+  // caller's gp.
+  bool calleeSharesGP(const GlobalValue &GV) const;
+
   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerGlobalTLSAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
