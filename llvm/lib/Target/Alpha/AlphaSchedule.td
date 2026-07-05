@@ -169,6 +169,7 @@ multiclass AlphaInstRW {
   def : InstRW<[Wr_JSR], (instrs TCRETURN)>;
   def : InstRW<[Wr_JSR], (instrs BSR)>;
   def : InstRW<[Wr_ICmp], (instrs CMPEQi, CMPLEi, CMPLTi, CMPULEi, CMPULTi)>;
+  def : InstRW<[Wr_Misc], (instrs CALL_PAL)>;
 }
 
 //===----------------------------------------------------------------------===//
