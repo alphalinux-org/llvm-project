@@ -68,6 +68,12 @@ public:
   // instruction until here so that no other update of the same quadword can be
   // scheduled between its load and its store.
   bool expandPostRAPseudo(MachineInstr &MI) const override;
+
+  // Reassociate chains of these operations (via the machine combiner) to
+  // shorten the critical path on the out-of-order 21264.
+  bool useMachineCombiner() const override { return true; }
+  bool isAssociativeAndCommutative(const MachineInstr &Inst,
+                                   bool Invert) const override;
 };
 
 } // end namespace llvm

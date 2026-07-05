@@ -85,6 +85,7 @@ public:
 
   void addIRPasses() override;
   bool addInstSelector() override;
+  bool addILPOpts() override;
 };
 } // end anonymous namespace
 
@@ -92,6 +93,12 @@ void AlphaPassConfig::addIRPasses() {
   // Expand atomic operations (inserting the memory barriers this target uses).
   addPass(createAtomicExpandLegacyPass());
   TargetPassConfig::addIRPasses();
+}
+
+bool AlphaPassConfig::addILPOpts() {
+  // Reassociate operation chains to shorten the critical path.
+  addPass(&MachineCombinerID);
+  return true;
 }
 
 bool AlphaPassConfig::addInstSelector() {

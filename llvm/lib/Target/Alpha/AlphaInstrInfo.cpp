@@ -270,3 +270,30 @@ bool AlphaInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   MBB.erase(MI);
   return true;
 }
+
+bool AlphaInstrInfo::isAssociativeAndCommutative(const MachineInstr &Inst,
+                                                 bool Invert) const {
+  // The inverse (subtract) forms are not modeled for reassociation.
+  if (Invert)
+    return false;
+  switch (Inst.getOpcode()) {
+  // 64-bit integer add, multiply and the bitwise operations are associative
+  // and commutative.
+  case Alpha::ADDQ:
+  case Alpha::MULQ:
+  case Alpha::AND:
+  case Alpha::BIS:
+  case Alpha::XOR:
+    return true;
+  // Floating-point add and multiply reassociate only when the fast-math flags
+  // permit reordering and sign-of-zero changes.
+  case Alpha::ADDS:
+  case Alpha::ADDT:
+  case Alpha::MULS:
+  case Alpha::MULT:
+    return Inst.getFlag(MachineInstr::MIFlag::FmReassoc) &&
+           Inst.getFlag(MachineInstr::MIFlag::FmNsz);
+  default:
+    return false;
+  }
+}
