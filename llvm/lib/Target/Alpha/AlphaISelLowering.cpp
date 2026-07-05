@@ -139,7 +139,10 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   // umulh provides the high half of an unsigned 64x64 multiply; the signed high
   // multiply is expanded in terms of it.
   setOperationAction(ISD::MULHU, MVT::i64, Legal);
-  setOperationAction(ISD::MULHS, MVT::i64, Expand);
+  // No signed high-multiply instruction, but synthesizing one from umulh is
+  // still far cheaper than the millicode divide, so keep MULHS available (as a
+  // custom expansion) to enable magic-number signed division by a constant.
+  setOperationAction(ISD::MULHS, MVT::i64, Custom);
   setOperationAction(ISD::SMUL_LOHI, MVT::i64, Expand);
   setOperationAction(ISD::UMUL_LOHI, MVT::i64, Expand);
 
@@ -458,6 +461,8 @@ SDValue AlphaTargetLowering::LowerOperation(SDValue Op,
     return LowerVACOPY(Op, DAG);
   case ISD::BITCAST:
     return LowerBITCAST(Op, DAG);
+  case ISD::MULHS:
+    return LowerMULHS(Op, DAG);
   case ISD::SDIV:
   case ISD::UDIV:
   case ISD::SREM:
@@ -477,6 +482,27 @@ SDValue AlphaTargetLowering::LowerOperation(SDValue Op,
   default:
     llvm_unreachable("unexpected operation to lower");
   }
+}
+
+SDValue AlphaTargetLowering::LowerMULHS(SDValue Op, SelectionDAG &DAG) const {
+  // umulh gives the high half of the unsigned product; correct it to the signed
+  // high half:  mulhs(a,b) = umulh(a,b) - (a<0 ? b : 0) - (b<0 ? a : 0).
+  // sra by 63 yields all-ones for a negative operand and zero otherwise, so the
+  // masked term is b (resp. a) exactly when a (resp. b) is negative.  When b is
+  // a positive constant (the magic-number division case) the second term folds
+  // away entirely.
+  SDLoc DL(Op);
+  EVT VT = MVT::i64;
+  SDValue A = Op.getOperand(0);
+  SDValue B = Op.getOperand(1);
+  SDValue Sh = DAG.getConstant(63, DL, VT);
+  SDValue Hi = DAG.getNode(ISD::MULHU, DL, VT, A, B);
+  SDValue TA =
+      DAG.getNode(ISD::AND, DL, VT, DAG.getNode(ISD::SRA, DL, VT, A, Sh), B);
+  SDValue TB =
+      DAG.getNode(ISD::AND, DL, VT, DAG.getNode(ISD::SRA, DL, VT, B, Sh), A);
+  Hi = DAG.getNode(ISD::SUB, DL, VT, Hi, TA);
+  return DAG.getNode(ISD::SUB, DL, VT, Hi, TB);
 }
 
 SDValue AlphaTargetLowering::LowerDivRem(SDValue Op, SelectionDAG &DAG) const {
