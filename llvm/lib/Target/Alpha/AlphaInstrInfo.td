@@ -52,6 +52,11 @@ def AlphaCall : SDNode<"AlphaISD::CALL", SDTNone,
                        [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
                         SDNPVariadic]>;
 
+// A tail call: jump to the callee (procedure value in $27) without saving a
+// return address.
+def AlphaTCReturn : SDNode<"AlphaISD::TC_RETURN", SDTNone,
+                           [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
+
 // A direct call: identical, but the leading operand is the callee symbol so the
 // jsr can carry the hint and lituse_jsr relocations.
 def SDT_AlphaCallDirect : SDTypeProfile<0, 1, [SDTCisVT<0, i64>]>;
@@ -1545,11 +1550,11 @@ def ATOMIC_CMPXCHG_I16 : AtomicCAS<AtomicCASvt<i16>>;
 def ATOMIC_CMPXCHG_I8  : AtomicCAS<AtomicCASvt<i8>>;
 
 // Subroutine return: the canonical form `ret $31, ($26), 1` is printed as the
-// bare `ret` (matching gas), which also lets the assembler parse it.
-// $26 is not listed as a use: the epilogue reloads it as a frame-destroy
-// instruction (so it survives), and leaving it off keeps the return address,
-// which is only materialized in the encoding, from reading as undefined
-// before the epilogue is inserted (mirrors RISCV's PseudoRET).
+// bare `ret` (matching gas), which also lets the assembler parse it.  $26 is
+// not listed as a use: the epilogue reloads it as a frame-destroy instruction
+// (so it survives), and leaving it off keeps the return address, which is only
+// materialized in the encoding, from reading as undefined before the epilogue
+// is inserted (mirrors RISCV's PseudoRET).
 let isReturn = 1, isTerminator = 1, isBarrier = 1 in
 def RET : MbrForm<0b10, (outs), (ins), "ret", [(AlphaRet)]> {
   let Ra = 31;
@@ -1603,6 +1608,16 @@ let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1,
     Ra = 31 in
 def JMP : MbrForm<0b00, (outs), (ins parenGPR:$Rb), "jmp $$31, $Rb, 0", []>;
 def : Pat<(brind GPRC:$r), (JMP GPRC:$r)>;
+
+// Tail call: jump to the procedure value in $27 without saving a return
+// address, so the callee returns straight to our caller.  The epilogue, which
+// tears down the frame and restores $26, is inserted before this terminator.
+let isCall = 1, isTerminator = 1, isReturn = 1, isBarrier = 1, Uses = [R27] in
+def TCRETURN : MbrForm<0b00, (outs), (ins), "jmp $$31, ($$27), 0",
+                       [(AlphaTCReturn)]> {
+  let Ra = 31;
+  let Rb = 27;
+}
 
 //===----------------------------------------------------------------------===//
 // GAS-compatible pseudo-instruction aliases.
