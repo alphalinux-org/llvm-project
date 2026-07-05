@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "Alpha.h"
+#include "AlphaMachineFunctionInfo.h"
 #include "AlphaTargetMachine.h"
 #include "MCTargetDesc/AlphaInstPrinter.h"
 #include "MCTargetDesc/AlphaMCTargetDesc.h"
@@ -24,6 +25,7 @@
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCSymbol.h"
+#include "llvm/MC/MCSymbolELF.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/ErrorHandling.h"
 
@@ -42,6 +44,8 @@ public:
   StringRef getPassName() const override { return "Alpha Assembly Printer"; }
 
   void emitStartOfAsmFile(Module &M) override;
+  void emitFunctionBodyStart() override;
+  void emitFunctionBodyEnd() override;
   void emitInstruction(const MachineInstr *MI) override;
 
   bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
@@ -77,6 +81,32 @@ void AlphaAsmPrinter::emitStartOfAsmFile(Module &M) {
   else if (Features[Alpha::FeatureBWX])
     Arch = "ev56";
   OutStreamer->emitRawText(Twine("\t.arch ") + Arch);
+}
+
+// Record the function's procedure kind in its st_other, as GNU as does from
+// .ent/.prologue: a function that establishes its own global pointer advertises
+// the standard gp load (STO_ALPHA_STD_GPLOAD) so a caller reaching it with a
+// same-gp branch (R_ALPHA_BRSGP) may skip the gp-loading prologue; one that
+// runs on the caller's gp needs no procedure value (STO_ALPHA_NOPV).
+void AlphaAsmPrinter::emitFunctionBodyStart() {
+  const unsigned STO_ALPHA_NOPV = 0x80, STO_ALPHA_STD_GPLOAD = 0x88;
+  bool UsesGP = MF->getInfo<AlphaMachineFunctionInfo>()->usesGP();
+  auto *Sym = static_cast<MCSymbolELF *>(CurrentFnSym);
+  Sym->setOther((Sym->getOther() & ~STO_ALPHA_STD_GPLOAD) |
+                (UsesGP ? STO_ALPHA_STD_GPLOAD : STO_ALPHA_NOPV));
+  // For textual output an external assembler sets st_other from .ent/.prologue,
+  // so emit those (.prologue 1 = standard gp load, 0 = runs on the caller's
+  // gp).
+  if (OutStreamer->hasRawTextSupport()) {
+    OutStreamer->emitRawText(Twine("\t.ent ") + CurrentFnSym->getName());
+    OutStreamer->emitRawText(Twine("\t.prologue ") + (UsesGP ? "1" : "0"));
+  }
+}
+
+void AlphaAsmPrinter::emitFunctionBodyEnd() {
+  // Close the .ent opened above so an external assembler pairs them.
+  if (OutStreamer->hasRawTextSupport())
+    OutStreamer->emitRawText(Twine("\t.end ") + CurrentFnSym->getName());
 }
 
 MCOperand AlphaAsmPrinter::lowerOperand(const MachineOperand &MO) const {
