@@ -12,6 +12,7 @@
 
 #include "AlphaFixupKinds.h"
 #include "AlphaMCTargetDesc.h"
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
@@ -219,6 +220,22 @@ void AlphaMCCodeEmitter::encodeInstruction(const MCInst &MI,
                                            SmallVectorImpl<char> &CB,
                                            SmallVectorImpl<MCFixup> &Fixups,
                                            const MCSubtargetInfo &STI) const {
+#ifndef NDEBUG
+  // The multi-instruction pseudos below declare their length in
+  // AlphaInstrInfo.td and AlphaInstrInfo::getInstSizeInBytes hands it to branch
+  // relaxation, which uses it to decide whether a 21-bit branch displacement
+  // reaches.  A declared size smaller than what is written here makes
+  // relaxation decline to relax a branch that does not actually reach, so hold
+  // the two together.  The many early returns below are why this is a scope
+  // guard.
+  size_t StartSize = CB.size();
+  llvm::scope_exit CheckSize([&] {
+    unsigned Declared = MCII.get(MI.getOpcode()).getSize();
+    assert((Declared == 0 || CB.size() - StartSize == Declared) &&
+           "emitted byte count disagrees with the instruction's Size in "
+           "AlphaInstrInfo.td");
+  });
+#endif
   switch (MI.getOpcode()) {
   case Alpha::LDGP:
     // ldgp $29, 0($27): establish the GP from the procedure value.
