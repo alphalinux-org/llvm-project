@@ -68,6 +68,48 @@ define i64 @mul11(i64 %a) {
   ret i64 %r
 }
 
+; 25 = 5 * 5 factors into two scaled adds instead of a multiply.
+; CHECK-LABEL: mul25:
+; CHECK-NOT:  mulq
+; CHECK:      s4addq $16, $16, $0
+; CHECK-NEXT: s4addq $0, $0, $0
+; CHECK-NEXT: ret
+define i64 @mul25(i64 %a) {
+  %r = mul i64 %a, 25
+  ret i64 %r
+}
+
+; 27 = 9 * 3 peels the other two factors: s8addq for the 9, s4subq for the 3.
+; CHECK-LABEL: mul27:
+; CHECK-NOT:  mulq
+; CHECK:      s8addq $16, $16, $0
+; CHECK-NEXT: s4subq $0, $0, $0
+; CHECK-NEXT: ret
+define i64 @mul27(i64 %a) {
+  %r = mul i64 %a, 27
+  ret i64 %r
+}
+
+; 45 = 9 * 5 mixes the two adds.
+; CHECK-LABEL: mul45:
+; CHECK-NOT:  mulq
+; CHECK:      s8addq $16, $16, $0
+; CHECK-NEXT: s4addq $0, $0, $0
+; CHECK-NEXT: ret
+define i64 @mul45(i64 %a) {
+  %r = mul i64 %a, 45
+  ret i64 %r
+}
+
+; 100 = 4 * 25: still a short shift/add chain, no multiply.
+; CHECK-LABEL: mul100:
+; CHECK-NOT:  mulq
+; CHECK:      ret
+define i64 @mul100(i64 %a) {
+  %r = mul i64 %a, 100
+  ret i64 %r
+}
+
 ; A constant whose shift/add chain would be longer than the multiplier keeps
 ; the multiply (10000 = 2^4 * 5^4).
 ; CHECK-LABEL: mul10000:
@@ -102,5 +144,28 @@ define signext i32 @mul5_32(i32 %a) {
 ; CHECK-NEXT: ret
 define i64 @muln5(i64 %a) {
   %r = mul i64 %a, -5
+  ret i64 %r
+}
+
+; The factoring path takes the constant's magnitude and negates the result, as
+; the generic decomposition one commit earlier already does.  Taking the
+; constant zero-extended would leave a negative one astronomically large, its
+; estimated chain past the cut-off, and the multiply for the multiplier.
+; CHECK-LABEL: muln25:
+; CHECK:      s4addq $16, $16, $0
+; CHECK-NEXT: s4addq $0, $0, $0
+; CHECK-NEXT: subq $31, $0, $0
+; CHECK-NEXT: ret
+define i64 @muln25(i64 %a) {
+  %r = mul i64 %a, -25
+  ret i64 %r
+}
+
+; CHECK-LABEL: muln100:
+; CHECK-NOT:  mulq
+; CHECK:      subq $31, $0, $0
+; CHECK-NEXT: ret
+define i64 @muln100(i64 %a) {
+  %r = mul i64 %a, -100
   ret i64 %r
 }
