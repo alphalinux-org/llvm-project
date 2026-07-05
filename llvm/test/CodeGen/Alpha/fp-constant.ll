@@ -29,3 +29,18 @@ define double @addpi(double %x) {
   %r = fadd double %x, 0x400921FB54442D18
   ret double %r
 }
+
+; A constant that would be a denormal as an f32 must stay an f64, even though it
+; is exactly representable: lds maps an S_floating exponent of zero to zero, so
+; a denormal read back that way is not the value that was written.  This one is
+; __FLT_MIN__ / 2.
+; CHECK-LABEL: adddenormal:
+; CHECK:       ldah {{.*}}!gprelhigh
+; CHECK:       ldt $f0, {{.*}}!gprellow
+; CHECK-NOT:   lds
+; CHECK:       addt $f16, $f0, $f0
+; CHECK:       ret
+define double @adddenormal(double %x) {
+  %r = fadd double %x, 0x3800000000000000
+  ret double %r
+}
