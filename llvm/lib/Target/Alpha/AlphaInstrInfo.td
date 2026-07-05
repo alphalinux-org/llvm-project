@@ -1663,6 +1663,13 @@ let isBranch = 1, isTerminator = 1, isBarrier = 1, Ra = 31 in
 def BR : BForm<0x30, (outs), (ins brtarget:$target), "br $$31, $target",
                [(br bb:$target)]>;
 
+// PC-relative subroutine branch: `bsr $23, target` saves the return address in
+// $23 (a caller-saved temporary) and branches.  Used by the machine outliner to
+// call an outlined function without loading its address through the GOT; the
+// outlined function returns with `jmp $31, ($23)`.
+let isCall = 1, Ra = 23, Defs = [R23], isCodeGenOnly = 1 in
+def BSR : BForm<0x34, (outs), (ins brtarget:$target), "bsr $$23, $target", []>;
+
 // Conditional branches test a register against zero.  The relational forms
 // carry a signed interpretation of the register value.
 let isBranch = 1, isTerminator = 1 in {
