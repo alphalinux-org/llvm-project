@@ -51,6 +51,16 @@ BitVector AlphaRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   // $28 is the assembler/codegen scratch ($at), used to build large stack
   // offsets that do not fit a 16-bit displacement.
   Reserved.set(Alpha::R28);
+
+  const AlphaSubtarget &ST = MF.getSubtarget<AlphaSubtarget>();
+  // Integer registers reserved from allocation with -ffixed-$<n>.
+  for (MCPhysReg Reg : Alpha::GPRCRegClass)
+    if (ST.isRegisterReserved(Reg))
+      Reserved.set(Reg);
+  // -mno-fp-regs: keep the whole floating-point file out of allocation.
+  if (ST.hasNoFPRegs())
+    for (MCPhysReg Reg : Alpha::FPRCRegClass)
+      Reserved.set(Reg);
   return Reserved;
 }
 

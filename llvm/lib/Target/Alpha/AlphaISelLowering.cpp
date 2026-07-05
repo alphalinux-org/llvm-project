@@ -32,10 +32,15 @@ using namespace llvm;
 AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
                                          const AlphaSubtarget &STI)
     : TargetLowering(TM, STI), Subtarget(STI) {
-  // Set up the register classes.
+  // Set up the register classes.  With -mno-fp-regs the floating-point file is
+  // not available at all, so no floating type has a register class and every
+  // floating operation is softened into a libcall -- which is what GCC's
+  // -mno-fp-regs does, and what the kernel this option exists for expects.
   addRegisterClass(MVT::i64, &Alpha::GPRCRegClass);
-  addRegisterClass(MVT::f32, &Alpha::FPRCRegClass);
-  addRegisterClass(MVT::f64, &Alpha::FPRCRegClass);
+  if (!STI.hasNoFPRegs()) {
+    addRegisterClass(MVT::f32, &Alpha::FPRCRegClass);
+    addRegisterClass(MVT::f64, &Alpha::FPRCRegClass);
+  }
 
   setStackPointerRegisterToSaveRestore(Alpha::R30);
 
@@ -94,8 +99,12 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   // Bit-cast between f32 and i32 uses the single-precision integer/FP move
   // (itofs/ftois) rather than a stack bounce.  i32 is illegal, so the i32
   // result form is handled in ReplaceNodeResults and the f32 result form here.
-  setOperationAction(ISD::BITCAST, MVT::f32, Custom);
-  setOperationAction(ISD::BITCAST, MVT::i32, Custom);
+  // With no floating registers the value is already in an integer one and the
+  // bit-cast is nothing at all, so the moves must not be asked for.
+  if (!STI.hasNoFPRegs()) {
+    setOperationAction(ISD::BITCAST, MVT::f32, Custom);
+    setOperationAction(ISD::BITCAST, MVT::i32, Custom);
+  }
   for (MVT VT : {MVT::i16, MVT::i32}) {
     setLoadExtAction(ISD::EXTLOAD, MVT::i64, VT, Custom);
     setLoadExtAction(ISD::ZEXTLOAD, MVT::i64, VT, Custom);
