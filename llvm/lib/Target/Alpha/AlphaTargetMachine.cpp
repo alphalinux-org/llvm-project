@@ -98,8 +98,8 @@ public:
 
   void addIRPasses() override;
   bool addInstSelector() override;
-  void addPreEmitPass() override;
   bool addILPOpts() override;
+  void addPreEmitPass() override;
 };
 } // end anonymous namespace
 
@@ -122,6 +122,8 @@ void AlphaPassConfig::addPreEmitPass() {
   // spill, a reload or a reordering placed there makes the store conditional
   // fail every time round the loop.
   addPass(createAlphaExpandAtomicPseudo());
+  // Rewrite branches whose target is beyond the 21-bit displacement.
+  addPass(&BranchRelaxationPassID);
 }
 
 bool AlphaPassConfig::addInstSelector() {

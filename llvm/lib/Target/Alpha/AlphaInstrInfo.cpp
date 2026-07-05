@@ -7,15 +7,20 @@
 //===----------------------------------------------------------------------===//
 
 #include "AlphaInstrInfo.h"
+#include "AlphaMachineFunctionInfo.h"
 #include "AlphaSubtarget.h"
 #include "MCTargetDesc/AlphaMCTargetDesc.h"
+#include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineInstrBundle.h"
 #include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/Module.h"
+#include "llvm/MC/MCAsmInfo.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Target/TargetMachine.h"
 
 #define GET_INSTRINFO_CTOR_DTOR
 #include "AlphaGenInstrInfo.inc"
@@ -273,6 +278,24 @@ bool AlphaInstrInfo::reverseBranchCondition(
   return false;
 }
 
+unsigned AlphaInstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
+  if (MI.isBundle()) {
+    // The header itself assembles to nothing; the size is what the instructions
+    // held inside it come to.
+    unsigned Size = 0;
+    for (auto I = std::next(MI.getIterator()), E = MI.getParent()->instr_end();
+         I != E && I->isInsideBundle(); ++I)
+      Size += getInstSizeInBytes(*I);
+    return Size;
+  }
+  if (MI.isInlineAsm()) {
+    const MachineFunction &MF = *MI.getParent()->getParent();
+    const char *AsmStr = MI.getOperand(0).getSymbolName();
+    return getInlineAsmLength(AsmStr, MF.getTarget().getMCAsmInfo());
+  }
+  return MI.getDesc().getSize();
+}
+
 bool AlphaInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   unsigned Opc = MI.getOpcode();
 
@@ -393,6 +416,48 @@ bool AlphaInstrInfo::isSchedulingBoundary(const MachineInstr &MI,
   if (MI.getOpcode() == Alpha::LDGP)
     return true;
   return TargetInstrInfo::isSchedulingBoundary(MI, MBB, MF);
+}
+
+MachineBasicBlock *
+AlphaInstrInfo::getBranchDestBlock(const MachineInstr &MI) const {
+  for (const MachineOperand &MO : MI.operands())
+    if (MO.isMBB())
+      return MO.getMBB();
+  return nullptr;
+}
+
+bool AlphaInstrInfo::isBranchOffsetInRange(unsigned BranchOpc,
+                                           int64_t BrOffset) const {
+  // All branches carry a 21-bit signed displacement in 4-byte instruction
+  // units, so the byte offset reaches +/- 4 MiB.
+  return isInt<23>(BrOffset);
+}
+
+void AlphaInstrInfo::insertIndirectBranch(MachineBasicBlock &MBB,
+                                          MachineBasicBlock &NewDestBB,
+                                          MachineBasicBlock &RestoreBB,
+                                          const DebugLoc &DL, int64_t BrOffset,
+                                          RegScavenger *RS) const {
+  // The destination is too far for a branch, so form its address gp-relatively
+  // into the assembler scratch $28 (reserved, so nothing needs to be scavenged)
+  // and jump through it: ldah !gprelhigh then lda !gprellow of the block
+  // symbol.
+  MachineFunction &MF = *MBB.getParent();
+  BuildMI(MBB, MBB.end(), DL, get(Alpha::LDAHg), Alpha::R28)
+      .addMBB(&NewDestBB)
+      .addReg(Alpha::R29);
+  BuildMI(MBB, MBB.end(), DL, get(Alpha::LDAg), Alpha::R28)
+      .addMBB(&NewDestBB)
+      .addReg(Alpha::R28);
+  BuildMI(MBB, MBB.end(), DL, get(Alpha::JMP)).addReg(Alpha::R28);
+
+  // Forming a gp-relative address needs the global pointer, and this runs after
+  // the prologue that would establish it: asking for one here is too late.  The
+  // guarantee that one is there comes from determineCalleeSaves, which requests
+  // it for any function whose code approaches the branch range.
+  assert(MF.getInfo<AlphaMachineFunctionInfo>()->usesGP() &&
+         "relaxed branch has no global pointer to form its target with");
+  (void)MF;
 }
 
 bool AlphaInstrInfo::isAssociativeAndCommutative(const MachineInstr &Inst,
