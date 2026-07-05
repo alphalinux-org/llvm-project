@@ -1263,6 +1263,33 @@ def MSKBL : OForm<0x12, 0x02, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
 def MSKWL : OForm<0x12, 0x12, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
                   "mskwl $Ra, $Rb, $Rc", []>;
 }
+
+// Extract / insert / mask a byte, word, or longword at a variable byte position
+// held in a register.  The ext/ins/msk instructions take the position (low 3
+// bits) directly, while the shift/mask idiom shifts by that times eight; the two
+// agree because 8*n mod 64 is 8*(n mod 8), so a shift by (n << 3) picks the same
+// byte the position n does.
+let AddedComplexity = 2 in {
+def : Pat<(and (srl GPRC:$x, (shl GPRC:$n, (i64 3))), 0xff),
+          (EXTBL GPRC:$x, GPRC:$n)>;
+def : Pat<(and (srl GPRC:$x, (shl GPRC:$n, (i64 3))), 0xffff),
+          (EXTWL GPRC:$x, GPRC:$n)>;
+def : Pat<(and (srl GPRC:$x, (shl GPRC:$n, (i64 3))), 0xffffffff),
+          (EXTLL GPRC:$x, GPRC:$n)>;
+def : Pat<(shl (and GPRC:$y, 0xff), (shl GPRC:$n, (i64 3))),
+          (INSBL GPRC:$y, GPRC:$n)>;
+def : Pat<(shl (and GPRC:$y, 0xffff), (shl GPRC:$n, (i64 3))),
+          (INSWL GPRC:$y, GPRC:$n)>;
+def : Pat<(shl (and GPRC:$y, 0xffffffff), (shl GPRC:$n, (i64 3))),
+          (INSLL GPRC:$y, GPRC:$n)>;
+def : Pat<(and GPRC:$x, (not (shl (i64 0xff), (shl GPRC:$n, (i64 3))))),
+          (MSKBL GPRC:$x, GPRC:$n)>;
+def : Pat<(and GPRC:$x, (not (shl (i64 0xffff), (shl GPRC:$n, (i64 3))))),
+          (MSKWL GPRC:$x, GPRC:$n)>;
+def : Pat<(and GPRC:$x, (not (shl (i64 0xffffffff), (shl GPRC:$n, (i64 3))))),
+          (MSKLL GPRC:$x, GPRC:$n)>;
+}
+
 let mayStore = 1, hasSideEffects = 0 in
 def STQ_U : MFormZ<0x0f, (outs), (ins GPRC:$Ra, memzGPR:$base),
                    "stq_u $Ra, $base", [(AlphaStqU i64:$Ra, i64:$base)]>;
