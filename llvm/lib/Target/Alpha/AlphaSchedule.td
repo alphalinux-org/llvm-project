@@ -164,6 +164,8 @@ def Alpha21064Model : SchedMachineModel {
   let LoadLatency = 3;
   let MispredictPenalty = 5;
   let CompleteModel = 1;
+  // In-order, so schedule after register allocation to hide latencies.
+  let PostRAScheduler = 1;
 }
 
 let SchedModel = Alpha21064Model in {
@@ -236,6 +238,8 @@ def Alpha21164Model : SchedMachineModel {
   let LoadLatency = 2;
   let MispredictPenalty = 5;
   let CompleteModel = 1;
+  // In-order, so schedule after register allocation to hide latencies.
+  let PostRAScheduler = 1;
 }
 
 let SchedModel = Alpha21164Model in {
