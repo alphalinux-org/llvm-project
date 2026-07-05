@@ -1187,8 +1187,8 @@ static MachineBasicBlock *emitAtomicRMW(MachineInstr &MI,
 
 // Expand a compare-and-swap pseudo into an ldq_l/stq_c loop.  $dst receives the
 // value that was read; success is (dst == cmp), computed by the caller.
-static MachineBasicBlock *emitAtomicCmpXchg(MachineInstr &MI,
-                                            MachineBasicBlock *BB) {
+static MachineBasicBlock *
+emitAtomicCmpXchg(MachineInstr &MI, MachineBasicBlock *BB, bool Is32 = false) {
   MachineFunction &MF = *BB->getParent();
   const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
   MachineRegisterInfo &MRI = MF.getRegInfo();
@@ -1198,6 +1198,10 @@ static MachineBasicBlock *emitAtomicCmpXchg(MachineInstr &MI,
   Register Addr = MI.getOperand(1).getReg();
   Register Cmp = MI.getOperand(2).getReg();
   Register New = MI.getOperand(3).getReg();
+
+  // A longword compare-and-swap uses ldl_l/stl_c and operates on 4 bytes.
+  unsigned LLOpc = Is32 ? Alpha::LDL_L : Alpha::LDQ_L;
+  unsigned SCOpc = Is32 ? Alpha::STL_C : Alpha::STQ_C;
 
   const BasicBlock *LLVMBB = BB->getBasicBlock();
   MachineFunction::iterator It = ++BB->getIterator();
@@ -1217,12 +1221,23 @@ static MachineBasicBlock *emitAtomicCmpXchg(MachineInstr &MI,
   StoreBB->addSuccessor(ExitBB);
 
   // LoopBB:
-  //   ldq_l  Dst, 0(Addr)
+  //   ldl_l  Dst, 0(Addr)        ; (ldq_l for quadword)
   //   cmpeq  Dst, Cmp, Eq
   //   beq    Eq, ExitBB          ; mismatch: leave Dst as read, no store
-  BuildMI(LoopBB, DL, TII.get(Alpha::LDQ_L), Dst).addReg(Addr).addImm(0);
+  addNarrowedMemOperands(
+      BuildMI(LoopBB, DL, TII.get(LLOpc), Dst).addReg(Addr).addImm(0), MI,
+      MachineMemOperand::MOLoad);
+  // ldl_l sign-extends the loaded longword; sign-extend the expected value too
+  // so the comparison sees matching bits.
+  Register CmpVal = Cmp;
+  if (Is32) {
+    CmpVal = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+    BuildMI(LoopBB, DL, TII.get(Alpha::ADDL), CmpVal)
+        .addReg(Alpha::R31)
+        .addReg(Cmp);
+  }
   Register Eq = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
-  BuildMI(LoopBB, DL, TII.get(Alpha::CMPEQ), Eq).addReg(Dst).addReg(Cmp);
+  BuildMI(LoopBB, DL, TII.get(Alpha::CMPEQ), Eq).addReg(Dst).addReg(CmpVal);
   BuildMI(LoopBB, DL, TII.get(Alpha::BEQ)).addReg(Eq).addMBB(ExitBB);
 
   // StoreBB:
@@ -1234,14 +1249,35 @@ static MachineBasicBlock *emitAtomicCmpXchg(MachineInstr &MI,
       .addReg(Alpha::R31)
       .addReg(New);
   Register Success = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
-  BuildMI(StoreBB, DL, TII.get(Alpha::STQ_C), Success)
-      .addReg(Store)
-      .addReg(Addr)
-      .addImm(0);
+  addNarrowedMemOperands(BuildMI(StoreBB, DL, TII.get(SCOpc), Success)
+                             .addReg(Store)
+                             .addReg(Addr)
+                             .addImm(0),
+                         MI, MachineMemOperand::MOStore);
   BuildMI(StoreBB, DL, TII.get(Alpha::BEQ)).addReg(Success).addMBB(LoopBB);
 
   MI.eraseFromParent();
   return ExitBB;
+}
+
+// Sign-extend the low byte or word of Src into Dst.  sextb and sextw are BWX
+// instructions, so without BWX this is a left shift back out to the top of the
+// register and an arithmetic shift back down, the same expansion the
+// sext_inreg patterns use.
+static void emitSignExtendField(MachineBasicBlock &MBB,
+                                MachineBasicBlock::iterator I,
+                                const DebugLoc &DL, const TargetInstrInfo &TII,
+                                MachineRegisterInfo &MRI, bool HasBWX,
+                                bool IsWord, Register Dst, Register Src) {
+  if (HasBWX) {
+    BuildMI(MBB, I, DL, TII.get(IsWord ? Alpha::SEXTW : Alpha::SEXTB), Dst)
+        .addReg(Src);
+    return;
+  }
+  unsigned Shift = IsWord ? 48 : 56;
+  Register Up = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  BuildMI(MBB, I, DL, TII.get(Alpha::SLLi), Up).addReg(Src).addImm(Shift);
+  BuildMI(MBB, I, DL, TII.get(Alpha::SRAi), Dst).addReg(Up).addImm(Shift);
 }
 
 // Expand a sub-word (byte or word) compare-and-swap into an ldq_l/stq_c loop:
@@ -1288,17 +1324,22 @@ emitSubwordCmpXchg(MachineInstr &MI, MachineBasicBlock *BB, bool IsWord) {
   StoreBB->addSuccessor(ExitBB);
 
   //   ldq_l  Quad, 0(Aligned)
-  //   ext    Quad, Addr, Dst        ; current field (zero-extended)
-  //   cmpeq  Dst, CmpField, Eq
+  //   ext    Quad, Addr, Field      ; current field (zero-extended)
+  //   sext   Field, Dst             ; result is sign-extended
+  //   cmpeq  Field, CmpField, Eq
   //   beq    Eq, ExitBB             ; mismatch: leave Dst, no store
   Register Quad = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
   addNarrowedMemOperands(BuildMI(LoopBB, DL, TII.get(Alpha::LDQ_L), Quad)
                              .addReg(Aligned)
                              .addImm(0),
                          MI, MachineMemOperand::MOLoad);
-  BuildMI(LoopBB, DL, TII.get(ExtOpc), Dst).addReg(Quad).addReg(Addr);
+  Register Field = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  BuildMI(LoopBB, DL, TII.get(ExtOpc), Field).addReg(Quad).addReg(Addr);
+  emitSignExtendField(*LoopBB, LoopBB->end(), DL, TII, MRI,
+                      MF.getSubtarget<AlphaSubtarget>().hasBWX(), IsWord, Dst,
+                      Field);
   Register Eq = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
-  BuildMI(LoopBB, DL, TII.get(Alpha::CMPEQ), Eq).addReg(Dst).addReg(CmpField);
+  BuildMI(LoopBB, DL, TII.get(Alpha::CMPEQ), Eq).addReg(Field).addReg(CmpField);
   BuildMI(LoopBB, DL, TII.get(Alpha::BEQ)).addReg(Eq).addMBB(ExitBB);
 
   //   msk    Quad, Addr, Cleared
@@ -1417,8 +1458,9 @@ static MachineBasicBlock *emitSubwordAtomicRMW(MachineInstr &MI,
   LoopBB->addSuccessor(ExitBB);
 
   //   ldq_l  Quad, 0(Aligned)
-  //   ext    Quad, Addr, Dst        ; old field, zero-extended
-  //   <op>   Dst, Val, NewField     ; (or copy Val for xchg)
+  //   ext    Quad, Addr, Field      ; old field, zero-extended
+  //   sext   Field, Dst             ; result (old value) is sign-extended
+  //   <op>   Field, Val, NewField   ; (or copy Val for xchg)
   //   msk    Quad, Addr, Cleared
   //   ins    NewField, Addr, Positioned
   //   bis    Cleared, Positioned, Merged
@@ -1429,11 +1471,15 @@ static MachineBasicBlock *emitSubwordAtomicRMW(MachineInstr &MI,
                              .addReg(Aligned)
                              .addImm(0),
                          MI, MachineMemOperand::MOLoad);
-  BuildMI(LoopBB, DL, TII.get(ExtOpc), Dst).addReg(Quad).addReg(Addr);
+  Register Field = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  BuildMI(LoopBB, DL, TII.get(ExtOpc), Field).addReg(Quad).addReg(Addr);
+  emitSignExtendField(*LoopBB, LoopBB->end(), DL, TII, MRI,
+                      MF.getSubtarget<AlphaSubtarget>().hasBWX(), IsWord, Dst,
+                      Field);
 
   Register NewField = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
   if (Opc)
-    BuildMI(LoopBB, DL, TII.get(Opc), NewField).addReg(Dst).addReg(Val);
+    BuildMI(LoopBB, DL, TII.get(Opc), NewField).addReg(Field).addReg(Val);
   else
     BuildMI(LoopBB, DL, TII.get(Alpha::BIS), NewField)
         .addReg(Alpha::R31)
@@ -1508,6 +1554,8 @@ AlphaTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
     return emitAtomicRMW(MI, MBB);
   case Alpha::ATOMIC_CMPXCHG_I64:
     return emitAtomicCmpXchg(MI, MBB);
+  case Alpha::ATOMIC_CMPXCHG_I32:
+    return emitAtomicCmpXchg(MI, MBB, /*Is32=*/true);
   case Alpha::ATOMIC_CMPXCHG_I8:
     return emitSubwordCmpXchg(MI, MBB, /*IsWord=*/false);
   case Alpha::ATOMIC_CMPXCHG_I16:

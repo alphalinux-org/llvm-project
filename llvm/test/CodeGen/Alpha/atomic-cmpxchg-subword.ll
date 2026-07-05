@@ -4,9 +4,14 @@
 ; expected value inside an ldq_l/stq_c loop and splices the new value back on a
 ; match.
 
+; The comparand is sign-extended to the canonical register form first: the
+; success flag compares it against the extracted field, which is sign-extended
+; the same way, and an any-extended negative comparand would never match.
 ; CHECK-LABEL: cas8:
+; CHECK:       sll $17, 56, [[SX:\$[0-9]+]]
+; CHECK-NEXT:  sra [[SX]], 56, [[SX]]
 ; CHECK:       bic $16, 7, [[A:\$[0-9]+]]
-; CHECK:       zapnot $17, 1, [[C:\$[0-9]+]]
+; CHECK:       zapnot [[SX]], 1, [[C:\$[0-9]+]]
 ; CHECK:       insbl $18, $16,
 ; CHECK:       ldq_l {{\$[0-9]+}}, 0([[A]])
 ; CHECK:       extbl {{\$[0-9]+}}, $16,
@@ -23,7 +28,9 @@ define i64 @cas8(ptr %p, i8 %c, i8 %n) {
 }
 
 ; CHECK-LABEL: cas16:
-; CHECK:       zapnot $17, 3,
+; CHECK:       sll $17, 48, [[SX16:\$[0-9]+]]
+; CHECK-NEXT:  sra [[SX16]], 48, [[SX16]]
+; CHECK:       zapnot [[SX16]], 3,
 ; CHECK:       inswl $18, $16,
 ; CHECK:       extwl {{\$[0-9]+}}, $16,
 ; CHECK:       mskwl {{\$[0-9]+}}, $16,

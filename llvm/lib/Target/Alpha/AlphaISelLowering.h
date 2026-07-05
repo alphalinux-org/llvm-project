@@ -184,6 +184,20 @@ public:
     return AtomicExpansionKind::None;
   }
 
+  // A subword or longword load-locked sign-extends its result (the Alpha
+  // canonical form for values narrower than a register), so tell the rest of
+  // the compiler that a narrow atomic result is sign-extended.
+  ISD::NodeType getExtendForAtomicOps() const override {
+    return ISD::SIGN_EXTEND;
+  }
+
+  // The comparand has to be extended the same way, or the success flag compares
+  // a sign-extended loaded value against an any-extended operand and a negative
+  // i32 comparand never reports success.
+  ISD::NodeType getExtendForAtomicCmpSwapArg() const override {
+    return ISD::SIGN_EXTEND;
+  }
+
   SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
                                bool IsVarArg,
                                const SmallVectorImpl<ISD::InputArg> &Ins,

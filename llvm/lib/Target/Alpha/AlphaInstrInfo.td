@@ -1248,12 +1248,18 @@ def : Pat<(atomic_store_32 GPRC:$val, ADDRri:$addr),
 let Predicates = [HasBWX] in {
 def : Pat<(i64 (atomic_load_azext_8 ADDRri:$addr)), (LDBU memri:$addr)>;
 def : Pat<(i64 (atomic_load_azext_16 ADDRri:$addr)), (LDWU memri:$addr)>;
+def : Pat<(i64 (atomic_load_sext_8 ADDRri:$addr)), (SEXTB (LDBU memri:$addr))>;
+def : Pat<(i64 (atomic_load_sext_16 ADDRri:$addr)), (SEXTW (LDWU memri:$addr))>;
 }
 let Predicates = [NotBWX] in {
 def : Pat<(i64 (atomic_load_azext_8 ADDRr:$a)),
           (EXTBL (LDQ_U GPRC:$a), GPRC:$a)>;
 def : Pat<(i64 (atomic_load_azext_16 ADDRr:$a)),
           (EXTWL (LDQ_U GPRC:$a), GPRC:$a)>;
+def : Pat<(i64 (atomic_load_sext_8 ADDRr:$a)),
+          (SRAi (SLLi (EXTBL (LDQ_U GPRC:$a), GPRC:$a), 56), 56)>;
+def : Pat<(i64 (atomic_load_sext_16 ADDRr:$a)),
+          (SRAi (SLLi (EXTWL (LDQ_U GPRC:$a), GPRC:$a), 48), 48)>;
 }
 
 // A byte/word atomic store: stb/stw with BWX; otherwise the lock-based
@@ -1375,6 +1381,7 @@ class AtomicCASvt<ValueType vt>
   let MemoryVT = vt;
 }
 def ATOMIC_CMPXCHG_I64 : AtomicCAS<AtomicCASvt<i64>>;
+def ATOMIC_CMPXCHG_I32 : AtomicCAS<AtomicCASvt<i32>>;
 def ATOMIC_CMPXCHG_I16 : AtomicCAS<AtomicCASvt<i16>>;
 def ATOMIC_CMPXCHG_I8  : AtomicCAS<AtomicCASvt<i8>>;
 

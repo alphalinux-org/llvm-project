@@ -7,12 +7,16 @@
 ; CHECK:       bic $16, 7, [[A:\$[0-9]+]]
 ; CHECK:       [[LOOP:\.LBB[0-9_]+]]:
 ; CHECK-NEXT:  ldq_l {{\$[0-9]+}}, 0([[A]])
-; CHECK:       extbl {{\$[0-9]+}}, $16, $0
-; CHECK:       addq $0, $17,
+; CHECK:       extbl {{\$[0-9]+}}, $16, [[F:\$[0-9]+]]
+; CHECK:       addq [[F]], $17,
 ; CHECK:       mskbl {{\$[0-9]+}}, $16,
 ; CHECK:       insbl {{\$[0-9]+}}, $16,
 ; CHECK:       stq_c [[N:\$[0-9]+]], 0([[A]])
 ; CHECK-NEXT:  beq [[N]], [[LOOP]]
+; The returned old value is sign-extended.  This runs without BWX, so that is
+; a shift up to the top of the register and back down rather than sextb.
+; CHECK:       sll [[F]], 56, [[U:\$[0-9]+]]
+; CHECK:       sra [[U]], 56, $0
 ; CHECK:       ret
 define i8 @add8(ptr %p, i8 %v) {
   %r = atomicrmw add ptr %p, i8 %v monotonic
@@ -28,7 +32,9 @@ define i8 @add8(ptr %p, i8 %v) {
 ; CHECK:       mskwl {{\$[0-9]+}}, $16,
 ; CHECK:       stq_c [[N:\$[0-9]+]],
 ; CHECK-NEXT:  beq [[N]], [[LOOP]]
-; CHECK:       extwl {{\$[0-9]+}}, $16, $0
+; CHECK:       extwl {{\$[0-9]+}}, $16, [[F:\$[0-9]+]]
+; CHECK:       sll [[F]], 48, [[U:\$[0-9]+]]
+; CHECK:       sra [[U]], 48, $0
 ; CHECK:       ret
 define i16 @xchg16(ptr %p, i16 %v) {
   %r = atomicrmw xchg ptr %p, i16 %v monotonic
