@@ -87,6 +87,13 @@ def AlphaDivCall : SDNode<"AlphaISD::DIVCALL", SDTNone,
 def AlphaGprelHi : SDNode<"AlphaISD::GPREL_HI", SDTIntBinOp>;
 def AlphaGprelLo : SDNode<"AlphaISD::GPREL_LO", SDTIntBinOp>;
 
+// Single-precision integer/floating register move (itofs/ftois), produced by
+// custom f32<->i32 bitcast lowering.
+def AlphaMovi2fS : SDNode<"AlphaISD::MOVI2F_S",
+                          SDTypeProfile<1, 1, [SDTCisVT<0, f32>, SDTCisVT<1, i64>]>>;
+def AlphaMovf2iS : SDNode<"AlphaISD::MOVF2I_S",
+                          SDTypeProfile<1, 1, [SDTCisVT<0, i64>, SDTCisVT<1, f32>]>>;
+
 // Unaligned quadword load/store, ignoring the low three address bits.
 def SDT_AlphaLdqU : SDTypeProfile<1, 1, [SDTCisVT<0, i64>, SDTCisPtrTy<1>]>;
 def SDT_AlphaStqU : SDTypeProfile<0, 2, [SDTCisVT<0, i64>, SDTCisPtrTy<1>]>;
@@ -956,16 +963,29 @@ def MOVi2f : AlphaPseudo<(outs FPRC:$dst), (ins GPRC:$src), "# MOVi2f",
                          [(set f64:$dst, (bitconvert i64:$src))]>;
 def MOVf2i : AlphaPseudo<(outs GPRC:$dst), (ins FPRC:$src), "# MOVf2i",
                          [(set i64:$dst, (bitconvert f64:$src))]>;
+// The single-precision forms move the low 32 bits between an integer register
+// and an S_floating register.  i32 is not a legal register type, so custom
+// bitcast lowering produces these target nodes (the low 32 bits of an i64 for
+// MOVi2f_S; an i64 holding the sign-extended longword for MOVf2i_S).
+def MOVi2f_S : AlphaPseudo<(outs FPRC:$dst), (ins GPRC:$src), "# MOVi2f_S",
+                           [(set f32:$dst, (AlphaMovi2fS i64:$src))]>;
+def MOVf2i_S : AlphaPseudo<(outs GPRC:$dst), (ins FPRC:$src), "# MOVf2i_S",
+                           [(set i64:$dst, (AlphaMovf2iS f32:$src))]>;
 }
 
 // The FIX extension (ev6) moves the raw bits directly between an integer and a
-// T_floating register, so the MOVi2f/MOVf2i custom inserter emits these instead
-// of the stack round trip.
+// floating register, so the MOVi2f/MOVf2i custom inserter emits these instead of
+// the stack round trip.  itoft/ftoit move a T_floating (64-bit) value; itofs/
+// ftois move an S_floating (low 32 bits).
 let Predicates = [HasFIX], hasSideEffects = 0 in {
 def ITOFT : FForm<0x14, 0x024, (outs FPRC:$Rc), (ins GPRC:$Ra),
                   "itoft $Ra, $Rc", []> { let Rb = 31; }
 def FTOIT : FForm<0x1c, 0x070, (outs GPRC:$Rc), (ins FPRC:$Ra),
                   "ftoit $Ra, $Rc", []> { let Rb = 31; }
+def ITOFS : FForm<0x14, 0x004, (outs FPRC:$Rc), (ins GPRC:$Ra),
+                  "itofs $Ra, $Rc", []> { let Rb = 31; }
+def FTOIS : FForm<0x1c, 0x078, (outs GPRC:$Rc), (ins FPRC:$Ra),
+                  "ftois $Ra, $Rc", []> { let Rb = 31; }
 }
 
 // Signed integer/floating conversions: move the bits into a floating-point

@@ -90,6 +90,12 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   // Software-directed prefetch lowers to a load whose destination is R31/F31,
   // but only where that is a real prefetch; drop it otherwise.
   setOperationAction(ISD::PREFETCH, MVT::Other, Custom);
+
+  // Bit-cast between f32 and i32 uses the single-precision integer/FP move
+  // (itofs/ftois) rather than a stack bounce.  i32 is illegal, so the i32
+  // result form is handled in ReplaceNodeResults and the f32 result form here.
+  setOperationAction(ISD::BITCAST, MVT::f32, Custom);
+  setOperationAction(ISD::BITCAST, MVT::i32, Custom);
   for (MVT VT : {MVT::i16, MVT::i32}) {
     setLoadExtAction(ISD::EXTLOAD, MVT::i64, VT, Custom);
     setLoadExtAction(ISD::ZEXTLOAD, MVT::i64, VT, Custom);
@@ -234,6 +240,10 @@ const char *AlphaTargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "AlphaISD::GPREL_HI";
   case AlphaISD::GPREL_LO:
     return "AlphaISD::GPREL_LO";
+  case AlphaISD::MOVI2F_S:
+    return "AlphaISD::MOVI2F_S";
+  case AlphaISD::MOVF2I_S:
+    return "AlphaISD::MOVF2I_S";
   case AlphaISD::BR_EQ:
     return "AlphaISD::BR_EQ";
   case AlphaISD::BR_NE:
@@ -362,6 +372,33 @@ SDValue AlphaTargetLowering::LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
       ST->getMemOperand());
 }
 
+// f32 = bitcast i32.  The i32 source occupies the low 32 bits of an integer
+// register; move them into an S_floating register (itofs, or a stack bounce).
+SDValue AlphaTargetLowering::LowerBITCAST(SDValue Op, SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  SDValue Src = Op.getOperand(0);
+  if (Op.getValueType() != MVT::f32)
+    return SDValue();
+  if (Src.getValueType() != MVT::i64)
+    Src = DAG.getNode(ISD::ANY_EXTEND, DL, MVT::i64, Src);
+  return DAG.getNode(AlphaISD::MOVI2F_S, DL, MVT::f32, Src);
+}
+
+// i32 = bitcast f32 (i32 is illegal, so this comes through result
+// legalization). Move the S_floating value into an integer register (ftois,
+// sign-extended).
+void AlphaTargetLowering::ReplaceNodeResults(SDNode *N,
+                                             SmallVectorImpl<SDValue> &Results,
+                                             SelectionDAG &DAG) const {
+  SDLoc DL(N);
+  if (N->getOpcode() == ISD::BITCAST && N->getValueType(0) == MVT::i32 &&
+      N->getOperand(0).getValueType() == MVT::f32) {
+    SDValue I64 =
+        DAG.getNode(AlphaISD::MOVF2I_S, DL, MVT::i64, N->getOperand(0));
+    Results.push_back(DAG.getNode(ISD::TRUNCATE, DL, MVT::i32, I64));
+  }
+}
+
 SDValue AlphaTargetLowering::LowerOperation(SDValue Op,
                                             SelectionDAG &DAG) const {
   switch (Op.getOpcode()) {
@@ -395,6 +432,8 @@ SDValue AlphaTargetLowering::LowerOperation(SDValue Op,
     return LowerVAARG(Op, DAG);
   case ISD::VACOPY:
     return LowerVACOPY(Op, DAG);
+  case ISD::BITCAST:
+    return LowerBITCAST(Op, DAG);
   case ISD::SDIV:
   case ISD::UDIV:
   case ISD::SREM:
@@ -1298,8 +1337,23 @@ AlphaTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
   Register Src = MI.getOperand(1).getReg();
 
   if (Subtarget.hasFIX()) {
-    unsigned Opc =
-        MI.getOpcode() == Alpha::MOVi2f ? Alpha::ITOFT : Alpha::FTOIT;
+    unsigned Opc;
+    switch (MI.getOpcode()) {
+    default:
+      llvm_unreachable("unexpected custom-inserted instruction");
+    case Alpha::MOVi2f:
+      Opc = Alpha::ITOFT;
+      break;
+    case Alpha::MOVf2i:
+      Opc = Alpha::FTOIT;
+      break;
+    case Alpha::MOVi2f_S:
+      Opc = Alpha::ITOFS;
+      break;
+    case Alpha::MOVf2i_S:
+      Opc = Alpha::FTOIS;
+      break;
+    }
     BuildMI(*MBB, MI, DL, TII.get(Opc), Dst).addReg(Src);
     MI.eraseFromParent();
     return MBB;
@@ -1327,6 +1381,14 @@ AlphaTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
   case Alpha::MOVf2i:
     StoreOpc = Alpha::STT;
     LoadOpc = Alpha::LDQ;
+    break;
+  case Alpha::MOVi2f_S:
+    StoreOpc = Alpha::STL;
+    LoadOpc = Alpha::LDS;
+    break;
+  case Alpha::MOVf2i_S:
+    StoreOpc = Alpha::STS;
+    LoadOpc = Alpha::LDL;
     break;
   }
 

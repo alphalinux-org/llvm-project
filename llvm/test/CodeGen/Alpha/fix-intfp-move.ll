@@ -25,3 +25,25 @@ define i64 @f2i(double %x) {
   %r = bitcast double %x to i64
   ret i64 %r
 }
+
+define float @i2f_s(i32 %x) {
+; BASE-LABEL: i2f_s:
+; BASE: stl $16,
+; BASE: lds $f0,
+; FIX-LABEL: i2f_s:
+; FIX: itofs $16, $f0
+; FIX-NOT: lds
+  %r = bitcast i32 %x to float
+  ret float %r
+}
+
+define i32 @f2i_s(float %x) {
+; BASE-LABEL: f2i_s:
+; BASE: sts $f16,
+; BASE: ldl $0,
+; FIX-LABEL: f2i_s:
+; FIX: ftois $f16, $0
+; FIX-NOT: ldl
+  %r = bitcast float %x to i32
+  ret i32 %r
+}
