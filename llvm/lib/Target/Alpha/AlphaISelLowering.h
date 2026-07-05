@@ -202,6 +202,30 @@ public:
     return ISD::SIGN_EXTEND;
   }
 
+  // +0.0, -0.0 and +2.0 are producible in a single instruction (cpys/cpysn of
+  // the zero register, or cmpteq $f31,$f31), so keep them as immediates rather
+  // than constant-pool loads.
+  // $f31 reads as +0.0, its negation gives -0.0 and cmpteq of it with itself
+  // gives +2.0, so those three need no constant pool.  X_floating has none of
+  // that: it lives in memory and every operation on it is a call, so a constant
+  // of that type is never immediate.
+  bool isFPImmLegal(const APFloat &Imm, EVT VT,
+                    bool ForCodeSize) const override {
+    if (VT != MVT::f32 && VT != MVT::f64)
+      return false;
+    return Imm.isExactlyValue(+0.0) || Imm.isExactlyValue(-0.0) ||
+           Imm.isExactlyValue(+2.0);
+  }
+
+  // lds, which is how a float is loaded, maps the S_floating exponent onto the
+  // T_floating one, and that mapping has no entry for a denormal: an exponent
+  // of zero stays zero and the value read back is not the one written. A double
+  // may therefore only be shrunk into a float that is normal (or a zero, which
+  // does survive the mapping).
+  bool ShouldShrinkFPConstant(EVT VT, const APFloat &Val) const override {
+    return !Val.isDenormal();
+  }
+
   SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
                                bool IsVarArg,
                                const SmallVectorImpl<ISD::InputArg> &Ins,
