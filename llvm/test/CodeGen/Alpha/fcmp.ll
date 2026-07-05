@@ -77,3 +77,14 @@ define i64 @ne_f32(float %a, float %b) {
   %z = zext i1 %c to i64
   ret i64 %z
 }
+
+; The same condition feeding a select inverts the fcmov instead.
+; CHECK-LABEL: ne_select:
+; CHECK:       cmpteq $f16, $f17, $f1
+; CHECK:       fcmovne $f1, $f19, $f0
+; CHECK:       ret
+define double @ne_select(double %a, double %b, double %x, double %y) {
+  %c = fcmp nnan une double %a, %b
+  %s = select i1 %c, double %x, double %y
+  ret double %s
+}
