@@ -188,7 +188,91 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   for (auto Ext : {ISD::EXTLOAD, ISD::ZEXTLOAD, ISD::SEXTLOAD})
     setLoadExtAction(Ext, MVT::i64, MVT::i1, Promote);
 
+  setTargetDAGCombine(ISD::MUL);
+
   computeRegisterProperties(STI.getRegisterInfo());
+}
+
+// Estimate how many instructions build x * V from x with shifts and scaled
+// adds; 100 (effectively infinite) means it would still need a multiply.  The
+// recursion mirrors the factoring in PerformDAGCombine and the generic
+// shift-and-add decomposition it defers to.
+static unsigned mulSeqCost(uint64_t V) {
+  unsigned Tz = llvm::countr_zero(V);
+  uint64_t Odd = V >> Tz;
+  if (Odd == 1)
+    return Tz ? 1 : 0; // a power of two is a single shift (or the value itself)
+  if (isPowerOf2_64(Odd - 1) || isPowerOf2_64(Odd + 1))
+    return Tz ? 2 : 1; // 2^k +/- 1 is a scaled add, plus a shift if scaled up
+  for (uint64_t F : {9, 5, 3})
+    if (Odd % F == 0)
+      return 1 + mulSeqCost(V / F); // one scaled add, then the cofactor
+  return 100;
+}
+
+// Factor a multiply by a constant whose odd part is not 2^k +/- 1 (so the
+// generic shift-and-add decomposition does not apply) into two smaller
+// multiplies, when a factor of 3, 5 or 9 can be peeled off.  Each of those is a
+// single scaled add/subtract (s4subq/s4addq/s8addq), and the remaining multiply
+// is decomposed in turn, so the whole product costs a few dependent ALU ops
+// instead of the high-latency multiplier.
+SDValue AlphaTargetLowering::PerformDAGCombine(SDNode *N,
+                                               DAGCombinerInfo &DCI) const {
+  if (N->getOpcode() != ISD::MUL || N->getValueType(0) != MVT::i64)
+    return SDValue();
+  auto *C = dyn_cast<ConstantSDNode>(N->getOperand(1));
+  if (!C || DCI.isBeforeLegalizeOps())
+    return SDValue();
+
+  // Factor the magnitude and negate afterwards.  A negative constant taken
+  // zero-extended is astronomically large, its estimated chain length runs
+  // past the cut-off below, and the multiply would be left for the
+  // multiplier -- while decomposeMulByConstant, which does use the magnitude,
+  // already handles the 2^k +/- 1 negatives.  The negation of the result is a
+  // single subq from $31.
+  bool Negate = C->getAPIntValue().isNegative();
+  uint64_t V = Negate ? (-C->getAPIntValue()).getZExtValue()
+                      : C->getZExtValue();
+  if (V < 2)
+    return SDValue();
+  // The odd part: the trailing power of two is a free shift the combiner
+  // already forms.
+  uint64_t Odd = V >> llvm::countr_zero(V);
+  // Already a single shift-and-add (2^k +/- 1), or a plain power of two.
+  if (Odd == 1 || isPowerOf2_64(Odd - 1) || isPowerOf2_64(Odd + 1))
+    return SDValue();
+  // Only worth it when the shift/add chain is clearly shorter than the
+  // multiplier's latency; otherwise leave the multiply in place.
+  if (mulSeqCost(V) > 4)
+    return SDValue();
+  // Peel off the largest single-instruction scaled factor.
+  uint64_t Factor = 0;
+  for (uint64_t F : {9, 5, 3})
+    if (Odd % F == 0) {
+      Factor = F;
+      break;
+    }
+  if (!Factor)
+    return SDValue();
+
+  // Emit the factor as an explicit scaled add/subtract rather than a nested
+  // multiply: 3x = 4x - x, 5x = 4x + x, 9x = 8x + x.  A nested multiply would
+  // be reassociated back into the original constant and re-enter this combine;
+  // the shift/add form breaks that cycle and selects to s4subq/s4addq/s8addq.
+  // The remaining multiply by V / Factor is decomposed (or factored) in turn.
+  SDLoc DL(N);
+  SelectionDAG &DAG = DCI.DAG;
+  SDValue X = N->getOperand(0);
+  SDValue Shl = DAG.getNode(ISD::SHL, DL, MVT::i64, X,
+                            DAG.getConstant(Factor == 9 ? 3 : 2, DL, MVT::i64));
+  SDValue Scaled =
+      DAG.getNode(Factor == 3 ? ISD::SUB : ISD::ADD, DL, MVT::i64, Shl, X);
+  SDValue Mul = DAG.getNode(ISD::MUL, DL, MVT::i64, Scaled,
+                            DAG.getConstant(V / Factor, DL, MVT::i64));
+  if (!Negate)
+    return Mul;
+  return DAG.getNode(ISD::SUB, DL, MVT::i64, DAG.getConstant(0, DL, MVT::i64),
+                     Mul);
 }
 
 bool AlphaTargetLowering::decomposeMulByConstant(LLVMContext &Context, EVT VT,
