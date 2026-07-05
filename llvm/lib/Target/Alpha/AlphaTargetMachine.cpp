@@ -42,6 +42,17 @@ AlphaTargetMachine::AlphaTargetMachine(const Target &T, const Triple &TT,
   // Reconcile call-frame information across blocks so unwinding is correct at
   // any point, including within epilogues (see resetCFIToInitialState).
   setCFIFixup(true);
+  // Outline repeated instruction sequences from minsize functions.  Enabling
+  // the option lets the target pass config add the outliner pass; the pass then
+  // outlines only where shouldOutlineFromFunctionByDefault permits.
+  this->Options.EnableMachineOutliner = true;
+  setSupportsDefaultOutlining(true);
+  // GlobalISel does not cover everything the SelectionDAG path does: the
+  // legalizer marks a jump table, a va_arg, an alloca, an atomic and the rest
+  // of the gaps unsupported so such a function is handed back to that path.
+  // That is a fall back rather than an error only if abort is disabled, and it
+  // is what every one of those cases is documented to do.
+  setGlobalISelAbort(GlobalISelAbortMode::DisableWithDiag);
   initAsmInfo();
 }
 
