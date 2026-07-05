@@ -28,6 +28,7 @@ AlphaSubtarget &AlphaSubtarget::initializeSubtargetDependencies(StringRef CPU,
 AlphaSubtarget::AlphaSubtarget(const Triple &TT, StringRef CPU, StringRef FS,
                                const TargetMachine &TM)
     : AlphaGenSubtargetInfo(TT, CPU, /*TuneCPU=*/CPU, FS),
+      ReserveRegister(TM.getMCRegisterInfo().getNumRegs()),
       InstrInfo(initializeSubtargetDependencies(CPU, FS)),
       TLInfo(static_cast<const AlphaTargetMachine &>(TM), *this),
       FrameLowering(*this) {}
