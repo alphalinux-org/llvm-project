@@ -23,26 +23,23 @@ tracksRegLiveness: true
 body:             |
   bb.0.entry:
     successors: %bb.1, %bb.2, %bb.3
-    liveins: $r16, $r17, $r26
+    liveins: $r16, $r17
 
     BEQ $r16, %bb.1
     BNE $r17, %bb.2
     BR %bb.3
 
   bb.1:
-    liveins: $r26
     $r0 = LDA 1, $r31
-    RET implicit $r26, implicit $r0
+    RET implicit $r0
 
   bb.2:
-    liveins: $r26
     $r0 = LDA 2, $r31
-    RET implicit $r26, implicit $r0
+    RET implicit $r0
 
   bb.3:
-    liveins: $r26
     $r0 = LDA 3, $r31
-    RET implicit $r26, implicit $r0
+    RET implicit $r0
 ...
 
 # All three edges survive: both conditional branches are still there, in order,
