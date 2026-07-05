@@ -194,6 +194,15 @@ public:
     return ISD::SIGN_EXTEND;
   }
 
+  // +0.0, -0.0 and +2.0 are producible in a single instruction (cpys/cpysn of
+  // the zero register, or cmpteq $f31,$f31), so keep them as immediates rather
+  // than constant-pool loads.
+  bool isFPImmLegal(const APFloat &Imm, EVT VT,
+                    bool ForCodeSize) const override {
+    return Imm.isExactlyValue(+0.0) || Imm.isExactlyValue(-0.0) ||
+           Imm.isExactlyValue(+2.0);
+  }
+
   SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
                                bool IsVarArg,
                                const SmallVectorImpl<ISD::InputArg> &Ins,
