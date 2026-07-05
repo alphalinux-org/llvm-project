@@ -9,6 +9,7 @@
 #include "AlphaTargetMachine.h"
 #include "Alpha.h"
 #include "AlphaMachineFunctionInfo.h"
+#include "AlphaTargetTransformInfo.h"
 #include "TargetInfo/AlphaTargetInfo.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
@@ -70,6 +71,11 @@ AlphaTargetMachine::getSubtargetImpl(const Function &F) const {
   if (!I)
     I = std::make_unique<AlphaSubtarget>(TargetTriple, CPU, TuneCPU, FS, *this);
   return I.get();
+}
+
+TargetTransformInfo
+AlphaTargetMachine::getTargetTransformInfo(const Function &F) const {
+  return TargetTransformInfo(std::make_unique<AlphaTTIImpl>(this, F));
 }
 
 namespace {
