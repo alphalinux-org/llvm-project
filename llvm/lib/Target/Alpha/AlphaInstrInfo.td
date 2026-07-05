@@ -645,7 +645,10 @@ def MT_FPCR : FForm<0x17, 0x024, (outs), (ins FPRC:$reg), "mt_fpcr $reg", []> {
 // With $Rb = $31 (zero) this materializes a 16-bit signed constant.  The
 // split-operand form is used by codegen; LEA/LDAHm below carry the single
 // memory operand that the assembler and disassembler parse and print.
-let isCodeGenOnly = 1 in {
+// Rematerializable: with a constant base ($31) these compute a constant, so the
+// register allocator recomputes them at a use rather than spilling and
+// reloading (the per-instance check rejects the frame-relative uses).
+let isCodeGenOnly = 1, isReMaterializable = 1, isAsCheapAsAMove = 1 in {
 def LDA : MFormD<0x08, (outs GPRC:$Ra), (ins s16imm:$disp, GPRC:$Rb),
                  "lda $Ra, $disp($Rb)", []>;
 def LDAH : MFormD<0x09, (outs GPRC:$Ra), (ins s16imm:$disp, GPRC:$Rb),

@@ -60,14 +60,19 @@ def R27 : GPR<27, "$27", ["$pv", "$t12"]>, DwarfRegNum<[27]>;
 def R28 : GPR<28, "$28", ["$at"]>,  DwarfRegNum<[28]>;
 def R29 : GPR<29, "$29", ["$gp"]>,  DwarfRegNum<[29]>;
 def R30 : GPR<30, "$30", ["$sp"]>,  DwarfRegNum<[30]>;
+// $31 is hardwired to zero, so it holds a constant value.
+let isConstant = 1 in
 def R31 : GPR<31, "$31", ["$zero"]>, DwarfRegNum<[31]>;
 
 //===----------------------------------------------------------------------===//
 // Floating-point registers.
 //===----------------------------------------------------------------------===//
 
-foreach i = 0-31 in
+foreach i = 0-30 in
   def F#i : FPR<i, "$f"#i>, DwarfRegNum<[!add(i, 32)]>;
+// $f31 is hardwired to zero, so it holds a constant value.
+let isConstant = 1 in
+def F31 : FPR<31, "$f31">, DwarfRegNum<[63]>;
 
 //===----------------------------------------------------------------------===//
 // Register classes.
