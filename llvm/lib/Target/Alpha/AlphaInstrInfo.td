@@ -363,10 +363,18 @@ class ALU_ri<bits<6> opc, bits<7> func, string mnem, SDPatternOperator node>
     : OFormL<opc, func, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
              mnem # " $Ra, $lit, $Rc",
              [(set i64:$Rc, (node i64:$Ra, immUExt8:$lit))]>;
+// Longword form: the 32-bit result is sign-extended, folding the sextl.
+class ALU_riL<bits<6> opc, bits<7> func, string mnem, SDPatternOperator node>
+    : OFormL<opc, func, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
+             mnem # " $Ra, $lit, $Rc",
+             [(set i64:$Rc, (sext_inreg (node i64:$Ra, immUExt8:$lit), i32))]>;
 
 def ADDQi : ALU_ri<0x10, 0x20, "addq", add>;
 def SUBQi : ALU_ri<0x10, 0x29, "subq", sub>;
 def MULQi : ALU_ri<0x13, 0x20, "mulq", mul>;
+def ADDLi : ALU_riL<0x10, 0x00, "addl", add>;
+def SUBLi : ALU_riL<0x10, 0x09, "subl", sub>;
+def MULLi : ALU_riL<0x13, 0x00, "mull", mul>;
 def ANDi  : ALU_ri<0x11, 0x00, "and",  and>;
 def BISi  : ALU_ri<0x11, 0x20, "bis",  or>;
 def XORi  : ALU_ri<0x11, 0x40, "xor",  xor>;
@@ -406,10 +414,18 @@ def CTTZ : OForm<0x1c, 0x33, (outs GPRC:$Rc), (ins GPRC:$Rb), "cttz $Rb, $Rc",
                  [(set i64:$Rc, (cttz i64:$Rb))]>;
 }
 
-// `addl $Ra, $Rb, $Rc` is a 32-bit add whose result is sign-extended to 64
-// bits.  With $Rb = $31 it sign-extends the low 32 bits of $Ra.
+// Longword add/subtract/multiply: the 32-bit result is sign-extended to 64
+// bits, which is exactly an i32 operation, so they fold the sextl the quadword
+// forms would otherwise need.  addl with $Rb = $31 also sign-extends $Ra.
 def ADDL : OForm<0x10, 0x00, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
-                 "addl $Ra, $Rb, $Rc", []>;
+                 "addl $Ra, $Rb, $Rc",
+                 [(set i64:$Rc, (sext_inreg (add i64:$Ra, i64:$Rb), i32))]>;
+def SUBL : OForm<0x10, 0x09, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                 "subl $Ra, $Rb, $Rc",
+                 [(set i64:$Rc, (sext_inreg (sub i64:$Ra, i64:$Rb), i32))]>;
+def MULL : OForm<0x13, 0x00, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                 "mull $Ra, $Rb, $Rc",
+                 [(set i64:$Rc, (sext_inreg (mul i64:$Ra, i64:$Rb), i32))]>;
 
 // Comparisons write 0 or 1 into $Rc (Alpha has no condition-code register).
 class CMP_rr<bits<7> func, string mnem>
