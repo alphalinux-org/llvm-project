@@ -1271,6 +1271,10 @@ def STW : MForm<0x0d, (outs), (ins GPRC:$Ra, memri:$addr), "stw $Ra, $addr",
 }
 def : Pat<(i64 (extloadi8 ADDRri:$addr)), (LDBU memri:$addr)>;
 def : Pat<(i64 (extloadi16 ADDRri:$addr)), (LDWU memri:$addr)>;
+let AddedComplexity = 1 in {
+def : Pat<(truncstorei8 (i64 0), ADDRri:$addr), (STB R31, memri:$addr)>;
+def : Pat<(truncstorei16 (i64 0), ADDRri:$addr), (STW R31, memri:$addr)>;
+}
 } // Predicates = [HasBWX]
 
 // Pre-BWX byte/word access.  ldq_u loads the aligned quadword containing the
@@ -1402,6 +1406,13 @@ def STT : MForm<0x27, (outs), (ins FPRC:$Ra, memri:$addr), "stt $Ra, $addr",
                 [(store f64:$Ra, ADDRri:$addr)]>;
 def STS : MForm<0x26, (outs), (ins FPRC:$Ra, memri:$addr), "sts $Ra, $addr",
                 [(store f32:$Ra, ADDRri:$addr)]>;
+}
+
+// Storing a zero reads the zero register directly instead of materializing 0
+// into a temporary (common when zeroing memory).
+let AddedComplexity = 1 in {
+def : Pat<(store (i64 0), ADDRri:$addr), (STQ R31, memri:$addr)>;
+def : Pat<(truncstorei32 (i64 0), ADDRri:$addr), (STL R31, memri:$addr)>;
 }
 
 // Naturally aligned integer loads and stores are atomic; stronger orderings get
