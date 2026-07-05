@@ -166,6 +166,7 @@ multiclass AlphaInstRW {
   // it unmapped made a mull chain schedule as though it were an addq.
   def : InstRW<[Wr_IMul, Rd_IMulOp, Rd_IMulOp], (instrs MULL)>;
   def : InstRW<[Wr_IMul, Rd_IMulOp], (instrs MULLi)>;
+  def : InstRW<[Wr_JSR], (instrs TCRETURN)>;
 }
 
 //===----------------------------------------------------------------------===//

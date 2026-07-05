@@ -37,6 +37,10 @@ enum NodeType : unsigned {
   // A function call through the procedure value in $27.
   CALL,
 
+  // A tail call: jump to the callee (procedure value in $27) without saving a
+  // return address, so it returns straight to our caller.
+  TC_RETURN,
+
   // A direct call: like CALL, but carries the callee symbol so the jsr can be
   // tagged with a branch-prediction hint and a lituse_jsr relocation.
   CALL_DIRECT,
@@ -272,7 +276,22 @@ public:
   SDValue LowerCall(CallLoweringInfo &CLI,
                     SmallVectorImpl<SDValue> &InVals) const override;
 
+  // Let CodeGenPrepare duplicate a return into a tail-marked call's block so
+  // the call lands in tail position; LowerCall applies the real eligibility
+  // checks.
+  bool mayBeEmittedAsTailCall(const CallInst *CI) const override {
+    return CI->isTailCall();
+  }
+
 private:
+  // A call in tail position can reuse the caller's frame and return slot when
+  // it passes nothing on the stack, passes nothing that lives in the frame we
+  // are about to tear down, and shares the caller's C calling convention.
+  bool isEligibleForTailCallOptimization(
+      CallingConv::ID CallerCC, CallingConv::ID CalleeCC, bool IsVarArg,
+      unsigned NumStackBytes,
+      const SmallVectorImpl<ISD::OutputArg> &Outs) const;
+
   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerGlobalTLSAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
