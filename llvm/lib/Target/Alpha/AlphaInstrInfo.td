@@ -337,6 +337,24 @@ def S4SUBQ : OForm<0x10, 0x2b, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
 def S8SUBQ : OForm<0x10, 0x3b, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
                    "s8subq $Ra, $Rb, $Rc",
                    [(set i64:$Rc, (sub (shl i64:$Ra, (i64 3)), i64:$Rb))]>;
+// Longword forms scale then sign-extend the low 32 bits, folding the sextl an
+// i32-typed scaled add/subtract would otherwise need.
+def S4ADDL : OForm<0x10, 0x02, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                   "s4addl $Ra, $Rb, $Rc",
+                   [(set i64:$Rc, (sext_inreg (add (shl i64:$Ra, (i64 2)),
+                                                   i64:$Rb), i32))]>;
+def S8ADDL : OForm<0x10, 0x12, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                   "s8addl $Ra, $Rb, $Rc",
+                   [(set i64:$Rc, (sext_inreg (add (shl i64:$Ra, (i64 3)),
+                                                   i64:$Rb), i32))]>;
+def S4SUBL : OForm<0x10, 0x0b, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                   "s4subl $Ra, $Rb, $Rc",
+                   [(set i64:$Rc, (sext_inreg (sub (shl i64:$Ra, (i64 2)),
+                                                   i64:$Rb), i32))]>;
+def S8SUBL : OForm<0x10, 0x1b, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                   "s8subl $Ra, $Rb, $Rc",
+                   [(set i64:$Rc, (sext_inreg (sub (shl i64:$Ra, (i64 3)),
+                                                   i64:$Rb), i32))]>;
 }
 
 // Literal (8-bit immediate) form of an operate instruction:
