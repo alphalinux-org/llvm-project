@@ -1617,6 +1617,14 @@ void Clang::RenderTargetOptions(const llvm::Triple &EffectiveTriple,
       CmdArgs.push_back("-tune-cpu");
       CmdArgs.push_back(Args.MakeArgString(A->getValue()));
     }
+    // -msmall-data places small globals in .sdata and addresses them relative
+    // to $gp (ldah/lda !gprelhigh/!gprellow) instead of loading them from the
+    // GOT.
+    if (Args.hasFlag(options::OPT_msmall_data, options::OPT_mlarge_data,
+                     false)) {
+      CmdArgs.push_back("-target-feature");
+      CmdArgs.push_back("+small-data");
+    }
     break;
 
   case llvm::Triple::systemz:
