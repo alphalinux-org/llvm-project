@@ -7218,6 +7218,11 @@ def mno_ieee : Flag<["-"], "mno-ieee">, Group<m_alpha_Features_Group>;
 def mieee_with_inexact : Flag<["-"], "mieee-with-inexact">,
   Group<m_alpha_Features_Group>,
   HelpText<"Like -mieee but also maintain the IEEE inexact flag (Alpha)">;
+def msmall_data : Flag<["-"], "msmall-data">, Group<m_alpha_Features_Group>,
+  HelpText<"Place small globals in .sdata and address them relative to the "
+           "global pointer instead of loading them from the GOT (Alpha)">;
+def mlarge_data : Flag<["-"], "mlarge-data">, Group<m_alpha_Features_Group>,
+  HelpText<"Load all global addresses from the GOT (the default) (Alpha)">;
 def mfp_regs : Flag<["-"], "mfp-regs">, Group<m_alpha_Features_Group>,
   HelpText<"Use the floating-point registers (Alpha)">;
 def mno_fp_regs : Flag<["-"], "mno-fp-regs">, Group<m_alpha_Features_Group>,
