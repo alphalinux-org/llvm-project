@@ -13,6 +13,28 @@ define i64 @mulhu(i64 %a, i64 %b) {
   ret i64 %r
 }
 
+; The signed high multiply is expanded in terms of umulh, and the sign
+; correction is the whole content of that expansion: umulh gives the unsigned
+; high half, and each operand's sign mask, ANDed with the other operand, is
+; subtracted from it.
+; CHECK-LABEL: mulhs:
+; CHECK:       sra $16, 63,
+; CHECK:       and
+; CHECK:       umulh $16, $17,
+; CHECK:       subq
+; CHECK:       sra $17, 63,
+; CHECK:       and
+; CHECK:       subq
+; CHECK:       ret
+define i64 @mulhs(i64 %a, i64 %b) {
+  %x = sext i64 %a to i128
+  %y = sext i64 %b to i128
+  %m = mul i128 %x, %y
+  %s = lshr i128 %m, 64
+  %r = trunc i128 %s to i64
+  ret i64 %r
+}
+
 ; Unsigned division by a constant becomes a umulh-based multiply, no divq call.
 ; CHECK-LABEL: divconst:
 ; CHECK-NOT:   __divqu
