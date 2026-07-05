@@ -82,6 +82,13 @@ public:
   // scheduled between its load and its store.
   bool expandPostRAPseudo(MachineInstr &MI) const override;
 
+  // The entry ldgp must stay the function's first instruction: its !gpdisp
+  // relocation assumes the procedure value ($27) equals the ldah's address, so
+  // nothing may be scheduled in front of it.
+  bool isSchedulingBoundary(const MachineInstr &MI,
+                            const MachineBasicBlock *MBB,
+                            const MachineFunction &MF) const override;
+
   // Branch relaxation: the conditional and unconditional branches have a 21-bit
   // displacement (+/- 4 MiB); a target beyond that is reached with an indirect
   // jump through a materialized block address.

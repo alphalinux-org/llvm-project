@@ -335,9 +335,19 @@ bool AlphaInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   return true;
 }
 
+bool AlphaInstrInfo::isSchedulingBoundary(const MachineInstr &MI,
+                                          const MachineBasicBlock *MBB,
+                                          const MachineFunction &MF) const {
+  // Keep the entry ldgp pinned: its !gpdisp relocation resolves relative to the
+  // ldah's own address, which only equals the incoming procedure value ($27)
+  // when the ldgp is the first instruction, so nothing may move ahead of it.
+  if (MI.getOpcode() == Alpha::LDGP)
+    return true;
+  return TargetInstrInfo::isSchedulingBoundary(MI, MBB, MF);
+}
+
 MachineBasicBlock *
 AlphaInstrInfo::getBranchDestBlock(const MachineInstr &MI) const {
-  // The branch target is the machine-basic-block operand.
   for (const MachineOperand &MO : MI.operands())
     if (MO.isMBB())
       return MO.getMBB();
