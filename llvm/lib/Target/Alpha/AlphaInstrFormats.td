@@ -161,3 +161,11 @@ class PalForm<bits<26> func, dag outs, dag ins, string asmstr,
   let Opcode = 0x00;
   let Inst{25-0} = func;
 }
+
+// PALcode call whose 26-bit function code is an operand (call_pal <n>).
+class PalCallForm<dag outs, dag ins, string asmstr, list<dag> pattern>
+    : AlphaInst<outs, ins, asmstr, pattern> {
+  bits<26> func;
+  let Opcode = 0x00;
+  let Inst{25-0} = func;
+}
