@@ -248,6 +248,8 @@ const char *AlphaTargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "AlphaISD::LITERAL";
   case AlphaISD::CALL:
     return "AlphaISD::CALL";
+  case AlphaISD::TC_RETURN:
+    return "AlphaISD::TC_RETURN";
   case AlphaISD::CALL_DIRECT:
     return "AlphaISD::CALL_DIRECT";
   case AlphaISD::CALL_DIRECT_LOCAL:
@@ -783,15 +785,38 @@ SDValue AlphaTargetLowering::LowerBR_JT(SDValue Op, SelectionDAG &DAG) const {
   return DAG.getNode(ISD::BRIND, DL, MVT::Other, Chain, Target);
 }
 
+bool AlphaTargetLowering::isEligibleForTailCallOptimization(
+    CallingConv::ID CallerCC, CallingConv::ID CalleeCC, bool IsVarArg,
+    unsigned NumStackBytes, const SmallVectorImpl<ISD::OutputArg> &Outs) const {
+  // The tail-callee returns straight to our caller, so it must return the way
+  // this function would have: the same convention, and one of the two whose
+  // return lowering this backend implements.
+  if (CallerCC != CalleeCC)
+    return false;
+  if (CalleeCC != CallingConv::C && CalleeCC != CallingConv::Fast)
+    return false;
+  // A variadic callee, or one that needs outgoing stack arguments, would need
+  // stack space that overlaps the frame we are tearing down.
+  if (IsVarArg || NumStackBytes != 0)
+    return false;
+  // A byval argument is a copy the caller made in its own frame and passes by
+  // address.  The epilogue runs before the jump, so that copy is below the
+  // stack pointer by the time the callee reads it.  (This is how a long double
+  // argument is passed, so it is not a rare case.)
+  for (const ISD::OutputArg &Out : Outs)
+    if (Out.Flags.isByVal())
+      return false;
+  return true;
+}
+
 SDValue AlphaTargetLowering::LowerCall(CallLoweringInfo &CLI,
                                        SmallVectorImpl<SDValue> &InVals) const {
   SelectionDAG &DAG = CLI.DAG;
   SDLoc &DL = CLI.DL;
   MachineFunction &MF = DAG.getMachineFunction();
 
-  // No tail calls yet, and the caller uses the global pointer to load the
-  // callee address and to reload gp afterwards.
-  CLI.IsTailCall = false;
+  // The caller uses the global pointer to load the callee address and, for a
+  // non-tail call, to reload gp afterwards.
   MF.getInfo<AlphaMachineFunctionInfo>()->setUsesGP();
 
   SmallVector<CCValAssign, 16> ArgLocs;
@@ -799,7 +824,18 @@ SDValue AlphaTargetLowering::LowerCall(CallLoweringInfo &CLI,
   CCInfo.AnalyzeCallOperands(CLI.Outs, CC_Alpha);
   unsigned NumBytes = CCInfo.getStackSize();
 
-  SDValue Chain = DAG.getCALLSEQ_START(CLI.Chain, NumBytes, 0, DL);
+  // A call in tail position is turned into a jump through $27 when it passes
+  // nothing on the stack (so it reuses the caller's frame) and shares the
+  // caller's calling convention.
+  bool IsTailCall =
+      CLI.IsTailCall && isEligibleForTailCallOptimization(
+                            MF.getFunction().getCallingConv(), CLI.CallConv,
+                            CLI.IsVarArg, NumBytes, CLI.Outs);
+  CLI.IsTailCall = IsTailCall;
+
+  SDValue Chain = CLI.Chain;
+  if (!IsTailCall)
+    Chain = DAG.getCALLSEQ_START(Chain, NumBytes, 0, DL);
 
   // Copy each argument into its assigned register or store it to the outgoing
   // argument area.  The callee address goes in $27 (the procedure value).
@@ -848,6 +884,25 @@ SDValue AlphaTargetLowering::LowerCall(CallLoweringInfo &CLI,
     Glue = Chain.getValue(1);
   }
 
+  const TargetRegisterInfo *TRI = Subtarget.getRegisterInfo();
+  const uint32_t *Mask = TRI->getCallPreservedMask(MF, CLI.CallConv);
+
+  // A tail call jumps through the procedure value in $27 (already copied
+  // above), with the argument registers held live by the glue chain.  The
+  // epilogue is inserted before this terminator, so the frame is gone by the
+  // time we jump. No register mask is attached: nothing is live past the jump,
+  // and jmp (unlike jsr) leaves $26 untouched, so a function whose only call is
+  // a tail call does not clobber the return address and needs no frame to
+  // preserve it.
+  if (IsTailCall) {
+    SmallVector<SDValue, 8> Ops(1, Chain);
+    for (auto &R : RegsToPass)
+      Ops.push_back(DAG.getRegister(R.first, R.second.getValueType()));
+    if (Glue.getNode())
+      Ops.push_back(Glue);
+    return DAG.getNode(AlphaISD::TC_RETURN, DL, MVT::Other, Ops);
+  }
+
   // A direct external call passes the callee symbol as the first operand so the
   // jsr is tagged with the hint and lituse_jsr relocations; a direct local call
   // carries only lituse_jsr; an indirect call has neither.
@@ -859,8 +914,6 @@ SDValue AlphaTargetLowering::LowerCall(CallLoweringInfo &CLI,
   for (auto &R : RegsToPass)
     Ops.push_back(DAG.getRegister(R.first, R.second.getValueType()));
 
-  const TargetRegisterInfo *TRI = Subtarget.getRegisterInfo();
-  const uint32_t *Mask = TRI->getCallPreservedMask(MF, CLI.CallConv);
   Ops.push_back(DAG.getRegisterMask(Mask));
   if (Glue.getNode())
     Ops.push_back(Glue);
