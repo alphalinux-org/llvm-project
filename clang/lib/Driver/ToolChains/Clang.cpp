@@ -1610,6 +1610,15 @@ void Clang::RenderTargetOptions(const llvm::Triple &EffectiveTriple,
     AddSparcTargetArgs(Args, CmdArgs);
     break;
 
+  case llvm::Triple::alpha:
+    // -mcpu is forwarded as -target-cpu via getCPUName; forward -mtune so it is
+    // not reported as an unused argument (the scheduling model follows -mcpu).
+    if (Arg *A = Args.getLastArg(options::OPT_mtune_EQ)) {
+      CmdArgs.push_back("-tune-cpu");
+      CmdArgs.push_back(Args.MakeArgString(A->getValue()));
+    }
+    break;
+
   case llvm::Triple::systemz:
     AddSystemZTargetArgs(Args, CmdArgs);
     break;
