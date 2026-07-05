@@ -161,6 +161,11 @@ multiclass AlphaInstRW {
   def : InstRW<[Wr_ItoF], (instrs ITOFS, MOVi2f_S)>;
   def : InstRW<[Wr_IALU], (instrs S4ADDL, S4SUBL, S8ADDL, S8SUBL)>;
   def : InstRW<[Wr_IShift], (instrs EXTBLi, EXTWLi, EXTLLi)>;
+  def : InstRW<[Wr_IALU], (instrs ADDLi, SUBL, SUBLi)>;
+  // A 32-bit multiply takes the multiplier just as a 64-bit one does; leaving
+  // it unmapped made a mull chain schedule as though it were an addq.
+  def : InstRW<[Wr_IMul, Rd_IMulOp, Rd_IMulOp], (instrs MULL)>;
+  def : InstRW<[Wr_IMul, Rd_IMulOp], (instrs MULLi)>;
 }
 
 //===----------------------------------------------------------------------===//
