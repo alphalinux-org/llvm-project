@@ -13,6 +13,8 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineInstrBundle.h"
 #include "llvm/CodeGen/MachineMemOperand.h"
+#include "llvm/CodeGen/MachineModuleInfo.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Support/ErrorHandling.h"
 
 #define GET_INSTRINFO_CTOR_DTOR
@@ -418,4 +420,120 @@ bool AlphaInstrInfo::isAssociativeAndCommutative(const MachineInstr &Inst,
   default:
     return false;
   }
+}
+
+//===----------------------------------------------------------------------===//
+// Machine outlining.
+//===----------------------------------------------------------------------===//
+
+namespace {
+// The single outlining construction this target uses: call the outlined
+// function with a bsr, which saves the return address in $23 (a caller-saved
+// temporary), and end it with a jump back through $23.
+enum MachineOutlinerClass { MachineOutlinerDefault };
+} // namespace
+
+bool AlphaInstrInfo::shouldOutlineFromFunctionByDefault(
+    MachineFunction &MF) const {
+  return MF.getFunction().hasMinSize();
+}
+
+bool AlphaInstrInfo::isFunctionSafeToOutlineFrom(
+    MachineFunction &MF, bool OutlineFromLinkOnceODRs) const {
+  const Function &F = MF.getFunction();
+  // A linkonce_odr function may be deduplicated by the linker; don't outline
+  // from it unless asked.  A function pinned to a section could expect all its
+  // code to stay there.
+  if (!OutlineFromLinkOnceODRs && F.hasLinkOnceODRLinkage())
+    return false;
+  if (F.hasSection())
+    return false;
+  return true;
+}
+
+std::optional<std::unique_ptr<outliner::OutlinedFunction>>
+AlphaInstrInfo::getOutliningCandidateInfo(
+    const MachineModuleInfo &MMI,
+    std::vector<outliner::Candidate> &RepeatedSequenceLocs,
+    unsigned MinRepeats) const {
+  const TargetRegisterInfo &TRI =
+      *RepeatedSequenceLocs[0].getMF()->getSubtarget().getRegisterInfo();
+
+  // The outlined function is entered with a bsr that overwrites $23, so drop
+  // any candidate where $23 is live across the call site.
+  llvm::erase_if(RepeatedSequenceLocs, [&](outliner::Candidate &C) {
+    return !C.isAvailableAcrossAndOutOfSeq(Alpha::R23, TRI);
+  });
+  if (RepeatedSequenceLocs.size() < MinRepeats)
+    return std::nullopt;
+
+  unsigned SequenceSize = 0;
+  for (const MachineInstr &MI : RepeatedSequenceLocs[0])
+    SequenceSize += getInstSizeInBytes(MI);
+
+  // Each call is a single bsr; the outlined function adds one ret.
+  for (outliner::Candidate &C : RepeatedSequenceLocs)
+    C.setCallInfo(MachineOutlinerDefault, /*CallOverhead=*/4);
+
+  return std::make_unique<outliner::OutlinedFunction>(
+      RepeatedSequenceLocs, SequenceSize, /*FrameOverhead=*/4,
+      MachineOutlinerDefault);
+}
+
+outliner::InstrType
+AlphaInstrInfo::getOutliningTypeImpl(const MachineModuleInfo &MMI,
+                                     MachineBasicBlock::iterator &MBBI,
+                                     unsigned Flags) const {
+  const MachineInstr &MI = *MBBI;
+  const TargetRegisterInfo *TRI = MI.getMF()->getSubtarget().getRegisterInfo();
+
+  // Positions and debug markers do not affect the outlined code.
+  if (MI.isDebugInstr() || MI.isPosition())
+    return outliner::InstrType::Invisible;
+
+  // Outlining across CFI would split the unwind state; control-transfer and
+  // frame instructions cannot be moved either.
+  if (MI.isCFIInstruction() || MI.isCall() || MI.isReturn() || MI.isBranch() ||
+      MI.isTerminator() || MI.isInlineAsm() ||
+      MI.getFlag(MachineInstr::FrameSetup) ||
+      MI.getFlag(MachineInstr::FrameDestroy))
+    return outliner::InstrType::Illegal;
+
+  // Anything that refers to a symbol, constant pool, jump table, block address,
+  // frame slot, or carries a relocation specifier is position- or
+  // gp-dependent, so it is unsafe to move into a separate function.
+  for (const MachineOperand &MO : MI.operands()) {
+    if (MO.isGlobal() || MO.isSymbol() || MO.isCPI() || MO.isJTI() ||
+        MO.isBlockAddress() || MO.isMBB() || MO.isFI() ||
+        MO.getTargetFlags() != 0)
+      return outliner::InstrType::Illegal;
+  }
+
+  // The global pointer, stack pointer, frame pointer, procedure value, return
+  // address, assembler scratch and the $23 bsr link either differ in the
+  // outlined function or are clobbered by the call sequence.
+  for (MCPhysReg Reg : {Alpha::R29, Alpha::R30, Alpha::R15, Alpha::R27,
+                        Alpha::R28, Alpha::R26, Alpha::R23}) {
+    if (MI.readsRegister(Reg, TRI) || MI.modifiesRegister(Reg, TRI))
+      return outliner::InstrType::Illegal;
+  }
+
+  return outliner::InstrType::Legal;
+}
+
+void AlphaInstrInfo::buildOutlinedFrame(
+    MachineBasicBlock &MBB, MachineFunction &MF,
+    const outliner::OutlinedFunction &OF) const {
+  // The bsr left the return address in $23; jump back through it.
+  MBB.addLiveIn(Alpha::R23);
+  MBB.insert(MBB.end(),
+             BuildMI(MF, DebugLoc(), get(Alpha::JMP)).addReg(Alpha::R23));
+}
+
+MachineBasicBlock::iterator AlphaInstrInfo::insertOutlinedCall(
+    Module &M, MachineBasicBlock &MBB, MachineBasicBlock::iterator &It,
+    MachineFunction &MF, outliner::Candidate &C) const {
+  It = MBB.insert(It, BuildMI(MF, DebugLoc(), get(Alpha::BSR))
+                          .addGlobalAddress(M.getNamedValue(MF.getName())));
+  return It;
 }

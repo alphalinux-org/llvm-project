@@ -44,6 +44,14 @@ AlphaTargetMachine::AlphaTargetMachine(const Target &T, const Triple &TT,
   // Reconcile call-frame information across blocks so unwinding is correct at
   // any point, including within epilogues (see resetCFIToInitialState).
   setCFIFixup(true);
+  // Outline repeated instruction sequences from minsize functions.
+  // TargetPassConfig adds the pass only when Options.EnableMachineOutliner is
+  // set, and nothing sets it for Alpha: clang's -moutline is wired up per
+  // target and llc has no flag for it at all, so without this the pass can
+  // never run.  setSupportsDefaultOutlining then confines it to the functions
+  // shouldOutlineFromFunctionByDefault permits, which is the minsize ones.
+  this->Options.EnableMachineOutliner = true;
+  setSupportsDefaultOutlining(true);
   initAsmInfo();
 }
 
