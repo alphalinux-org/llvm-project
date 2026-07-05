@@ -157,6 +157,8 @@ multiclass AlphaInstRW {
   def : InstRW<[Wr_Misc], (instrs PREFR, PREFREN, PREFW)>;
   def : InstRW<[Wr_FtoI, Rd_FStData], (instrs FTOIT)>;
   def : InstRW<[Wr_ItoF], (instrs ITOFT)>;
+  def : InstRW<[Wr_FtoI, Rd_FStData], (instrs FTOIS, MOVf2i_S)>;
+  def : InstRW<[Wr_ItoF], (instrs ITOFS, MOVi2f_S)>;
 }
 
 //===----------------------------------------------------------------------===//
