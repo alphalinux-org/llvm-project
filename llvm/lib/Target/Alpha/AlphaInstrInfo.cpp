@@ -7,12 +7,17 @@
 //===----------------------------------------------------------------------===//
 
 #include "AlphaInstrInfo.h"
+#include "AlphaMachineFunctionInfo.h"
 #include "AlphaSubtarget.h"
 #include "MCTargetDesc/AlphaMCTargetDesc.h"
+#include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/Module.h"
+#include "llvm/MC/MCAsmInfo.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Target/TargetMachine.h"
 
 #define GET_INSTRINFO_CTOR_DTOR
 #include "AlphaGenInstrInfo.inc"
@@ -243,6 +248,15 @@ bool AlphaInstrInfo::reverseBranchCondition(
   return false;
 }
 
+unsigned AlphaInstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
+  if (MI.isInlineAsm()) {
+    const MachineFunction &MF = *MI.getParent()->getParent();
+    const char *AsmStr = MI.getOperand(0).getSymbolName();
+    return getInlineAsmLength(AsmStr, MF.getTarget().getMCAsmInfo());
+  }
+  return MI.getDesc().getSize();
+}
+
 bool AlphaInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   unsigned Opc = MI.getOpcode();
   if (Opc != Alpha::RMW_STOREI8 && Opc != Alpha::RMW_STOREI16)
@@ -271,6 +285,45 @@ bool AlphaInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
 
   MBB.erase(MI);
   return true;
+}
+
+MachineBasicBlock *
+AlphaInstrInfo::getBranchDestBlock(const MachineInstr &MI) const {
+  // The branch target is the machine-basic-block operand.
+  for (const MachineOperand &MO : MI.operands())
+    if (MO.isMBB())
+      return MO.getMBB();
+  return nullptr;
+}
+
+bool AlphaInstrInfo::isBranchOffsetInRange(unsigned BranchOpc,
+                                           int64_t BrOffset) const {
+  // All branches carry a 21-bit signed displacement in 4-byte instruction
+  // units, so the byte offset reaches +/- 4 MiB.
+  return isInt<23>(BrOffset);
+}
+
+void AlphaInstrInfo::insertIndirectBranch(MachineBasicBlock &MBB,
+                                          MachineBasicBlock &NewDestBB,
+                                          MachineBasicBlock &RestoreBB,
+                                          const DebugLoc &DL, int64_t BrOffset,
+                                          RegScavenger *RS) const {
+  // The destination is too far for a branch, so form its address gp-relatively
+  // into the assembler scratch $28 (reserved, so nothing needs to be scavenged)
+  // and jump through it: ldah !gprelhigh then lda !gprellow of the block
+  // symbol.
+  MachineFunction &MF = *MBB.getParent();
+  BuildMI(MBB, MBB.end(), DL, get(Alpha::LDAHg), Alpha::R28)
+      .addMBB(&NewDestBB)
+      .addReg(Alpha::R29);
+  BuildMI(MBB, MBB.end(), DL, get(Alpha::LDAg), Alpha::R28)
+      .addMBB(&NewDestBB)
+      .addReg(Alpha::R28);
+  BuildMI(MBB, MBB.end(), DL, get(Alpha::JMP)).addReg(Alpha::R28);
+
+  // Forming a gp-relative address needs the global pointer established in the
+  // prologue.
+  MF.getInfo<AlphaMachineFunctionInfo>()->setUsesGP();
 }
 
 bool AlphaInstrInfo::isAssociativeAndCommutative(const MachineInstr &Inst,

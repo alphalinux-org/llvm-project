@@ -91,6 +91,7 @@ public:
   void addIRPasses() override;
   bool addInstSelector() override;
   bool addILPOpts() override;
+  void addPreEmitPass() override;
 };
 } // end anonymous namespace
 
@@ -104,6 +105,11 @@ bool AlphaPassConfig::addILPOpts() {
   // Reassociate operation chains to shorten the critical path.
   addPass(&MachineCombinerID);
   return true;
+}
+
+void AlphaPassConfig::addPreEmitPass() {
+  // Rewrite branches whose target is beyond the 21-bit displacement.
+  addPass(&BranchRelaxationPassID);
 }
 
 bool AlphaPassConfig::addInstSelector() {
