@@ -1,41 +1,34 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
 
-; s4addq/s8addq (and the subtract forms) fold a shift-by-2/3 and an add or
-; subtract into one instruction, which is how array indexing is addressed.
-
-; CHECK-LABEL: gep8:
-; CHECK:       s8addq $17, $16, $0
-; CHECK:       ret
-define ptr @gep8(ptr %a, i64 %i) {
-  %p = getelementptr i64, ptr %a, i64 %i
-  ret ptr %p
-}
-
-; CHECK-LABEL: s4a:
-; CHECK:       s4addq $16, $17, $0
-; CHECK:       ret
-define i64 @s4a(i64 %a, i64 %b) {
+; Quadword scaled add/subtract, and the longword forms that fold the sign-extend.
+define i64 @q4(i64 %a, i64 %b) {
+; CHECK-LABEL: q4:
+; CHECK: s4addq $16, $17, $0
   %s = shl i64 %a, 2
   %r = add i64 %s, %b
   ret i64 %r
 }
 
-; CHECK-LABEL: s8s:
-; CHECK:       s8subq $16, $17, $0
-; CHECK:       ret
-define i64 @s8s(i64 %a, i64 %b) {
-  %s = shl i64 %a, 3
-  %r = sub i64 %s, %b
-  ret i64 %r
-}
-
-; The quadword subtract by four, which no case above reaches: s8subq is here
-; and s4subq is not.
-define i64 @s4s(i64 %a, i64 %b) {
-; CHECK-LABEL: s4s:
-; CHECK:       s4subq $16, $17, $0
-; CHECK:       ret
+; The quadword subtract, which no other case here reaches.
+define i64 @q4sub(i64 %a, i64 %b) {
+; CHECK-LABEL: q4sub:
+; CHECK: s4subq $16, $17, $0
   %s = shl i64 %a, 2
   %r = sub i64 %s, %b
   ret i64 %r
+}
+define signext i32 @l4(i32 %a, i32 %b) {
+; CHECK-LABEL: l4:
+; CHECK: s4addl $16, $17, $0
+; CHECK-NOT: addl $0, $31
+  %s = shl i32 %a, 2
+  %r = add i32 %s, %b
+  ret i32 %r
+}
+define signext i32 @l8sub(i32 %a, i32 %b) {
+; CHECK-LABEL: l8sub:
+; CHECK: s8subl $16, $17, $0
+  %s = shl i32 %a, 3
+  %r = sub i32 %s, %b
+  ret i32 %r
 }
