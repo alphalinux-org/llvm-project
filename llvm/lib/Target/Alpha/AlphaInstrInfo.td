@@ -655,6 +655,16 @@ def : Pat<(i64 immSExt16:$imm), (LDA immSExt16:$imm, R31)>;
 // `not $x` is `ornot $31, $x` (0 OR ~x), avoiding an explicit -1.
 def : Pat<(not GPRC:$x), (ORNOT R31, GPRC:$x)>;
 
+// Negate is `subq $31, $x` (0 - x); keep the zero in the register file rather
+// than materializing it with an lda.
+def : Pat<(sub (i64 0), GPRC:$x), (SUBQ R31, GPRC:$x)>;
+
+// Multiply by 3 is 4x - x, a single scaled subtract.  (Multiplies by 5, 7 and
+// 9 are split by decomposeMulByConstant into shift+add/sub forms that fold into
+// s4addq/s8subq/s8addq, so they need no pattern here.)
+def : Pat<(mul GPRC:$x, 3), (S4SUBQ GPRC:$x, GPRC:$x)>;
+def : Pat<(sext_inreg (mul GPRC:$x, 3), i32), (S4SUBL GPRC:$x, GPRC:$x)>;
+
 //===----------------------------------------------------------------------===//
 // Global pointer and global addresses.
 //===----------------------------------------------------------------------===//
