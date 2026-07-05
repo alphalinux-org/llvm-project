@@ -91,6 +91,19 @@ def FeaturePrefetch
                        "Support software-directed prefetch (21264 and later)">;
 def HasPrefetch : Predicate<"Subtarget->hasPrefetch()">;
 
+// -mno-fp-regs: do not use the floating-point registers at all.  The kernel is
+// built this way so it need not save and restore floating-point state on every
+// entry into the kernel.
+def FeatureNoFPRegs : SubtargetFeature<"no-fp-regs", "HasNoFPRegs", "true",
+    "Do not use the floating-point registers (-mno-fp-regs)">;
+
+// -ffixed-$<n>: reserve integer register $<n> so the register allocator will
+// not use it.  The kernel dedicates $8 to the current-thread pointer this way.
+foreach i = 0 ... 31 in
+  def FeatureReserveR#i : SubtargetFeature<"reserve-r"#i,
+      "ReserveRegister["#i#" + Alpha::R0]", "true",
+      "Reserve integer register $"#i>;
+
 // -mieee: floating point traps are completed in software.
 def HasIEEE : Predicate<"Subtarget->hasIEEE()">;
 def NotIEEE : Predicate<"!Subtarget->hasIEEE()">;
