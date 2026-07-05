@@ -5714,6 +5714,12 @@ def msmall_data_limit_EQ : Joined<["-"], "msmall-data-limit=">, Group<m_Group>,
   Alias<G>,
   HelpText<"Put global and static data smaller than the limit into a special section">;
 let Flags = [TargetSpecific] in {
+def msmall_data : Flag<["-"], "msmall-data">, Group<m_alpha_Features_Group>,
+  HelpText<"Place small globals in .sdata and address them relative to the global pointer instead of loading them from the GOT (Alpha)">;
+def mlarge_data : Flag<["-"], "mlarge-data">, Group<m_alpha_Features_Group>,
+  HelpText<"Load all global addresses from the GOT (the default) (Alpha)">;
+}
+let Flags = [TargetSpecific] in {
 def msave_restore : Flag<["-"], "msave-restore">, Group<m_riscv_Features_Group>,
   HelpText<"Enable using library calls for save and restore">;
 def mno_save_restore : Flag<["-"], "mno-save-restore">, Group<m_riscv_Features_Group>,
