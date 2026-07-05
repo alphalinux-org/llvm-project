@@ -993,15 +993,38 @@ def : Pat<(f32 (sint_to_fp GPRC:$x)), (CVTQS (MOVi2f GPRC:$x))>;
 def : Pat<(i64 (fp_to_sint f64:$x)), (MOVf2i (CVTTQ f64:$x))>;
 def : Pat<(i64 (fp_to_sint f32:$x)), (MOVf2i (CVTTQ (CVTST f32:$x)))>;
 
-// Zero-extension of the low two or four bytes via zapnot (the byte mask keeps
-// the low N bytes).  This also lets `and` with these masks avoid materializing
-// a wide constant.  0xff is no longer one of them: it fits and's own 8-bit
-// literal field, and and is a logic operation where zap and zapnot are
-// shift-class ones -- the whole Ebox rather than the upper subcluster on the
-// 21264, either integer pipe rather than E0 alone on the 21164, and a
-// one-cycle result rather than a two-cycle one on the 21064.
-def : Pat<(and GPRC:$x, 0xffff),     (ZAPNOTi GPRC:$x, 3)>;
-def : Pat<(and GPRC:$x, 0xffffffff), (ZAPNOTi GPRC:$x, 15)>;
+// An AND whose mask keeps or clears whole bytes (each byte is 0x00 or 0xFF) is a
+// single zapnot, so it needs no materialized constant.  This covers zero-
+// extension of the low two or four bytes (masks 0xffff and 0xffffffff) and any
+// other byte-granular mask too wide for and's literal field.
+def bytemask : PatLeaf<(imm), [{
+  uint64_t M = N->getZExtValue();
+  // A mask that fits the 8-bit literal field is not one of these: and takes
+  // the literal directly, and and is a logic operation while zap and zapnot
+  // are shift-class ones.  On the 21264 that is four issue pipes rather than
+  // the upper subcluster's two, on the 21164 either integer pipe rather than
+  // E0 alone, and on the 21064 a one-cycle result rather than a two-cycle
+  // one.  0xff is the only byte-granular mask this excludes, since every
+  // other one has a set bit above bit 7.
+  if (M <= 0xFF)
+    return false;
+  for (unsigned I = 0; I != 8; ++I) {
+    uint64_t B = (M >> (I * 8)) & 0xFF;
+    if (B != 0 && B != 0xFF)
+      return false;
+  }
+  return true;
+}]>;
+def zapnotmask : SDNodeXForm<imm, [{
+  uint64_t M = N->getZExtValue();
+  unsigned Keep = 0;
+  for (unsigned I = 0; I != 8; ++I)
+    if (((M >> (I * 8)) & 0xFF) == 0xFF)
+      Keep |= 1u << I;
+  return CurDAG->getTargetConstant(Keep, SDLoc(N), MVT::i64);
+}]>;
+let AddedComplexity = 1 in
+def : Pat<(and GPRC:$x, bytemask:$m), (ZAPNOTi GPRC:$x, (zapnotmask $m))>;
 
 // Sign-extend the low 32 bits with `addl $x, $31, $dst`.
 def : Pat<(sext_inreg GPRC:$x, i32), (ADDL GPRC:$x, R31)>;
