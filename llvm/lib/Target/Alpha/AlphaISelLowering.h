@@ -59,6 +59,10 @@ enum NodeType : unsigned {
   GPREL_HI,
   GPREL_LO,
 
+  // Single-precision integer/floating register move (itofs/ftois).
+  MOVI2F_S,
+  MOVF2I_S,
+
   // Conditional branches that test a register against zero: equal, not-equal,
   // the signed relations, and the low-bit tests.
   BR_EQ,
@@ -257,6 +261,8 @@ public:
                               MachineBasicBlock *MBB) const override;
 
   SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
+  void ReplaceNodeResults(SDNode *N, SmallVectorImpl<SDValue> &Results,
+                          SelectionDAG &DAG) const override;
 
   SDValue LowerCall(CallLoweringInfo &CLI,
                     SmallVectorImpl<SDValue> &InVals) const override;
@@ -267,6 +273,7 @@ private:
   SDValue LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerJumpTable(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerDYNAMIC_STACKALLOC(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerBITCAST(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerLOAD(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSTORE(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBR_CC(SDValue Op, SelectionDAG &DAG) const;
