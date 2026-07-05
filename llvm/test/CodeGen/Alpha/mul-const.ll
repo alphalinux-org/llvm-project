@@ -68,6 +68,35 @@ define i64 @mul11(i64 %a) {
   ret i64 %r
 }
 
+; 25 = 5 * 5 factors into two scaled adds instead of a multiply.
+; CHECK-LABEL: mul25:
+; CHECK-NOT:  mulq
+; CHECK:      s4addq $16, $16, $0
+; CHECK-NEXT: s4addq $0, $0, $0
+; CHECK-NEXT: ret
+define i64 @mul25(i64 %a) {
+  %r = mul i64 %a, 25
+  ret i64 %r
+}
+
+; 100 = 4 * 25: still a short shift/add chain, no multiply.
+; CHECK-LABEL: mul100:
+; CHECK-NOT:  mulq
+; CHECK:      ret
+define i64 @mul100(i64 %a) {
+  %r = mul i64 %a, 100
+  ret i64 %r
+}
+
+; A constant whose shift/add chain would be longer than the multiplier keeps
+; the multiply (10000 = 2^4 * 5^4).
+; CHECK-LABEL: mul10000:
+; CHECK:      mulq
+define i64 @mul10000(i64 %a) {
+  %r = mul i64 %a, 10000
+  ret i64 %r
+}
+
 ; The longword forms fold the sign-extension: i32 x * 3 = s4subl.
 ; CHECK-LABEL: mul3_32:
 ; CHECK:      s4subl $16, $16, $0
