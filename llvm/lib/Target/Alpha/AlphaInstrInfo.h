@@ -73,6 +73,10 @@ public:
   bool
   reverseBranchCondition(SmallVectorImpl<MachineOperand> &Cond) const override;
 
+  // The size in bytes of an instruction; inline assembly needs its length
+  // estimated so branch relaxation sees large asm blocks.
+  unsigned getInstSizeInBytes(const MachineInstr &MI) const override;
+
   // Expands the pre-BWX byte/word store, which is held together as one
   // instruction until here so that no other update of the same quadword can be
   // scheduled between its load and its store.
@@ -84,6 +88,17 @@ public:
   bool isSchedulingBoundary(const MachineInstr &MI,
                             const MachineBasicBlock *MBB,
                             const MachineFunction &MF) const override;
+
+  // Branch relaxation: the conditional and unconditional branches have a 21-bit
+  // displacement (+/- 4 MiB); a target beyond that is reached with an indirect
+  // jump through a materialized block address.
+  MachineBasicBlock *getBranchDestBlock(const MachineInstr &MI) const override;
+  bool isBranchOffsetInRange(unsigned BranchOpc,
+                             int64_t BrOffset) const override;
+  void insertIndirectBranch(MachineBasicBlock &MBB,
+                            MachineBasicBlock &NewDestBB,
+                            MachineBasicBlock &RestoreBB, const DebugLoc &DL,
+                            int64_t BrOffset, RegScavenger *RS) const override;
 
   // Reassociate chains of these operations (via the machine combiner) to
   // shorten the critical path on the out-of-order 21264.

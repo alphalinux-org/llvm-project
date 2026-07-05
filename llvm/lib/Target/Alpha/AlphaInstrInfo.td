@@ -953,8 +953,8 @@ def : Pat<(store f32:$v, (AlphaTprelLo tglobaltlsaddr:$s, GPRC:$b)),
 // Call through the procedure value in $27.  jsr leaves the return address in
 // $26; the following ldgp reloads the caller's global pointer, which the callee
 // may have changed.  $29 is redefined with the caller's gp.
-let isCall = 1, Uses = [R27], Defs = [R26, R29], Size = 12,
-    isCodeGenOnly = 1 in
+// Size is 4 (jsr) + 8 (the ldgp expansion, see AlphaMCCodeEmitter::emitLdgp).
+let isCall = 1, Uses = [R27], Defs = [R26, R29], isCodeGenOnly = 1, Size = 12 in
 def JSR : MbrForm<0b01, (outs), (ins), "jsr $$26, ($$27)\n\tldgp $$29, 0($$26)",
                   [(AlphaCall)]> {
   let Ra = 26;
@@ -969,7 +969,8 @@ def calltarget : Operand<i64> {
 }
 
 // A direct call: same as JSR but tagged with the callee symbol.
-let isCall = 1, Uses = [R27], Defs = [R26, R29], isCodeGenOnly = 1 in
+let isCall = 1, Uses = [R27], Defs = [R26, R29], isCodeGenOnly = 1,
+    Size = 12 in
 def JSRd : MbrForm<0b01, (outs), (ins calltarget:$sym),
                    "jsr $$26, ($$27)\n\tldgp $$29, 0($$26)", []> {
   bits<14> sym;
@@ -982,7 +983,8 @@ def : Pat<(AlphaCallDirect texternalsym:$sym), (JSRd texternalsym:$sym)>;
 
 // A dso-local direct call: only the lituse_jsr relocation, emitted in the code
 // emitter; no callee operand is needed since lituse references the text section.
-let isCall = 1, Uses = [R27], Defs = [R26, R29], isCodeGenOnly = 1 in
+let isCall = 1, Uses = [R27], Defs = [R26, R29], isCodeGenOnly = 1,
+    Size = 12 in
 def JSRdl : MbrForm<0b01, (outs), (ins),
                     "jsr $$26, ($$27)\n\tldgp $$29, 0($$26)",
                     [(AlphaCallDirectLocal)]> {
@@ -993,7 +995,8 @@ def JSRdl : MbrForm<0b01, (outs), (ins),
 // The jsr to __tls_get_addr in a general- or local-dynamic sequence.  Encoded
 // like JSR, but the code emitter attaches a lituse_tlsgd or lituse_tlsldm
 // relocation so the linker can relax the sequence.
-let isCall = 1, Uses = [R27], Defs = [R26, R29], isCodeGenOnly = 1 in {
+let isCall = 1, Uses = [R27], Defs = [R26, R29], isCodeGenOnly = 1,
+    Size = 12 in {
 def JSRtlsgd : MbrForm<0b01, (outs), (ins),
                        "jsr $$26, ($$27)\n\tldgp $$29, 0($$26)",
                        [(AlphaCallTlsgd)]> {

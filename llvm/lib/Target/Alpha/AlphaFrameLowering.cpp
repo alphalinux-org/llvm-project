@@ -110,6 +110,23 @@ void AlphaFrameLowering::determineCalleeSaves(MachineFunction &MF,
       FI->setFramePointerSaveIndex(MF.getFrameInfo().CreateStackObject(
           8, Align(8), /*isSpillSlot=*/true));
   }
+
+  // A branch's 21-bit displacement reaches +/- 4 MiB.  A function that large
+  // may need branch relaxation, which materializes a far target's address gp-
+  // relatively; that only works if the global pointer is established in the
+  // prologue.  Relaxation runs after prologue insertion, too late to request
+  // it, so ask for the global pointer here once the code approaches the branch
+  // range.
+  const AlphaInstrInfo &TII = *MF.getSubtarget<AlphaSubtarget>().getInstrInfo();
+  uint64_t Size = 0;
+  for (const MachineBasicBlock &MBB : MF) {
+    for (const MachineInstr &MI : MBB)
+      Size += TII.getInstSizeInBytes(MI);
+    if (Size > (3u << 20))
+      break;
+  }
+  if (Size > (3u << 20))
+    MF.getInfo<AlphaMachineFunctionInfo>()->setUsesGP();
 }
 
 void AlphaFrameLowering::emitPrologue(MachineFunction &MF,
