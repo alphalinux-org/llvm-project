@@ -393,7 +393,12 @@ ParseStatus AlphaAsmParser::tryParseRegister(MCRegister &Reg, SMLoc &StartLoc,
     return ParseStatus::NoMatch;
   const AsmToken &RegTok = getLexer().peekTok();
   StringRef Name = RegTok.getString();
-  if (matchRegister(("$" + Name).str(), Reg))
+  bool Matched = !matchRegister(("$" + Name).str(), Reg);
+  // GNU as also spells integer register $N as "$rN".
+  if (!Matched && Name.size() > 1 && Name[0] == 'r' &&
+      llvm::all_of(Name.drop_front(), isDigit))
+    Matched = !matchRegister(("$" + Name.drop_front()).str(), Reg);
+  if (!Matched)
     return ParseStatus::NoMatch;
   getParser().Lex(); // $
   getParser().Lex(); // name
@@ -874,6 +879,32 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
         Add.setLoc(IDLoc);
         Out.emitInstruction(Add, getSTI());
       }
+      return false;
+    }
+  }
+
+  // mov imm, $Rc: GNU as defines this as `bis $31, imm, $Rc' and nothing else
+  // -- the operate instruction's own 8-bit unsigned literal field.  It is not
+  // the ldi materialization macro: a value that does not fit is an error
+  // ("operand out of range"), not a longer sequence, and even a value that
+  // does fit assembles to a different instruction from the one lda gives.
+  if (Mnemonic == "mov" && Operands.size() == 3 && Operands[1]->isImm() &&
+      Operands[2]->isReg()) {
+    const MCExpr *E = static_cast<AlphaOperand &>(*Operands[1]).getImm();
+    if (auto *CE = dyn_cast<MCConstantExpr>(E)) {
+      int64_t V = CE->getValue();
+      if (!isUInt<8>(V))
+        return Error(Operands[1]->getStartLoc(),
+                     "operand out of range (" + Twine(V) +
+                         " is not between 0 and 255)");
+      MCInst Inst;
+      Inst.setOpcode(Alpha::BISi);
+      Inst.addOperand(MCOperand::createReg(
+          static_cast<AlphaOperand &>(*Operands[2]).getReg()));
+      Inst.addOperand(MCOperand::createReg(Alpha::R31));
+      Inst.addOperand(MCOperand::createImm(V));
+      Inst.setLoc(IDLoc);
+      Out.emitInstruction(Inst, getSTI());
       return false;
     }
   }
