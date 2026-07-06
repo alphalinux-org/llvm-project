@@ -90,4 +90,10 @@ def int_alpha_pkwb   : ClangBuiltin<"__builtin_alpha_pkwb">,   AlphaI64_1;
 def int_alpha_unpkbl : ClangBuiltin<"__builtin_alpha_unpkbl">, AlphaI64_1;
 def int_alpha_unpkbw : ClangBuiltin<"__builtin_alpha_unpkbw">, AlphaI64_1;
 
+// Write the thread pointer via the wrunique PAL call.
+// Mirrors __builtin_set_thread_pointer, which glibc's TLS setup uses.
+def int_alpha_set_thread_pointer
+    : ClangBuiltin<"__builtin_set_thread_pointer">,
+      DefaultAttrsIntrinsic<[], [llvm_ptr_ty], [IntrHasSideEffects]>;
+
 } // TargetPrefix = "alpha"
