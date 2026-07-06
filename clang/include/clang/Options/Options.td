@@ -7223,6 +7223,10 @@ def msmall_data : Flag<["-"], "msmall-data">, Group<m_alpha_Features_Group>,
            "global pointer instead of loading them from the GOT (Alpha)">;
 def mlarge_data : Flag<["-"], "mlarge-data">, Group<m_alpha_Features_Group>,
   HelpText<"Load all global addresses from the GOT (the default) (Alpha)">;
+def msafe_partial : Flag<["-"], "msafe-partial">, Group<m_alpha_Features_Group>,
+  HelpText<"Use a lock-based sequence for partial/unaligned stores so they are "
+           "safe against concurrent access to adjacent bytes (Alpha)">;
+def mno_safe_partial : Flag<["-"], "mno-safe-partial">, Group<m_alpha_Features_Group>;
 def msmall_text : Flag<["-"], "msmall-text">, Group<m_alpha_Features_Group>,
   HelpText<"Assume all code fits within branch range of one global pointer, "
            "making a direct call a single bsr (Alpha)">;
