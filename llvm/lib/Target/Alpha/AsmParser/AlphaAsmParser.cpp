@@ -392,7 +392,12 @@ ParseStatus AlphaAsmParser::tryParseRegister(MCRegister &Reg, SMLoc &StartLoc,
     return ParseStatus::NoMatch;
   const AsmToken &RegTok = getLexer().peekTok();
   StringRef Name = RegTok.getString();
-  if (matchRegister(("$" + Name).str(), Reg))
+  bool Matched = !matchRegister(("$" + Name).str(), Reg);
+  // GNU as also spells integer register $N as "$rN".
+  if (!Matched && Name.size() > 1 && Name[0] == 'r' &&
+      llvm::all_of(Name.drop_front(), isDigit))
+    Matched = !matchRegister(("$" + Name.drop_front()).str(), Reg);
+  if (!Matched)
     return ParseStatus::NoMatch;
   getParser().Lex(); // $
   getParser().Lex(); // name
@@ -873,6 +878,18 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
         Add.setLoc(IDLoc);
         Out.emitInstruction(Add, getSTI());
       }
+      return false;
+    }
+  }
+
+  // mov imm, $Rc: GNU as accepts an immediate source, materializing it in code
+  // (bis of a small constant, otherwise the same sequence as ldi).
+  if (Mnemonic == "mov" && Operands.size() == 3 && Operands[1]->isImm() &&
+      Operands[2]->isReg()) {
+    const MCExpr *E = static_cast<AlphaOperand &>(*Operands[1]).getImm();
+    if (auto *CE = dyn_cast<MCConstantExpr>(E)) {
+      emitLoadImm(static_cast<AlphaOperand &>(*Operands[2]).getReg(),
+                  CE->getValue(), IDLoc, Out);
       return false;
     }
   }
