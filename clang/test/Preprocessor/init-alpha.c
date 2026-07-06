@@ -15,3 +15,14 @@
 // Little-endian.
 // CHECK-DAG: #define __ORDER_LITTLE_ENDIAN__ 1234
 // CHECK-DAG: #define __BYTE_ORDER__ __ORDER_LITTLE_ENDIAN__
+
+// 128-bit long double.
+// CHECK-DAG: #define __LONG_DOUBLE_128__ 1
+// CHECK-DAG: #define __SIZEOF_LONG_DOUBLE__ 16
+
+// -mlong-double-64 makes long double a plain double, so the macro glibc's
+// ldbl-opt headers switch on must not be defined.
+// RUN: %clang_cc1 -E -dM -triple alpha-unknown-linux-gnu -mlong-double-64 \
+// RUN:   < /dev/null | FileCheck %s --check-prefix=LD64 \
+// RUN:       --implicit-check-not=__LONG_DOUBLE_128__
+// LD64: #define __SIZEOF_LONG_DOUBLE__ 8

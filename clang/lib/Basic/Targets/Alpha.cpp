@@ -57,6 +57,11 @@ void AlphaTargetInfo::getTargetDefines(const LangOptions &Opts,
   Builder.defineMacro("__alpha");
   Builder.defineMacro("_LP64");
   Builder.defineMacro("__LP64__");
+  // long double is 128-bit IEEE quad, as GCC signals with this macro.  Not
+  // under -mlong-double-64, where it is the same double the macro says it is
+  // not: glibc's ldbl-opt headers switch on it.
+  if (LongDoubleWidth == 128)
+    Builder.defineMacro("__LONG_DOUBLE_128__");
 
   // Processor-family macro, matching GCC: the EV56/PCA56 share the EV5 core and
   // EV67 shares the EV6 core, so the family macro follows the microarchitecture
