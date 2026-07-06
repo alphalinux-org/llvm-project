@@ -31,7 +31,9 @@ public:
 
   bool runOnMachineFunction(MachineFunction &MF) override {
     const AlphaSubtarget &ST = MF.getSubtarget<AlphaSubtarget>();
-    if (!ST.hasTrapPrecisionInsn())
+    // The 21264 and later report arithmetic exceptions precisely in hardware
+    // and treat trapb as a no-op, so no barrier is needed there.
+    if (!ST.hasTrapPrecisionInsn() || ST.hasPreciseArithTraps())
       return false;
 
     const TargetInstrInfo &TII = *ST.getInstrInfo();

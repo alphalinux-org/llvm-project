@@ -109,6 +109,12 @@ def FeatureTrapPrecisionInsn
     : SubtargetFeature<"trap-precision-insn", "HasTrapPrecisionInsn", "true",
                        "Insert trap barriers for instruction-precise FP traps">;
 
+// The 21264 (ev6) and later implement precise arithmetic exceptions in
+// hardware, so trapb is a no-op there and need not be emitted.
+def FeaturePreciseArithTraps
+    : SubtargetFeature<"precise-arith-traps", "HasPreciseArithTraps", "true",
+                       "Arithmetic traps are precise in hardware (21264+)">;
+
 // Software-directed prefetch (a load to R31/F31) is architecturally defined
 // only on the 21264 and later; on earlier processors such a load is an ordinary
 // load that can fault.  The evict-next hint (ldq/ldt to R31/F31) is defined only
