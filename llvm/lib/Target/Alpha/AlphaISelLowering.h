@@ -119,7 +119,12 @@ enum NodeType : unsigned {
   // A misaligned store, kept whole until it is expanded into a bundle.
   USTORE,
 
-  LAST_MEMORY_OPCODE = USTORE,
+  // A -msafe-partial misaligned store (value, pointer, byte width): each
+  // spanned quadword is updated with a lock-based ldq_l/stq_c loop so the
+  // read-modify-write is safe against concurrent access to adjacent bytes.
+  SAFE_USTORE,
+
+  LAST_MEMORY_OPCODE = SAFE_USTORE,
 };
 } // namespace AlphaISD
 

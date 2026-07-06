@@ -190,6 +190,7 @@ multiclass AlphaInstRW {
   def : InstRW<[Wr_Misc], (instrs
       TRAPB, WMB, EXCB, ECB, WH64, WH64EN, FETCH, FETCH_M)>;
   def : InstRW<[Wr_JSR], (instrs CALLbsr, TCRETURNbr)>;
+  def : InstRW<[Wr_IStore, Rd_StData], (instrs SAFE_USTORE)>;
 }
 
 //===----------------------------------------------------------------------===//
