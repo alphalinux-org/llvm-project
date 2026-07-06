@@ -7224,6 +7224,18 @@ def mno_ieee : Flag<["-"], "mno-ieee">, Group<m_alpha_Features_Group>;
 def mieee_with_inexact : Flag<["-"], "mieee-with-inexact">,
   Group<m_alpha_Features_Group>,
   HelpText<"Like -mieee but also maintain the IEEE inexact flag (Alpha)">;
+def mieee_conformant : Flag<["-"], "mieee-conformant">,
+  Group<m_alpha_Features_Group>,
+  HelpText<"Generate fully IEEE-conformant floating-point code (Alpha)">;
+def mfp_trap_mode_EQ : Joined<["-"], "mfp-trap-mode=">,
+  Group<m_alpha_Features_Group>,
+  HelpText<"Floating-point trapping mode: n, u, su, or sui (Alpha)">;
+def mfp_rounding_mode_EQ : Joined<["-"], "mfp-rounding-mode=">,
+  Group<m_alpha_Features_Group>,
+  HelpText<"Floating-point rounding mode: n, m, c, or d (Alpha)">;
+def mtrap_precision_EQ : Joined<["-"], "mtrap-precision=">,
+  Group<m_alpha_Features_Group>,
+  HelpText<"Floating-point trap precision: p, f, or i (Alpha)">;
 def msmall_text : Flag<["-"], "msmall-text">, Group<m_alpha_Features_Group>,
   HelpText<"Assume all code fits within branch range of one global pointer, "
            "making a direct call a single bsr (Alpha)">;

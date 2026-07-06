@@ -42,15 +42,82 @@ void alpha::getAlphaTargetFeatures(const Driver &D, const ArgList &Args,
   Handle(options::OPT_mmax, options::OPT_mno_max, "mvi");
   Handle(options::OPT_mfix, options::OPT_mno_fix, "fix");
 
-  // IEEE floating-point conformance.  -mieee-with-inexact implies -mieee.
-  if (Args.hasArg(options::OPT_mieee_with_inexact)) {
-    Features.push_back("+ieee-with-inexact");
-    // -mieee-with-inexact implies -mieee; claim the weaker flag to silence
-    // "unsupported option" when both are passed (as glibc does).
-    Args.ClaimAllArgs(options::OPT_mieee);
-    Args.ClaimAllArgs(options::OPT_mno_ieee);
-  } else {
-    Handle(options::OPT_mieee, options::OPT_mno_ieee, "ieee");
+  // IEEE floating-point conformance.  -mieee, -mieee-with-inexact and
+  // -mfp-trap-mode all select the trapping mode -- they are GCC's one
+  // alpha_fptm -- so they form a single last-wins group rather than two
+  // independent queries.  `-mieee -mfp-trap-mode=n' asks for no trapping mode
+  // and must not leave +ieee behind, and `-mieee-with-inexact -mieee' asks for
+  // su, not sui.  getLastArg claims every argument it scans, so passing both
+  // -mieee and -mieee-with-inexact (as glibc does) still warns about neither.
+  if (Arg *A = Args.getLastArg(options::OPT_mieee, options::OPT_mno_ieee,
+                               options::OPT_mieee_with_inexact,
+                               options::OPT_mfp_trap_mode_EQ)) {
+    const Option &O = A->getOption();
+    if (O.matches(options::OPT_mieee)) {
+      Features.push_back("+ieee");
+    } else if (O.matches(options::OPT_mno_ieee)) {
+      Features.push_back("-ieee");
+    } else if (O.matches(options::OPT_mieee_with_inexact)) {
+      Features.push_back("+ieee-with-inexact");
+    } else {
+      StringRef M = A->getValue();
+      if (M == "su")
+        Features.push_back("+ieee");
+      else if (M == "sui")
+        Features.push_back("+ieee-with-inexact");
+      else if (M == "u")
+        Features.push_back("+fptrap-u");
+      else if (M != "n")
+        D.Diag(diag::err_drv_unsupported_option_argument)
+            << A->getSpelling() << M;
+    }
+  }
+
+  // -mfp-rounding-mode selects the IEEE rounding mode (n is the default).
+  if (Arg *A = Args.getLastArg(options::OPT_mfp_rounding_mode_EQ)) {
+    StringRef M = A->getValue();
+    if (M == "d")
+      Features.push_back("+fpround-dynamic");
+    else if (M == "m")
+      Features.push_back("+fpround-minus");
+    else if (M == "c")
+      Features.push_back("+fpround-chopped");
+    else if (M != "n")
+      D.Diag(diag::err_drv_unsupported_option_argument)
+          << A->getSpelling() << M;
+  }
+
+  // -mtrap-precision=i makes arithmetic traps precise to the instruction by
+  // inserting trap barriers.  Function precision (f) would need barriers only
+  // at function boundaries; we do not implement it, so say so rather than
+  // quietly giving program precision, which traps far from the instruction
+  // that raised them.
+  bool TrapPrecisionInsn = false;
+  if (Arg *A = Args.getLastArg(options::OPT_mtrap_precision_EQ)) {
+    StringRef M = A->getValue();
+    if (M == "i") {
+      Features.push_back("+trap-precision-insn");
+      TrapPrecisionInsn = true;
+    } else if (M != "p") {
+      D.Diag(diag::err_drv_unsupported_option_argument)
+          << A->getSpelling() << M;
+    }
+  }
+
+  // -mieee-conformant only marks the object, with a `.eflag 48' in each
+  // function prologue that asks the loader for IEEE-conformant math-library
+  // routines.  It implies nothing: gcc documents that as its whole effect, and
+  // that the user must also ask for -mtrap-precision=i and -mfp-trap-mode=su
+  // or sui.  Implying them instead would mean -mieee-conformant alone silently
+  // changed how arithmetic is generated.  gcc does not check the combination;
+  // diagnosing it is more useful than marking an object that does not hold up.
+  if (Arg *A = Args.getLastArg(options::OPT_mieee_conformant)) {
+    Features.push_back("+ieee-conformant");
+    bool HasSuMode = llvm::is_contained(Features, "+ieee") ||
+                     llvm::is_contained(Features, "+ieee-with-inexact");
+    if (!TrapPrecisionInsn || !HasSuMode)
+      D.Diag(diag::warn_drv_alpha_ieee_conformant_needs_modes)
+          << A->getSpelling();
   }
 
   // -msmall-text emits a single bsr for a direct call instead of a GOT load and
