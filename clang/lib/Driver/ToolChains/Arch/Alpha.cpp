@@ -53,6 +53,67 @@ void alpha::getAlphaTargetFeatures(const Driver &D, const ArgList &Args,
     Handle(options::OPT_mieee, options::OPT_mno_ieee, "ieee");
   }
 
+  // -mfp-trap-mode selects the trapping mode; su/sui are the -mieee modes.
+  if (Arg *A = Args.getLastArg(options::OPT_mfp_trap_mode_EQ)) {
+    StringRef M = A->getValue();
+    if (M == "su")
+      Features.push_back("+ieee");
+    else if (M == "sui")
+      Features.push_back("+ieee-with-inexact");
+    else if (M == "u")
+      Features.push_back("+fptrap-u");
+    else if (M != "n")
+      D.Diag(diag::err_drv_unsupported_option_argument)
+          << A->getSpelling() << M;
+  }
+
+  // -mfp-rounding-mode selects the IEEE rounding mode (n is the default).
+  if (Arg *A = Args.getLastArg(options::OPT_mfp_rounding_mode_EQ)) {
+    StringRef M = A->getValue();
+    if (M == "d")
+      Features.push_back("+fpround-dynamic");
+    else if (M == "m")
+      Features.push_back("+fpround-minus");
+    else if (M == "c")
+      Features.push_back("+fpround-chopped");
+    else if (M != "n")
+      D.Diag(diag::err_drv_unsupported_option_argument)
+          << A->getSpelling() << M;
+  }
+
+  // -mtrap-precision=i makes arithmetic traps precise to the instruction by
+  // inserting trap barriers.  Function precision (f) would need barriers only
+  // at function boundaries; we do not implement it, so say so rather than
+  // quietly giving program precision, which traps far from the instruction
+  // that raised them.
+  bool TrapPrecisionInsn = false;
+  if (Arg *A = Args.getLastArg(options::OPT_mtrap_precision_EQ)) {
+    StringRef M = A->getValue();
+    if (M == "i") {
+      Features.push_back("+trap-precision-insn");
+      TrapPrecisionInsn = true;
+    } else if (M != "p") {
+      D.Diag(diag::err_drv_unsupported_option_argument)
+          << A->getSpelling() << M;
+    }
+  }
+
+  // -mieee-conformant only marks the object, with a `.eflag 48' in each
+  // function prologue that asks the loader for IEEE-conformant math-library
+  // routines.  It implies nothing: gcc documents that as its whole effect, and
+  // that the user must also ask for -mtrap-precision=i and -mfp-trap-mode=su
+  // or sui.  Implying them instead would mean -mieee-conformant alone silently
+  // changed how arithmetic is generated.  gcc does not check the combination;
+  // diagnosing it is more useful than marking an object that does not hold up.
+  if (Arg *A = Args.getLastArg(options::OPT_mieee_conformant)) {
+    Features.push_back("+ieee-conformant");
+    bool HasSuMode = llvm::is_contained(Features, "+ieee") ||
+                     llvm::is_contained(Features, "+ieee-with-inexact");
+    if (!TrapPrecisionInsn || !HasSuMode)
+      D.Diag(diag::warn_drv_alpha_ieee_conformant_needs_modes)
+          << A->getSpelling();
+  }
+
   // -msmall-text emits a single bsr for a direct call instead of a GOT load and
   // jsr, assuming the whole program is in range and shares the global pointer.
   Handle(options::OPT_msmall_text, options::OPT_mlarge_text, "small-text");
