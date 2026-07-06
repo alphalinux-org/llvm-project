@@ -78,6 +78,9 @@ private:
                             MachineBasicBlock::iterator &NextMBBI);
   bool expandSafeStore(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
                        MachineBasicBlock::iterator &NextMBBI);
+  bool expandPartialStore(MachineBasicBlock &MBB,
+                          MachineBasicBlock::iterator MBBI,
+                          MachineBasicBlock::iterator &NextMBBI);
 };
 
 char AlphaExpandAtomicPseudo::ID = 0;
@@ -136,6 +139,8 @@ bool AlphaExpandAtomicPseudo::expandMI(MachineBasicBlock &MBB,
     return expandSubwordCmpXchg(MBB, MBBI, NextMBBI);
   case Alpha::SAFE_STORE_LOOP:
     return expandSafeStore(MBB, MBBI, NextMBBI);
+  case Alpha::SAFE_USTORE_LOOP:
+    return expandPartialStore(MBB, MBBI, NextMBBI);
   }
   return false;
 }
@@ -478,6 +483,105 @@ bool AlphaExpandAtomicPseudo::expandSafeStore(
             .addImm(0);
   addNarrowedMemOperands(MIB, MI, MachineMemOperand::MOStore);
   BuildMI(LoopBB, DL, TII->get(Alpha::BEQ)).addReg(Old).addMBB(LoopBB);
+
+  NextMBBI = MBB.end();
+  MI.eraseFromParent();
+  addLiveIns(Blocks);
+  return true;
+}
+
+// A misaligned store updates the one or two aligned quadwords the field falls
+// in, each with its own lock loop, so a concurrent access to adjacent bytes of
+// the same quadword is not lost.  Whether the field spans two quadwords is a
+// run-time question, so the second loop is guarded rather than always run: a
+// no-op update would still be a lock loop, which can spin against another
+// processor for nothing.
+bool AlphaExpandAtomicPseudo::expandPartialStore(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
+    MachineBasicBlock::iterator &NextMBBI) {
+  MachineInstr &MI = *MBBI;
+  const DebugLoc &DL = MI.getDebugLoc();
+
+  Register AlignedLo = MI.getOperand(0).getReg();
+  Register AlignedHi = MI.getOperand(1).getReg();
+  Register PosLo = MI.getOperand(2).getReg();
+  Register PosHi = MI.getOperand(3).getReg();
+  Register SameQuad = MI.getOperand(4).getReg();
+  Register Old = MI.getOperand(5).getReg();
+  Register Val = MI.getOperand(6).getReg();
+  Register Addr = MI.getOperand(7).getReg();
+  int64_t Bytes = MI.getOperand(8).getImm();
+
+  unsigned InsL, InsH, MskL, MskH;
+  switch (Bytes) {
+  case 2:
+    InsL = Alpha::INSWL;
+    InsH = Alpha::INSWH;
+    MskL = Alpha::MSKWL;
+    MskH = Alpha::MSKWH;
+    break;
+  case 4:
+    InsL = Alpha::INSLL;
+    InsH = Alpha::INSLH;
+    MskL = Alpha::MSKLL;
+    MskH = Alpha::MSKLH;
+    break;
+  case 8:
+    InsL = Alpha::INSQL;
+    InsH = Alpha::INSQH;
+    MskL = Alpha::MSKQL;
+    MskH = Alpha::MSKQH;
+    break;
+  default:
+    llvm_unreachable("misaligned store of a width with no insert/mask pair");
+  }
+
+  // Both aligned addresses and both positioned halves are computed once,
+  // outside either loop.  AlignedHi holds addr + bytes - 1 until it is aligned
+  // down, so the address of the last byte needs no register of its own.
+  BuildMI(MBB, MI, DL, TII->get(Alpha::BICi), AlignedLo).addReg(Addr).addImm(7);
+  BuildMI(MBB, MI, DL, TII->get(Alpha::LDA), AlignedHi)
+      .addImm(Bytes - 1)
+      .addReg(Addr);
+  BuildMI(MBB, MI, DL, TII->get(Alpha::BICi), AlignedHi)
+      .addReg(AlignedHi)
+      .addImm(7);
+  BuildMI(MBB, MI, DL, TII->get(InsL), PosLo).addReg(Val).addReg(Addr);
+  BuildMI(MBB, MI, DL, TII->get(InsH), PosHi).addReg(Val).addReg(Addr);
+  BuildMI(MBB, MI, DL, TII->get(Alpha::CMPEQ), SameQuad)
+      .addReg(AlignedLo)
+      .addReg(AlignedHi);
+
+  SmallVector<MachineBasicBlock *, 4> Blocks;
+  splitBlock(MBB, MI, Blocks, 4);
+  MachineBasicBlock *LoopLo = Blocks[0], *CheckBB = Blocks[1],
+                    *LoopHi = Blocks[2], *ExitBB = Blocks[3];
+  MBB.addSuccessor(LoopLo);
+  LoopLo->addSuccessor(LoopLo);
+  LoopLo->addSuccessor(CheckBB);
+  CheckBB->addSuccessor(ExitBB);
+  CheckBB->addSuccessor(LoopHi);
+  LoopHi->addSuccessor(LoopHi);
+  LoopHi->addSuccessor(ExitBB);
+
+  auto EmitLoop = [&](MachineBasicBlock *Loop, Register Aligned,
+                      unsigned MskOpc, Register Pos) {
+    MachineInstrBuilder MIB = BuildMI(Loop, DL, TII->get(Alpha::LDQ_L), Old)
+                                  .addReg(Aligned)
+                                  .addImm(0);
+    addNarrowedMemOperands(MIB, MI, MachineMemOperand::MOLoad);
+    BuildMI(Loop, DL, TII->get(MskOpc), Old).addReg(Old).addReg(Addr);
+    BuildMI(Loop, DL, TII->get(Alpha::BIS), Old).addReg(Pos).addReg(Old);
+    MIB = BuildMI(Loop, DL, TII->get(Alpha::STQ_C), Old)
+              .addReg(Old)
+              .addReg(Aligned)
+              .addImm(0);
+    addNarrowedMemOperands(MIB, MI, MachineMemOperand::MOStore);
+    BuildMI(Loop, DL, TII->get(Alpha::BEQ)).addReg(Old).addMBB(Loop);
+  };
+  EmitLoop(LoopLo, AlignedLo, MskL, PosLo);
+  BuildMI(CheckBB, DL, TII->get(Alpha::BNE)).addReg(SameQuad).addMBB(ExitBB);
+  EmitLoop(LoopHi, AlignedHi, MskH, PosHi);
 
   NextMBBI = MBB.end();
   MI.eraseFromParent();

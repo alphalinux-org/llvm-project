@@ -543,6 +543,8 @@ const char *AlphaTargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "AlphaISD::DTPREL_HI";
   case AlphaISD::DTPREL_LO:
     return "AlphaISD::DTPREL_LO";
+  case AlphaISD::SAFE_USTORE:
+    return "AlphaISD::SAFE_USTORE";
   }
   return nullptr;
 }
@@ -630,6 +632,17 @@ SDValue AlphaTargetLowering::LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
   SDValue Chain = ST->getChain();
   SDValue Ptr = ST->getBasePtr();
   SDValue Val = ST->getValue();
+  // With -msafe-partial, update each spanned quadword with a lock-based loop
+  // (emitted by the custom inserter) so the read-modify-write is atomic.  The
+  // node carries the store's memory operand, so it has to be built as a memory
+  // node: the expansion reads it back off the node to put on the ldq_l and
+  // stq_c it builds, and casting the result of getNode to MemSDNode is
+  // undefined behaviour -- there is nothing behind it to read.
+  if (Subtarget.hasSafePartial())
+    return DAG.getMemIntrinsicNode(
+        AlphaISD::SAFE_USTORE, dl, DAG.getVTList(MVT::Other),
+        {Chain, Val, Ptr, DAG.getConstant(Bytes, dl, MVT::i64)}, MemVT,
+        ST->getMemOperand());
   // A misaligned store reads the one or two quadwords the field falls in,
   // splices the field into them and writes them back.  That has to stay
   // indivisible -- one instruction, and then one bundle: two such stores can
@@ -1708,6 +1721,10 @@ AlphaTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
     return emitAtomicLoop(MI, MBB, Alpha::SAFE_STORE_LOOP,
                           /*NumScratch=*/3, /*NumDefs=*/0,
                           {1});
+  case Alpha::SAFE_USTORE:
+    return emitAtomicLoop(MI, MBB, Alpha::SAFE_USTORE_LOOP,
+                          /*NumScratch=*/6, /*NumDefs=*/0,
+                          {});
   case Alpha::ATOMIC_ADD_I64:
     return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_RMW_LOOP,
                           /*NumScratch=*/1, /*NumDefs=*/1,
