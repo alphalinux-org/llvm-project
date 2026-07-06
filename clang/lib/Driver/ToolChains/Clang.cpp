@@ -6273,7 +6273,16 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     else if (TC.getTriple().isPPC() &&
              (A->getOption().getID() != options::OPT_mlong_double_80))
       A->render(Args, CmdArgs);
-    else
+    else if (TC.getTriple().getArch() == llvm::Triple::alpha) {
+      if (A->getOption().getID() == options::OPT_mlong_double_128)
+        ; // Already the default; no-op.
+      else if (A->getOption().getID() == options::OPT_mlong_double_64)
+        A->render(Args,
+                  CmdArgs); // Switch long double to 64-bit (same as double).
+      else
+        D.Diag(diag::err_drv_unsupported_opt_for_target)
+            << A->getAsString(Args) << TripleStr;
+    } else
       D.Diag(diag::err_drv_unsupported_opt_for_target)
           << A->getAsString(Args) << TripleStr;
   }

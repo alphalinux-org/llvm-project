@@ -26,4 +26,13 @@
 // RUN:   -### -c %s 2>&1 | FileCheck %s --check-prefix=SAFEPARTIAL
 // SAFEPARTIAL: "-target-feature" "+safe-partial"
 
+// -mlong-double-128 restates the format long double already has, so the driver
+// accepts it and passes nothing down.
+// RUN: %clang --target=alpha-unknown-linux-gnu -mlong-double-128 \
+// RUN:   -### -c %s 2>&1 | FileCheck %s --check-prefix=LONGDOUBLE128
+// LONGDOUBLE128-NOT: error:
+// LONGDOUBLE128: "-cc1"
+// LONGDOUBLE128-NOT: "-mlong-double-128"
+// LONGDOUBLE128-NOT: error:
+
 int main(void) { return 0; }
