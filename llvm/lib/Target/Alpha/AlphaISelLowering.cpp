@@ -480,6 +480,8 @@ const char *AlphaTargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "AlphaISD::DTPREL_HI";
   case AlphaISD::DTPREL_LO:
     return "AlphaISD::DTPREL_LO";
+  case AlphaISD::SAFE_USTORE:
+    return "AlphaISD::SAFE_USTORE";
   }
   return nullptr;
 }
@@ -567,6 +569,11 @@ SDValue AlphaTargetLowering::LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
   SDValue Chain = ST->getChain();
   SDValue Ptr = ST->getBasePtr();
   SDValue Val = ST->getValue();
+  // With -msafe-partial, update each spanned quadword with a lock-based loop
+  // (emitted by the custom inserter) so the read-modify-write is atomic.
+  if (Subtarget.hasSafePartial())
+    return DAG.getNode(AlphaISD::SAFE_USTORE, dl, MVT::Other,
+                       {Chain, Val, Ptr, DAG.getConstant(Bytes, dl, MVT::i64)});
   auto Flags = ST->isVolatile() ? MachineMemOperand::MOVolatile
                                 : MachineMemOperand::MONone;
   SDValue PtrHi = DAG.getNode(ISD::ADD, dl, MVT::i64, Ptr,
@@ -1747,6 +1754,92 @@ emitSubwordCmpXchg(MachineInstr &MI, MachineBasicBlock *BB, bool IsWord) {
 
 // Expand a lock-based pre-BWX byte/word store into an ldq_l/stq_c loop that
 // reads the containing quadword, splices in the new field and stores it back.
+// Expand a -msafe-partial misaligned store into a lock-based read-modify-write
+// of each aligned quadword the field spans, so a concurrent access to adjacent
+// bytes in the same quadword is not corrupted.  The field's low part updates
+// the quadword at (addr & ~7) and its high part the quadword at ((addr+bytes-1)
+// & ~7); when the field lies within one quadword the high update is a no-op.
+static MachineBasicBlock *emitPartialStore(MachineInstr &MI,
+                                           MachineBasicBlock *BB) {
+  MachineFunction &MF = *BB->getParent();
+  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
+  MachineRegisterInfo &MRI = MF.getRegInfo();
+  const DebugLoc &DL = MI.getDebugLoc();
+
+  Register Val = MI.getOperand(0).getReg();
+  Register Addr = MI.getOperand(1).getReg();
+  int64_t Bytes = MI.getOperand(2).getImm();
+  unsigned InsL, InsH, MskL, MskH;
+  switch (Bytes) {
+  case 2:
+    InsL = Alpha::INSWL;
+    InsH = Alpha::INSWH;
+    MskL = Alpha::MSKWL;
+    MskH = Alpha::MSKWH;
+    break;
+  case 4:
+    InsL = Alpha::INSLL;
+    InsH = Alpha::INSLH;
+    MskL = Alpha::MSKLL;
+    MskH = Alpha::MSKLH;
+    break;
+  default:
+    InsL = Alpha::INSQL;
+    InsH = Alpha::INSQH;
+    MskL = Alpha::MSKQL;
+    MskH = Alpha::MSKQH;
+    break;
+  }
+
+  auto GPR = [&] { return MRI.createVirtualRegister(&Alpha::GPRCRegClass); };
+  // Precompute the two aligned addresses and the positioned field halves.
+  Register AlignedLo = GPR(), PtrHi = GPR(), AlignedHi = GPR();
+  Register PosLo = GPR(), PosHi = GPR();
+  BuildMI(*BB, MI, DL, TII.get(Alpha::BICi), AlignedLo).addReg(Addr).addImm(7);
+  BuildMI(*BB, MI, DL, TII.get(Alpha::LDA), PtrHi)
+      .addImm(Bytes - 1)
+      .addReg(Addr);
+  BuildMI(*BB, MI, DL, TII.get(Alpha::BICi), AlignedHi).addReg(PtrHi).addImm(7);
+  BuildMI(*BB, MI, DL, TII.get(InsL), PosLo).addReg(Val).addReg(Addr);
+  BuildMI(*BB, MI, DL, TII.get(InsH), PosHi).addReg(Val).addReg(Addr);
+
+  const BasicBlock *LLVMBB = BB->getBasicBlock();
+  MachineFunction::iterator It = ++BB->getIterator();
+  MachineBasicBlock *LoopLo = MF.CreateMachineBasicBlock(LLVMBB);
+  MachineBasicBlock *LoopHi = MF.CreateMachineBasicBlock(LLVMBB);
+  MachineBasicBlock *ExitBB = MF.CreateMachineBasicBlock(LLVMBB);
+  MF.insert(It, LoopLo);
+  MF.insert(It, LoopHi);
+  MF.insert(It, ExitBB);
+  ExitBB->splice(ExitBB->begin(), BB, std::next(MI.getIterator()), BB->end());
+  ExitBB->transferSuccessorsAndUpdatePHIs(BB);
+  BB->addSuccessor(LoopLo);
+  LoopLo->addSuccessor(LoopLo);
+  LoopLo->addSuccessor(LoopHi);
+  LoopHi->addSuccessor(LoopHi);
+  LoopHi->addSuccessor(ExitBB);
+
+  // One lock-based update: Old <- ldq_l; Merged <- Pos | msk(Old); stq_c;
+  // retry.
+  auto EmitLoop = [&](MachineBasicBlock *Loop, Register Aligned,
+                      unsigned MskOpc, Register Pos) {
+    Register Old = GPR(), Cleared = GPR(), Merged = GPR(), Success = GPR();
+    BuildMI(Loop, DL, TII.get(Alpha::LDQ_L), Old).addReg(Aligned).addImm(0);
+    BuildMI(Loop, DL, TII.get(MskOpc), Cleared).addReg(Old).addReg(Addr);
+    BuildMI(Loop, DL, TII.get(Alpha::BIS), Merged).addReg(Pos).addReg(Cleared);
+    BuildMI(Loop, DL, TII.get(Alpha::STQ_C), Success)
+        .addReg(Merged)
+        .addReg(Aligned)
+        .addImm(0);
+    BuildMI(Loop, DL, TII.get(Alpha::BEQ)).addReg(Success).addMBB(Loop);
+  };
+  EmitLoop(LoopLo, AlignedLo, MskL, PosLo);
+  EmitLoop(LoopHi, AlignedHi, MskH, PosHi);
+
+  MI.eraseFromParent();
+  return ExitBB;
+}
+
 static MachineBasicBlock *emitSafeStore(MachineInstr &MI, MachineBasicBlock *BB,
                                         bool IsWord) {
   MachineFunction &MF = *BB->getParent();
@@ -1910,6 +2003,8 @@ AlphaTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
     return emitSafeStore(MI, MBB, /*IsWord=*/false);
   case Alpha::SAFE_STOREI16:
     return emitSafeStore(MI, MBB, /*IsWord=*/true);
+  case Alpha::SAFE_USTORE:
+    return emitPartialStore(MI, MBB);
   case Alpha::ATOMIC_ADD_I64:
   case Alpha::ATOMIC_SUB_I64:
   case Alpha::ATOMIC_AND_I64:
