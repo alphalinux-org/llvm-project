@@ -28,6 +28,12 @@ def HasMVI : Predicate<"Subtarget->hasMVI()">,
 def FeatureSafeBWA : SubtargetFeature<"safe-bwa", "HasSafeBWA", "true",
     "Use a lock-based sequence for pre-BWX byte/word stores">;
 
+// -msafe-partial: a misaligned store spanning a 64-bit boundary updates each
+// containing quadword with a read-modify-write; use a lock-based (ldq_l/stq_c)
+// sequence so it is safe against concurrent access to adjacent bytes.
+def FeatureSafePartial : SubtargetFeature<"safe-partial", "HasSafePartial",
+    "true", "Use a lock-based sequence for partial/unaligned stores">;
+
 // Address global data GP-relative (gprel) rather than through the GOT.  This is
 // gcc's -msmall-data (the default is -mlarge-data, i.e. GOT/literal).
 def FeatureSmallData : SubtargetFeature<"small-data", "HasSmallData", "true",

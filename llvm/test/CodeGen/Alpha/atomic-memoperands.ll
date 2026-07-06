@@ -1,0 +1,55 @@
+; RUN: llc -mtriple=alpha-unknown-linux-gnu -stop-after=finalize-isel \
+; RUN:   -verify-machineinstrs < %s | FileCheck %s
+; RUN: llc -mtriple=alpha-unknown-linux-gnu -mattr=+safe-bwa \
+; RUN:   -stop-after=finalize-isel -verify-machineinstrs < %s \
+; RUN:   | FileCheck %s --check-prefix=BWA
+
+; The ldq_l/stq_c loops are built by custom inserters rather than by a pattern,
+; so the memory operand the pseudo carried has to be put onto the load and the
+; store by hand.  Each gets the half of the access it performs -- an instruction
+; that only loads may not be handed an operand claiming a store -- and with it
+; the ordering, the volatility and the object the access names.
+
+; CHECK-LABEL: name: rmw
+; CHECK: LDQ_L {{.*}} :: (load monotonic (s64) from %ir.p)
+; CHECK: STQ_C {{.*}} :: (store monotonic (s64) into %ir.p)
+define i64 @rmw(ptr %p, i64 %v) {
+  %r = atomicrmw add ptr %p, i64 %v seq_cst
+  ret i64 %r
+}
+
+; CHECK-LABEL: name: cas
+; CHECK: LDQ_L {{.*}} :: (load monotonic monotonic (s64) from %ir.p)
+; CHECK: STQ_C {{.*}} :: (store monotonic monotonic (s64) into %ir.p)
+define i64 @cas(ptr %p, i64 %c, i64 %n) {
+  %r = cmpxchg ptr %p, i64 %c, i64 %n seq_cst seq_cst
+  %v = extractvalue { i64, i1 } %r, 0
+  ret i64 %v
+}
+
+; CHECK-LABEL: name: subword_rmw
+; CHECK: LDQ_L {{.*}} :: (load monotonic (s8) from %ir.p)
+; CHECK: STQ_C {{.*}} :: (store monotonic (s8) into %ir.p)
+define i8 @subword_rmw(ptr %p, i8 %v) {
+  %r = atomicrmw add ptr %p, i8 %v seq_cst
+  ret i8 %r
+}
+
+; CHECK-LABEL: name: subword_cas
+; CHECK: LDQ_L {{.*}} :: (load monotonic monotonic (s8) from %ir.p)
+; CHECK: STQ_C {{.*}} :: (store monotonic monotonic (s8) into %ir.p)
+define i8 @subword_cas(ptr %p, i8 %c, i8 %n) {
+  %r = cmpxchg ptr %p, i8 %c, i8 %n seq_cst seq_cst
+  %v = extractvalue { i8, i1 } %r, 0
+  ret i8 %v
+}
+
+; -msafe-bwa turns a plain byte store into the same kind of loop, and the store
+; being volatile has to survive into it.
+; BWA-LABEL: name: safe_store
+; BWA: LDQ_L {{.*}} :: (volatile load (s8) from %ir.p)
+; BWA: STQ_C {{.*}} :: (volatile store (s8) into %ir.p)
+define void @safe_store(ptr %p, i8 %v) {
+  store volatile i8 %v, ptr %p
+  ret void
+}

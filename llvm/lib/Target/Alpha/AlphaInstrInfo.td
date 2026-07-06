@@ -116,6 +116,12 @@ def AlphaLdqU : SDNode<"AlphaISD::LDQ_U", SDT_AlphaLdqU,
 def AlphaStqU : SDNode<"AlphaISD::STQ_U", SDT_AlphaStqU,
                        [SDNPHasChain, SDNPMayStore, SDNPMemOperand]>;
 
+// -msafe-partial misaligned store: value, pointer, byte width.
+def SDT_AlphaSafeUStore
+    : SDTypeProfile<0, 3, [SDTCisVT<0, i64>, SDTCisPtrTy<1>, SDTCisVT<2, i64>]>;
+def AlphaSafeUStore : SDNode<"AlphaISD::SAFE_USTORE", SDT_AlphaSafeUStore,
+                             [SDNPHasChain, SDNPMayStore, SDNPMayLoad]>;
+
 // Conditional branches that test a single register against zero: equal,
 // not-equal, the signed relations, and the low-bit tests.
 def SDTAlphaCondBr : SDTypeProfile<0, 2, [SDTCisVT<0, i64>, SDTCisVT<1, OtherVT>]>;
@@ -1463,6 +1469,10 @@ def RMW_STOREI16 : AlphaPseudo<(outs GPRC:$t1, GPRC:$t2),
 let usesCustomInserter = 1, mayLoad = 1, mayStore = 1 in {
 def SAFE_STOREI8  : AlphaPseudo<(outs), (ins GPRC:$val, GPRC:$addr), "", []>;
 def SAFE_STOREI16 : AlphaPseudo<(outs), (ins GPRC:$val, GPRC:$addr), "", []>;
+// -msafe-partial misaligned store: the byte width picks the insert/mask forms.
+def SAFE_USTORE : AlphaPseudo<(outs), (ins GPRC:$val, GPRC:$addr, i64imm:$bytes),
+                              "", [(AlphaSafeUStore GPRC:$val, GPRC:$addr,
+                                                    imm:$bytes)]>;
 }
 let Predicates = [SafeBWStore] in {
 def : Pat<(truncstorei8 GPRC:$val, ADDRr:$addr),
