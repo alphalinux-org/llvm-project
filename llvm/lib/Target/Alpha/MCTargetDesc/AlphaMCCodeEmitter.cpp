@@ -129,6 +129,14 @@ public:
                                    SmallVectorImpl<MCFixup> &Fixups,
                                    const MCSubtargetInfo &STI) const;
 
+  // The target of a direct call made as a branch: the same displacement, but
+  // relocated BRSGP, which lets the linker aim it past the callee's gp
+  // prologue.  A callee in another gp group cannot be reached this way at all;
+  // bfd reports `change in gp: BRSGP' rather than interposing a stub.
+  unsigned getSameGpTargetEncoding(const MCInst &MI, unsigned OpNo,
+                                   SmallVectorImpl<MCFixup> &Fixups,
+                                   const MCSubtargetInfo &STI) const;
+
   void emitLdgp(unsigned Base, SmallVectorImpl<char> &CB,
                 SmallVectorImpl<MCFixup> &Fixups,
                 const MCSubtargetInfo &STI) const;
@@ -174,11 +182,11 @@ unsigned AlphaMCCodeEmitter::getSymEncoding(const MCInst &MI, unsigned OpNo,
   return 0;
 }
 
-unsigned
-AlphaMCCodeEmitter::getBranchTargetEncoding(const MCInst &MI, unsigned OpNo,
-                                            SmallVectorImpl<MCFixup> &Fixups,
-                                            const MCSubtargetInfo &STI) const {
-  const MCOperand &MO = MI.getOperand(OpNo);
+// Shared by the two branch-target operand kinds; Default is the relocation to
+// use when the operand carries no explicit relocation specifier of its own.
+static unsigned encodeBranchTarget(const MCOperand &MO, MCContext &Ctx,
+                                   SmallVectorImpl<MCFixup> &Fixups,
+                                   Alpha::Fixups Default) {
   if (MO.isImm())
     return static_cast<unsigned>(MO.getImm());
   assert(MO.isExpr() && "expected an expression for a branch target");
@@ -186,7 +194,7 @@ AlphaMCCodeEmitter::getBranchTargetEncoding(const MCInst &MI, unsigned OpNo,
   // It is the only suffix a branch displacement takes; taking whichever one was
   // written as the fixup kind put it on the branch, so `br $31, foo !literal'
   // assembled to a branch carrying R_ALPHA_LITERAL.
-  Alpha::Fixups Kind = Alpha::fixup_alpha_braddr;
+  Alpha::Fixups Kind = Default;
   if (auto *SE = dyn_cast<MCSpecifierExpr>(MO.getExpr())) {
     if (SE->getSpecifier() != Alpha::fixup_alpha_brsgp) {
       Ctx.reportError(MO.getExpr()->getLoc(),
@@ -198,6 +206,22 @@ AlphaMCCodeEmitter::getBranchTargetEncoding(const MCInst &MI, unsigned OpNo,
   Fixups.push_back(
       MCFixup::create(0, MO.getExpr(), MCFixupKind(Kind), /*PCRel=*/true));
   return 0;
+}
+
+unsigned
+AlphaMCCodeEmitter::getBranchTargetEncoding(const MCInst &MI, unsigned OpNo,
+                                            SmallVectorImpl<MCFixup> &Fixups,
+                                            const MCSubtargetInfo &STI) const {
+  return encodeBranchTarget(MI.getOperand(OpNo), Ctx, Fixups,
+                            Alpha::fixup_alpha_braddr);
+}
+
+unsigned
+AlphaMCCodeEmitter::getSameGpTargetEncoding(const MCInst &MI, unsigned OpNo,
+                                            SmallVectorImpl<MCFixup> &Fixups,
+                                            const MCSubtargetInfo &STI) const {
+  return encodeBranchTarget(MI.getOperand(OpNo), Ctx, Fixups,
+                            Alpha::fixup_alpha_brsgp);
 }
 
 // Emit an ldgp expansion: ldah $29, 0(Base) with a GPDISP relocation whose

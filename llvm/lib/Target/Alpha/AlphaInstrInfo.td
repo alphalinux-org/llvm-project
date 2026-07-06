@@ -70,6 +70,15 @@ def AlphaCallDirectLocal : SDNode<"AlphaISD::CALL_DIRECT_LOCAL", SDTNone,
                                   [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
                                    SDNPVariadic]>;
 
+// A direct call emitted as a single bsr under -msmall-text.
+def AlphaCallBsr : SDNode<"AlphaISD::CALL_BSR", SDT_AlphaCallDirect,
+                          [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
+                           SDNPVariadic]>;
+
+// The -msmall-text form of a tail call: a br straight to the callee.
+def AlphaTCReturnBr : SDNode<"AlphaISD::TC_RETURN_BR", SDT_AlphaCallDirect,
+                             [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
+
 // Calls to __tls_get_addr in the general- and local-dynamic sequences.  The jsr
 // carries a lituse_tlsgd or lituse_tlsldm relocation so the linker can relax.
 def AlphaCallTlsgd : SDNode<"AlphaISD::CALL_TLSGD", SDTNone,
@@ -1756,6 +1765,24 @@ def BR : BForm<0x30, (outs), (ins brtarget:$target), "br $$31, $target",
 let isCall = 1, Ra = 23, Defs = [R23], isCodeGenOnly = 1 in
 def BSR : BForm<0x34, (outs), (ins brtarget:$target), "bsr $$23, $target", []>;
 
+// A direct call under -msmall-text: `bsr $26, callee` reaches the callee with a
+// PC-relative branch, leaving the return address in $26.  It loads no procedure
+// value and does not reload the global pointer afterwards (so $29 is not
+// clobbered), because the callee runs on the caller's.  The R_ALPHA_BRSGP
+// relocation is what makes that true: the linker aims the branch past the
+// callee's own gp prologue, since the caller's gp already serves.  There is no
+// stub for the case where the two do not share one -- bfd's elf64-alpha.c
+// reports `change in gp: BRSGP' and fails the link -- which is why this form is
+// only used where the caller knows the callee is in the same gp group.
+def bsrcalltarget : Operand<i64> {
+  let EncoderMethod = "getSameGpTargetEncoding";
+}
+let isCall = 1, Ra = 26, Defs = [R26], isCodeGenOnly = 1 in
+def CALLbsr : BForm<0x34, (outs), (ins bsrcalltarget:$target),
+                    "bsr $$26, $target\t\t!samegp", []>;
+def : Pat<(AlphaCallBsr tglobaladdr:$t), (CALLbsr tglobaladdr:$t)>;
+def : Pat<(AlphaCallBsr texternalsym:$t), (CALLbsr texternalsym:$t)>;
+
 // Conditional branches test a register against zero.  The relational forms
 // carry a signed interpretation of the register value.
 let isBranch = 1, isTerminator = 1 in {
@@ -1802,13 +1829,23 @@ def TCRETURN : MbrForm<0b00, (outs), (ins), "jmp $$31, ($$27), 0",
   let Rb = 27;
 }
 
+// A direct tail call under -msmall-text: the callee is in range, so no procedure
+// value is loaded and the jump is a plain PC-relative br.  br writes its return
+// address to Ra just as jmp and jsr do; naming $31 there is what discards it,
+// which is what makes this a tail call rather than a call.  It takes the same
+// !samegp relocation as the call above.
+let isTerminator = 1, isReturn = 1, isBarrier = 1, Ra = 31,
+    isCodeGenOnly = 1 in
+def TCRETURNbr : BForm<0x30, (outs), (ins bsrcalltarget:$target),
+                       "br $$31, $target\t\t!samegp", []>;
+def : Pat<(AlphaTCReturnBr tglobaladdr:$t), (TCRETURNbr tglobaladdr:$t)>;
+def : Pat<(AlphaTCReturnBr texternalsym:$t), (TCRETURNbr texternalsym:$t)>;
+
 //===----------------------------------------------------------------------===//
 // GAS-compatible pseudo-instruction aliases.
 //===----------------------------------------------------------------------===//
 
-// mov copies a register (bis $31, src, dst); clr zeros one; nop is bis of $31.
-// bis operands are (Rc, Ra, Rb); the result register is Rc.  mov copies Rb
-// into Rc (bis $31, Rb, Rc); clr zeros Rc.  (nop is the def above.)
+// bis operands are (Rc, Ra, Rb), so mov copies Rb into Rc and clr zeros Rc.
 def : InstAlias<"mov $src, $dst", (BIS GPRC:$dst, R31, GPRC:$src)>;
 def : InstAlias<"clr $dst", (BIS GPRC:$dst, R31, R31)>;
 

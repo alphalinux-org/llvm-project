@@ -139,6 +139,11 @@ void AlphaFrameLowering::emitPrologue(MachineFunction &MF,
   DebugLoc DL;
 
   // Establish the global pointer from the procedure value ($27) if needed.
+  // This happens under -msmall-text too: a caller reaching us with a br rather
+  // than a jsr aims the branch past these two instructions (R_ALPHA_BRSGP), so
+  // they cost that caller nothing, and a caller from another global-pointer
+  // region -- libc calling main, or invoking a callback we handed it -- gets a
+  // correct $29 only because they are here.
   if (AFI->usesGP()) {
     MBB.addLiveIn(Alpha::R27);
     BuildMI(MBB, MBBI, DL, TII.get(Alpha::LDGP));
