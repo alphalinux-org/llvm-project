@@ -137,10 +137,10 @@ void AlphaPassConfig::addPreEmitPass2() {
   // the lock flag.
   addPass(createAlphaExpandAtomicPseudo());
 
-  // Last of all, and only when asked for: check the property no test can
-  // observe -- the reservation window this pass just built.  It has to follow
-  // the expansion, because before it the window is a single pseudo and there
-  // is nothing to look inside.
+  // Last of all, and only when asked for: check the properties no test can
+  // observe -- the reservation window this pass just built, -mno-fp-regs, and
+  // the global pointer.  It has to follow the expansion, because before it the
+  // window is a single pseudo and there is nothing to look inside.
   addPass(createAlphaVerifyInvariants());
 }
 

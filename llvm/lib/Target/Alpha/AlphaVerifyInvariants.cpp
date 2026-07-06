@@ -6,9 +6,9 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Two properties of Alpha code that a FileCheck test cannot observe, checked
+// Three properties of Alpha code that a FileCheck test cannot observe, checked
 // over the final machine function so that every function anything compiles
-// becomes a test of both.
+// becomes a test of all three.
 //
 //   1. No memory access, call or inline assembly appears between a load locked
 //      and its store conditional.  The Alpha Architecture Handbook (5.5.2)
@@ -22,6 +22,11 @@
 //      point of that option is that the kernel need not save the FP file for
 //      the process; one FP instruction anywhere makes the generated code
 //      wrong in a way that nothing in the output looks wrong.
+//
+//   3. The global pointer is established before anything reads it, and is
+//      re-established after any call that clobbers it without restoring it.
+//      $29 is a reserved register, so the machine verifier's liveness rules
+//      do not apply to it and nothing else checks this.
 //
 // The precedent is CompleteModel, which makes a missing InstRW a TableGen
 // error and so keeps scheduling-model completeness true by construction rather
@@ -39,7 +44,9 @@
 
 #include "Alpha.h"
 #include "AlphaInstrInfo.h"
+#include "AlphaMachineFunctionInfo.h"
 #include "AlphaSubtarget.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallVector.h"
@@ -54,8 +61,8 @@ using namespace llvm;
 #define ALPHA_VERIFY_INVARIANTS_NAME "Alpha machine invariant verifier"
 
 // On by default wherever assertions are, which is what turns every existing
-// test into a test of both invariants.  Two linear walks over the machine
-// function cost nothing next to the rest of an assertions build.
+// test into a test of all three invariants.  Three linear walks over the
+// machine function cost nothing next to the rest of an assertions build.
 #ifdef NDEBUG
 static constexpr bool DefaultEnabled = false;
 #else
@@ -68,7 +75,8 @@ static cl::opt<bool> EnableVerify(
     // and every tool that links this target aborts at startup.
     "alpha-check-invariants", cl::Hidden, cl::init(DefaultEnabled),
     cl::desc("Check the Alpha invariants no test can observe: the load "
-             "locked / store conditional window and -mno-fp-regs"));
+             "locked / store conditional window, -mno-fp-regs, and the "
+             "global pointer"));
 
 namespace {
 
@@ -95,6 +103,7 @@ private:
             const Twine &What) const;
   void checkLLSCWindow(MachineFunction &MF) const;
   void checkNoFPRegs(MachineFunction &MF) const;
+  void checkGlobalPointer(MachineFunction &MF) const;
 };
 
 } // end anonymous namespace
@@ -261,6 +270,126 @@ void AlphaVerifyInvariants::checkNoFPRegs(MachineFunction &MF) const {
 }
 
 //===----------------------------------------------------------------------===//
+// 3. The global pointer.
+//
+// $29 is reserved, so its liveness is not tracked and the machine verifier
+// says nothing about it.  This walks the function's blocks to a fixed point,
+// carrying one bit -- whether $29 holds this function's global pointer -- and
+// reports any read taken where it does not.
+
+void AlphaVerifyInvariants::checkGlobalPointer(MachineFunction &MF) const {
+  const AlphaMachineFunctionInfo *AFI = MF.getInfo<AlphaMachineFunctionInfo>();
+  if (MF.empty())
+    return;
+
+  // The prologue's ldgp is written by the AsmPrinter, not by an instruction,
+  // so the entry block's state comes from usesGP() rather than from a def.
+  const bool EntryEstablished = AFI->usesGP();
+
+  // "Established on entry to this block" is a must-property: it holds only if
+  // it holds along every path.  A must-analysis has to start optimistic and
+  // fall, or a loop header would be reported the moment its back edge has not
+  // been visited yet -- which is exactly how the first version of this check
+  // mis-reported a call inside a loop.
+  DenseMap<const MachineBasicBlock *, bool> In, Out;
+  for (const MachineBasicBlock &MBB : MF) {
+    In[&MBB] = true;
+    Out[&MBB] = true;
+  }
+
+  // Not every call reaches a routine that follows the standard calling
+  // sequence.  Three of them run on the caller's global pointer and so leave
+  // $29 holding it, which is why none of them emits an ldgp afterwards (see
+  // their comments in AlphaInstrInfo.td):
+  //
+  //   DIVCALL   the division millicode -- __divq and its three siblings,
+  //             entered through $23 -- preserves every register but $23-$25,
+  //             $27 and $28.
+  //   BSR       the machine outliner's call.  The outlined function cannot
+  //             touch $29: getOutliningTypeImpl rules out every instruction
+  //             that reads or writes it.  It returns through $23.
+  //   CALLbsr   the -msmall-text direct call.  It loads no procedure value,
+  //             and its R_ALPHA_BRSGP relocation aims the branch past the
+  //             callee's own gp prologue precisely so the callee inherits
+  //             ours.
+  //
+  // A call that preserves $29 must not clear the bit.  Clearing it reports the
+  // next read of the global pointer as a read of a dead one and refuses to
+  // compile a correct function -- which it did for the second of two divisions
+  // in one function, for a literal load after an outlined call, and for a
+  // -msmall-text call followed by any access to a global.
+  //
+  // Defaulting to "clobbers" is deliberate: a call this does not know about is
+  // reported rather than trusted.  But it means a new call pseudo that runs on
+  // the caller's gp has to be added here, and three times now that has been
+  // noticed only when a build stopped.
+  auto callPreservesGP = [](const MachineInstr &MI) {
+    switch (MI.getOpcode()) {
+    case Alpha::DIVCALL:
+    case Alpha::BSR:
+    case Alpha::CALLbsr:
+      return true;
+    default:
+      return false;
+    }
+  };
+
+  // Within a block: a def of $29 establishes it -- a call pseudo that lists
+  // $29 among its defs carries the ldgp reload in its expansion -- and a call
+  // that neither defines nor preserves it leaves it holding the callee's.
+  auto blockOut = [&](MachineBasicBlock &MBB, bool Established) {
+    for (MachineInstr &MI : MBB) {
+      if (MI.isDebugInstr())
+        continue;
+      if (MI.definesRegister(Alpha::R29, /*TRI=*/nullptr))
+        Established = true;
+      else if (MI.isCall() && !callPreservesGP(MI))
+        Established = false;
+    }
+    return Established;
+  };
+
+  bool Changed = true;
+  while (Changed) {
+    Changed = false;
+    for (MachineBasicBlock &MBB : MF) {
+      bool NewIn;
+      if (&MBB == &MF.front()) {
+        NewIn = EntryEstablished;
+      } else {
+        NewIn = !MBB.pred_empty();
+        for (const MachineBasicBlock *P : MBB.predecessors())
+          NewIn &= Out[P];
+      }
+      bool NewOut = blockOut(MBB, NewIn);
+      if (NewIn != In[&MBB] || NewOut != Out[&MBB]) {
+        In[&MBB] = NewIn;
+        Out[&MBB] = NewOut;
+        Changed = true;
+      }
+    }
+  }
+
+  // Only now, with the states settled, report.
+  for (MachineBasicBlock &MBB : MF) {
+    bool Established = In[&MBB];
+    for (MachineInstr &MI : MBB) {
+      if (MI.isDebugInstr())
+        continue;
+      if (MI.readsRegister(Alpha::R29, /*TRI=*/nullptr) && !Established)
+        fail(MF, MI, "B4",
+             "$29 is read where it does not hold this function's global "
+             "pointer -- either the prologue did not establish it or a call "
+             "clobbered it without a reload");
+      if (MI.definesRegister(Alpha::R29, /*TRI=*/nullptr))
+        Established = true;
+      else if (MI.isCall() && !callPreservesGP(MI))
+        Established = false;
+    }
+  }
+}
+
+//===----------------------------------------------------------------------===//
 
 bool AlphaVerifyInvariants::runOnMachineFunction(MachineFunction &MF) {
   if (!EnableVerify)
@@ -268,6 +397,7 @@ bool AlphaVerifyInvariants::runOnMachineFunction(MachineFunction &MF) {
   STI = &MF.getSubtarget<AlphaSubtarget>();
   checkLLSCWindow(MF);
   checkNoFPRegs(MF);
+  checkGlobalPointer(MF);
   return false;
 }
 

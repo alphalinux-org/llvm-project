@@ -159,6 +159,11 @@ static unsigned getReversedBranchOpcode(unsigned Opc) {
   }
 }
 
+bool AlphaInstrInfo::isTailCall(const MachineInstr &MI) const {
+  return MI.getOpcode() == Alpha::TCRETURNbr ||
+         AlphaGenInstrInfo::isTailCall(MI);
+}
+
 bool AlphaInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
                                    MachineBasicBlock *&TBB,
                                    MachineBasicBlock *&FBB,

@@ -99,3 +99,22 @@ define zeroext i32 @urem32(i32 %a, i32 %b) {
   %r = urem i32 %a, %b
   ret i32 %r
 }
+
+; Two of them in one function.  The millicode preserves $29, so the second
+; literal load reads the global pointer the prologue established and no ldgp
+; reload appears between the calls -- which is also why the B4 invariant
+; (AlphaVerifyInvariants) must not treat a DIVCALL as clobbering it.  A plain
+; call between two literal loads would be reloaded; this one is not.
+; CHECK-LABEL: two_divs:
+; CHECK:       ldgp $29, 0($27)
+; CHECK:       ldq $27, __divq($29){{.*}}!literal
+; CHECK:       jsr $23, ($27)
+; CHECK-NOT:   ldgp
+; CHECK:       ldq $27, __divqu($29){{.*}}!literal
+; CHECK:       jsr $23, ($27)
+define i64 @two_divs(i64 %a, i64 %b) {
+  %s = sdiv i64 %a, %b
+  %u = udiv i64 %a, %b
+  %r = add i64 %s, %u
+  ret i64 %r
+}

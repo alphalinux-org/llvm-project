@@ -56,6 +56,11 @@ public:
       Register VReg, unsigned SubReg = 0,
       MachineInstr::MIFlag Flags = MachineInstr::NoFlags) const override;
 
+  // Under -msmall-text a direct tail call is a plain br, which is a return and
+  // a barrier but not a call -- the hardware branch saves no return address --
+  // so the generic test, which asks for both, does not recognise it.
+  bool isTailCall(const MachineInstr &MI) const override;
+
   // Branch analysis.  Cond is { branch opcode, tested register }.
   bool analyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
                      MachineBasicBlock *&FBB,
