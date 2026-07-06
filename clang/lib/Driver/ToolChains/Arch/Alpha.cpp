@@ -53,6 +53,10 @@ void alpha::getAlphaTargetFeatures(const Driver &D, const ArgList &Args,
     Handle(options::OPT_mieee, options::OPT_mno_ieee, "ieee");
   }
 
+  // -msmall-text emits a single bsr for a direct call instead of a GOT load and
+  // jsr, assuming the whole program is in range and shares the global pointer.
+  Handle(options::OPT_msmall_text, options::OPT_mlarge_text, "small-text");
+
   // -mno-fp-regs keeps the floating-point registers out of use entirely; the
   // kernel is built this way so it need not save FP state on kernel entry.
   Handle(options::OPT_mno_fp_regs, options::OPT_mfp_regs, "no-fp-regs");
