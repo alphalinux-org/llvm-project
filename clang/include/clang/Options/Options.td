@@ -7236,6 +7236,10 @@ def mfp_rounding_mode_EQ : Joined<["-"], "mfp-rounding-mode=">,
 def mtrap_precision_EQ : Joined<["-"], "mtrap-precision=">,
   Group<m_alpha_Features_Group>,
   HelpText<"Floating-point trap precision: p, f, or i (Alpha)">;
+def msafe_partial : Flag<["-"], "msafe-partial">, Group<m_alpha_Features_Group>,
+  HelpText<"Use a lock-based sequence for partial/unaligned stores so they are "
+           "safe against concurrent access to adjacent bytes (Alpha)">;
+def mno_safe_partial : Flag<["-"], "mno-safe-partial">, Group<m_alpha_Features_Group>;
 def msmall_text : Flag<["-"], "msmall-text">, Group<m_alpha_Features_Group>,
   HelpText<"Assume all code fits within branch range of one global pointer, "
            "making a direct call a single bsr (Alpha)">;
