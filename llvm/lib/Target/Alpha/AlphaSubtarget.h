@@ -80,6 +80,7 @@ public:
   bool hasPrefetchEvictNext() const { return HasPrefetchEvictNext; }
   bool hasSafeBWA() const { return HasSafeBWA; }
   bool hasSmallData() const { return HasSmallData; }
+  bool hasSmallText() const { return HasSmallText; }
   bool hasBuildConstants() const { return HasBuildConstants; }
   bool hasNoFPRegs() const { return HasNoFPRegs; }
 

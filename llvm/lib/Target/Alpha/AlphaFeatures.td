@@ -33,6 +33,12 @@ def FeatureSafeBWA : SubtargetFeature<"safe-bwa", "HasSafeBWA", "true",
 def FeatureSmallData : SubtargetFeature<"small-data", "HasSmallData", "true",
     "Address global data GP-relative instead of through the GOT">;
 
+// -msmall-text: the whole program's code fits in 4 MiB (reachable by a branch)
+// and shares one global pointer, so a direct call is a single bsr and functions
+// need not re-establish the gp on entry.
+def FeatureSmallText : SubtargetFeature<"small-text", "HasSmallText", "true",
+    "Assume all code is within branch range of a single global pointer">;
+
 // Build every wide integer constant with code instead of loading it from the
 // constant pool.  This is gcc's -mbuild-constants; the dynamic loader needs it
 // because it must relocate itself before it can reach its own data segment.
