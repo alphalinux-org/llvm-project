@@ -1,5 +1,7 @@
 // RUN: %clang_cc1 -triple alpha-unknown-linux-gnu -emit-llvm -o - %s \
 // RUN:   | FileCheck %s
+// RUN: %clang_cc1 -triple alpha-unknown-linux-gnu -emit-llvm -o - %s \
+// RUN:   -mlong-double-64 | FileCheck %s --check-prefix=LD64
 
 // long double is the 128-bit X_floating format; the Alpha ABI passes and
 // returns it by invisible reference (sret / byval) rather than in registers.
@@ -24,3 +26,8 @@ _Complex long double cadd(_Complex long double a, _Complex long double b) {
 // CHECK-SAME: ptr dead_on_unwind noalias writable sret({ fp128, fp128 })
 // CHECK-SAME: ptr noundef byval({ fp128, fp128 })
 // CHECK-SAME: ptr noundef byval({ fp128, fp128 })
+
+// With -mlong-double-64 long double is just double, so it is passed and
+// returned in $f16/$f0 like any other double.
+// LD64-LABEL: define dso_local double @identity(double noundef {{.*}})
+// LD64-LABEL: define dso_local double @add(double noundef {{.*}}, double noundef {{.*}})
