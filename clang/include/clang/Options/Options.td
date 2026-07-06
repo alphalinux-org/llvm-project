@@ -7224,6 +7224,11 @@ def mno_ieee : Flag<["-"], "mno-ieee">, Group<m_alpha_Features_Group>;
 def mieee_with_inexact : Flag<["-"], "mieee-with-inexact">,
   Group<m_alpha_Features_Group>,
   HelpText<"Like -mieee but also maintain the IEEE inexact flag (Alpha)">;
+def msmall_text : Flag<["-"], "msmall-text">, Group<m_alpha_Features_Group>,
+  HelpText<"Assume all code fits within branch range of one global pointer, "
+           "making a direct call a single bsr (Alpha)">;
+def mlarge_text : Flag<["-"], "mlarge-text">, Group<m_alpha_Features_Group>,
+  HelpText<"Reach a call target through the GOT (the default) (Alpha)">;
 def mfp_regs : Flag<["-"], "mfp-regs">, Group<m_alpha_Features_Group>,
   HelpText<"Use the floating-point registers (Alpha)">;
 def mno_fp_regs : Flag<["-"], "mno-fp-regs">, Group<m_alpha_Features_Group>,
