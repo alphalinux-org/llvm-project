@@ -6273,6 +6273,9 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     else if (TC.getTriple().isPPC() &&
              (A->getOption().getID() != options::OPT_mlong_double_80))
       A->render(Args, CmdArgs);
+    else if (TC.getTriple().getArch() == llvm::Triple::alpha &&
+             A->getOption().getID() == options::OPT_mlong_double_128)
+      ; // Alpha's long double is 128-bit IEEE quad already; accept as a no-op.
     else
       D.Diag(diag::err_drv_unsupported_opt_for_target)
           << A->getAsString(Args) << TripleStr;
