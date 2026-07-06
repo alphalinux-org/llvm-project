@@ -139,6 +139,10 @@ public:
     // (config/alpha/constraints.md).
     switch (*Name) {
     case 'f': // Floating-point register.
+    case 'a': // Integer register $24.
+    case 'b': // Integer register $25.
+    case 'c': // Integer register $27.
+    case 'v': // Integer register $0.
       Info.setAllowsRegister();
       return true;
     case 'I': // Unsigned 8-bit constant (logical/arithmetic immediate).
