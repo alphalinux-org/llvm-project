@@ -1037,6 +1037,34 @@ def zapnotmask : SDNodeXForm<imm, [{
 let AddedComplexity = 1 in
 def : Pat<(and GPRC:$x, bytemask:$m), (ZAPNOTi GPRC:$x, (zapnotmask $m))>;
 
+// Extract a byte, word, or longword at a constant byte offset.  Shifting right
+// by a whole number of bytes and masking is a single ext instruction whose
+// literal operand is the byte position.
+let hasSideEffects = 0 in {
+def EXTBLi : OFormL<0x12, 0x06, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
+                    "extbl $Ra, $lit, $Rc", []>;
+def EXTWLi : OFormL<0x12, 0x16, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
+                    "extwl $Ra, $lit, $Rc", []>;
+def EXTLLi : OFormL<0x12, 0x26, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
+                    "extll $Ra, $lit, $Rc", []>;
+}
+// A right shift by a multiple of 8 bytes (up to 56), giving the byte position.
+def byteshift : PatLeaf<(imm), [{
+  uint64_t S = N->getZExtValue();
+  return S <= 56 && (S & 7) == 0;
+}]>;
+def bytepos : SDNodeXForm<imm, [{
+  return CurDAG->getTargetConstant(N->getZExtValue() / 8, SDLoc(N), MVT::i64);
+}]>;
+let AddedComplexity = 1 in {
+def : Pat<(and (srl GPRC:$x, byteshift:$s), 0xff),
+          (EXTBLi GPRC:$x, (bytepos $s))>;
+def : Pat<(and (srl GPRC:$x, byteshift:$s), 0xffff),
+          (EXTWLi GPRC:$x, (bytepos $s))>;
+def : Pat<(and (srl GPRC:$x, byteshift:$s), 0xffffffff),
+          (EXTLLi GPRC:$x, (bytepos $s))>;
+}
+
 // Sign-extend the low 32 bits with `addl $x, $31, $dst`.
 def : Pat<(sext_inreg GPRC:$x, i32), (ADDL GPRC:$x, R31)>;
 
