@@ -444,6 +444,24 @@ def CVTQS : FP_r<0x16, 0x0bc, "cvtqs", []>;
 // rounding, matching C's fp-to-integer truncation semantics.
 def CVTTQ : FP_r<0x16, 0x02f, "cvttq/c", []>;
 
+// Move the floating-point control register to/from a floating register.  The
+// operand is encoded in all three register fields.  These carry no pattern and
+// exist only so hand-written assembly (context save/restore) assembles.
+let hasSideEffects = 1, DecoderMethod = "decodeFpcrMove" in {
+def MF_FPCR : FForm<0x17, 0x025, (outs FPRC:$reg), (ins), "mf_fpcr $reg", []> {
+  bits<5> reg;
+  let Ra = reg;
+  let Rb = reg;
+  let Rc = reg;
+}
+def MT_FPCR : FForm<0x17, 0x024, (outs), (ins FPRC:$reg), "mt_fpcr $reg", []> {
+  bits<5> reg;
+  let Ra = reg;
+  let Rb = reg;
+  let Rc = reg;
+}
+}
+
 // Load address: `lda $Rc, $disp($Rb)` computes $Rc = $Rb + sign_ext($disp).
 // With $Rb = $31 (zero) this materializes a 16-bit signed constant.  The
 // split-operand form is used by codegen; LEA/LDAHm below carry the single
