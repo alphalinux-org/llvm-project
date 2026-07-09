@@ -191,6 +191,8 @@ public:
                                uint64_t &ErrorInfo,
                                bool MatchingInlineAsm) override;
 
+  ParseStatus parseDirective(AsmToken DirectiveID) override;
+
   ParseStatus parseOperand(OperandVector &Operands);
   ParseStatus parseMemOperand(OperandVector &Operands);
 };
@@ -204,6 +206,26 @@ public:
 bool AlphaAsmParser::matchRegister(StringRef Name, MCRegister &Reg) {
   Reg = MatchRegisterName(Name);
   return Reg == MCRegister();
+}
+
+ParseStatus AlphaAsmParser::parseDirective(AsmToken DirectiveID) {
+  // `.set at`, `.set noat`, `.set macro`, `.set reorder`, and similar are
+  // assembler mode pragmas that control features (the $28/$at temporary,
+  // macro/reorder handling) we do not model; accept and ignore them.  A `.set`
+  // with a symbol assignment is left to the generic parser.
+  if (DirectiveID.getIdentifier() == ".set") {
+    const AsmToken &Tok = getParser().getTok();
+    if (Tok.is(AsmToken::Identifier)) {
+      StringRef Opt = Tok.getIdentifier();
+      if (Opt == "at" || Opt == "noat" || Opt == "macro" || Opt == "nomacro" ||
+          Opt == "reorder" || Opt == "noreorder" || Opt == "move" ||
+          Opt == "nomove" || Opt == "volatile" || Opt == "novolatile") {
+        getParser().eatToEndOfStatement();
+        return ParseStatus::Success;
+      }
+    }
+  }
+  return ParseStatus::NoMatch;
 }
 
 ParseStatus AlphaAsmParser::tryParseRegister(MCRegister &Reg, SMLoc &StartLoc,
@@ -327,6 +349,17 @@ bool AlphaAsmParser::parseInstruction(ParseInstructionInfo &Info,
   return false;
 }
 
+// A parsed operand that is exactly the constant `V`.  The full spellings of
+// ret and jmp below carry fields the bare encodings do not, so each is taken
+// only where what it says is what the encoding holds.
+static bool isConstImm(MCParsedAsmOperand &Op, int64_t V) {
+  auto &AOp = static_cast<AlphaOperand &>(Op);
+  if (!AOp.isImm())
+    return false;
+  const auto *CE = dyn_cast<MCConstantExpr>(AOp.getImm());
+  return CE && CE->getValue() == V;
+}
+
 bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
                                              OperandVector &Operands,
                                              MCStreamer &Out,
@@ -373,12 +406,46 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     return false;
   }
 
-  // jsr $Ra, ($Rb): emit the bare jsr word.
-  if (Mnemonic == "jsr" && Operands.size() == 3) {
+  // jsr $Ra, ($Rb): emit the bare jsr word.  The operand kinds are checked
+  // too, so that a line whose operands are not what the form expects does not
+  // read the wrong member of the operand union.
+  if (Mnemonic == "jsr" && Operands.size() == 3 && Operands[1]->isReg() &&
+      Operands[2]->isMem()) {
     MCInst Inst;
     Inst.setOpcode(Alpha::JSRr);
     Inst.addOperand(MCOperand::createReg(
         static_cast<AlphaOperand &>(*Operands[1]).getReg()));
+    Inst.addOperand(MCOperand::createReg(
+        static_cast<AlphaOperand &>(*Operands[2]).getMemBase()));
+    Inst.setLoc(IDLoc);
+    Out.emitInstruction(Inst, getSTI());
+    return false;
+  }
+
+  // ret $31, ($26), 1: the canonical return, written in full in hand assembly.
+  // Our ret prints and encodes exactly this form, so emit the bare word.  RET
+  // carries neither the return-address register nor the hint, so nothing else
+  // is taken here: a spelling naming another register goes to the matcher,
+  // which says so, rather than quietly returning through $26.
+  if (Mnemonic == "ret" && Operands.size() == 4 && Operands[1]->isReg() &&
+      Operands[2]->isMem() && isConstImm(*Operands[3], 1) &&
+      static_cast<AlphaOperand &>(*Operands[1]).getReg() == Alpha::R31 &&
+      static_cast<AlphaOperand &>(*Operands[2]).getMemBase() == Alpha::R26) {
+    MCInst Inst;
+    Inst.setOpcode(Alpha::RET);
+    Inst.setLoc(IDLoc);
+    Out.emitInstruction(Inst, getSTI());
+    return false;
+  }
+
+  // jmp $31, ($Rb), 0: an indirect jump through $Rb.  JMP holds neither the
+  // link register nor the hint, so, as with ret above, only the spelling whose
+  // fields the encoding can hold is taken here.
+  if (Mnemonic == "jmp" && Operands.size() == 4 && Operands[1]->isReg() &&
+      Operands[2]->isMem() && isConstImm(*Operands[3], 0) &&
+      static_cast<AlphaOperand &>(*Operands[1]).getReg() == Alpha::R31) {
+    MCInst Inst;
+    Inst.setOpcode(Alpha::JMP);
     Inst.addOperand(MCOperand::createReg(
         static_cast<AlphaOperand &>(*Operands[2]).getMemBase()));
     Inst.setLoc(IDLoc);

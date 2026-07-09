@@ -95,6 +95,22 @@ static DecodeStatus decodeBranchTarget(MCInst &Inst, uint64_t Imm,
   return MCDisassembler::Success;
 }
 
+// mf_fpcr/mt_fpcr encode their one floating register in all three register
+// fields; read it from Rc (bits 4-0).  A dedicated method avoids the ambiguity
+// of the same operand appearing three times.
+static DecodeStatus decodeFpcrMove(MCInst &Inst, uint32_t Insn,
+                                   uint64_t Address,
+                                   const MCDisassembler *Decoder) {
+  // All three fields name the same register, and a word where they disagree is
+  // not this instruction -- GNU as will not assemble one and GNU objdump does
+  // not decode one.
+  unsigned Ra = (Insn >> 21) & 0x1f, Rb = (Insn >> 16) & 0x1f, Rc = Insn & 0x1f;
+  if (Ra != Rc || Rb != Rc)
+    return MCDisassembler::Fail;
+  Inst.addOperand(MCOperand::createReg(FPRDecoderTable[Rc]));
+  return MCDisassembler::Success;
+}
+
 #include "AlphaGenDisassemblerTables.inc"
 
 DecodeStatus AlphaDisassembler::getInstruction(MCInst &Instr, uint64_t &Size,
