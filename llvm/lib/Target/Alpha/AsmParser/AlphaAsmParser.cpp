@@ -187,6 +187,8 @@ public:
                                uint64_t &ErrorInfo,
                                bool MatchingInlineAsm) override;
 
+  ParseStatus parseDirective(AsmToken DirectiveID) override;
+
   ParseStatus parseOperand(OperandVector &Operands);
   ParseStatus parseMemOperand(OperandVector &Operands);
 };
@@ -200,6 +202,26 @@ public:
 bool AlphaAsmParser::matchRegister(StringRef Name, MCRegister &Reg) {
   Reg = MatchRegisterName(Name);
   return Reg == MCRegister();
+}
+
+ParseStatus AlphaAsmParser::parseDirective(AsmToken DirectiveID) {
+  // `.set at`, `.set noat`, `.set macro`, `.set reorder`, and similar are
+  // assembler mode pragmas that control features (the $28/$at temporary,
+  // macro/reorder handling) we do not model; accept and ignore them.  A `.set`
+  // with a symbol assignment is left to the generic parser.
+  if (DirectiveID.getIdentifier() == ".set") {
+    const AsmToken &Tok = getParser().getTok();
+    if (Tok.is(AsmToken::Identifier)) {
+      StringRef Opt = Tok.getIdentifier();
+      if (Opt == "at" || Opt == "noat" || Opt == "macro" || Opt == "nomacro" ||
+          Opt == "reorder" || Opt == "noreorder" || Opt == "move" ||
+          Opt == "nomove" || Opt == "volatile" || Opt == "novolatile") {
+        getParser().eatToEndOfStatement();
+        return ParseStatus::Success;
+      }
+    }
+  }
+  return ParseStatus::NoMatch;
 }
 
 ParseStatus AlphaAsmParser::tryParseRegister(MCRegister &Reg, SMLoc &StartLoc,
@@ -360,6 +382,27 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     Inst.setOpcode(Alpha::JSRr);
     Inst.addOperand(MCOperand::createReg(
         static_cast<AlphaOperand &>(*Operands[1]).getReg()));
+    Inst.addOperand(MCOperand::createReg(
+        static_cast<AlphaOperand &>(*Operands[2]).getMemBase()));
+    Inst.setLoc(IDLoc);
+    Out.emitInstruction(Inst, getSTI());
+    return false;
+  }
+
+  // ret $31, ($26), 1: the canonical return, written in full in hand assembly.
+  // Our ret prints and encodes exactly this form, so emit the bare word.
+  if (Mnemonic == "ret" && Operands.size() == 4) {
+    MCInst Inst;
+    Inst.setOpcode(Alpha::RET);
+    Inst.setLoc(IDLoc);
+    Out.emitInstruction(Inst, getSTI());
+    return false;
+  }
+
+  // jmp $31, ($Rb), 0: an indirect jump through $Rb (the hint is advisory).
+  if (Mnemonic == "jmp" && Operands.size() == 4) {
+    MCInst Inst;
+    Inst.setOpcode(Alpha::JMP);
     Inst.addOperand(MCOperand::createReg(
         static_cast<AlphaOperand &>(*Operands[2]).getMemBase()));
     Inst.setLoc(IDLoc);
