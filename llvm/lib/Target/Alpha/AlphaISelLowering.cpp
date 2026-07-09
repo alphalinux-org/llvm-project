@@ -200,6 +200,15 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
           ISD::SETULE, ISD::SETUNE, ISD::SETUO, ISD::SETO, ISD::SETNE})
       setCondCodeAction(CC, VT, Expand);
 
+  // Alpha has no per-instruction FP-exception signaling; lower constrained
+  // comparisons for native float types to regular SETCC (dropping the strict
+  // chain, which carries no semantic weight on Alpha).  f128 is handled in
+  // PerformDAGCombine before legalization.
+  for (MVT VT : {MVT::f32, MVT::f64}) {
+    setOperationAction(ISD::STRICT_FSETCC, VT, Custom);
+    setOperationAction(ISD::STRICT_FSETCCS, VT, Custom);
+  }
+
   // Signed byte/word loads become a zero/any-extending load plus an explicit
   // sign-extension, so only the extending byte/word loads need instructions.
   for (MVT VT : {MVT::i8, MVT::i16})
@@ -936,6 +945,20 @@ SDValue AlphaTargetLowering::LowerOperation(SDValue Op,
     return LowerLOAD(Op, DAG);
   case ISD::STORE:
     return LowerSTORE(Op, DAG);
+  case ISD::STRICT_FSETCC:
+  case ISD::STRICT_FSETCCS: {
+    // Alpha has no per-instruction FP-exception signaling; drop the chain
+    // and lower to a regular SETCC.  The incoming chain is threaded into
+    // the outgoing merge to preserve ordering, but no exception is raised.
+    SDLoc DL(Op);
+    SDValue Chain = Op.getOperand(0);
+    SDValue LHS = Op.getOperand(1);
+    SDValue RHS = Op.getOperand(2);
+    SDValue CCVal = Op.getOperand(3);
+    SDValue Cmp = DAG.getNode(ISD::SETCC, DL, Op.getNode()->getValueType(0),
+                              LHS, RHS, CCVal);
+    return DAG.getMergeValues({Cmp, Chain}, DL);
+  }
   default:
     llvm_unreachable("unexpected operation to lower");
   }
