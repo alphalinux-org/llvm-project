@@ -189,6 +189,12 @@ public:
 
   std::string_view getClobbers() const override { return ""; }
 
+  // _BitInt up to 64 bits works on Alpha: the backend promotes all sub-i64
+  // integer types to i64 without special-casing.  Wider _BitInt is not
+  // supported because Alpha has no 128-bit integer instructions.
+  bool hasBitIntType() const override { return true; }
+  size_t getMaxBitIntWidth() const override { return getLongLongWidth(); }
+
   bool isValidCPUName(StringRef Name) const override {
     return Name == "generic" || Name == "ev4" || Name == "ev45" ||
            Name == "ev5" || Name == "ev56" || Name == "pca56" ||
