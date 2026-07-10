@@ -28,6 +28,13 @@ AlphaMCAsmInfo::AlphaMCAsmInfo(const Triple &TT, const MCTargetOptions &Options)
   Data64bitsDirective = "\t.quad\t";
   GlobalDirective = "\t.globl\t";
   UsesELFSectionDirectiveForBSS = true;
+  // An alias inherits the procedure kind of what it names.  These are the only
+  // st_other bits alpha defines, and a caller reaching a function through an
+  // alias needs to know whether it can skip the gp-load prologue just as much
+  // as one reaching it by name.  GNU as propagates them the same way.
+  // STO_ALPHA_NOPV | STO_ALPHA_STD_GPLOAD; see AlphaAsmPrinter, which sets
+  // them, and lld/ELF/Arch/Alpha.cpp, which reads them.
+  InheritedSTOtherMask = 0x88;
   SupportsDebugInformation = true;
   ExceptionsType = ExceptionHandling::DwarfCFI;
 }
