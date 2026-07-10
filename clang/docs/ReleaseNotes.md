@@ -160,6 +160,10 @@ features cannot lower the translation-unit ABI level;
 ### Attribute Changes in Clang
 
 - Clang now properly propagates attributes on class and variable templates to their redeclarations, which will result in redeclarations not interfering with diagnostics. (#GH209812)
+- GCC's `noclone` function attribute is now accepted and ignored, rather than
+  warned about as unknown. Clang has no per-function opt-out for the passes that
+  clone a body, so it cannot be honoured, but code that uses it -- glibc and the
+  Linux kernel among others -- no longer fails to build under `-Werror`.
 
 ### Improvements to Clang's diagnostics
 
