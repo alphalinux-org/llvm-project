@@ -406,6 +406,33 @@ static bool isIFunc(const MCSymbolELF *Symbol) {
   return true;
 }
 
+// Follow a chain of `a = b` symbol assignments and return the first
+// target-specific st_other value found along it, so an alias inherits those
+// bits from whatever symbol it ultimately names.  GNU as behaves this way, and
+// some targets need it for correctness: on Alpha the bits record the procedure
+// kind (STO_ALPHA_STD_GPLOAD / STO_ALPHA_NOPV), which the linker uses to decide
+// whether a call through the alias must reload the global pointer.
+//
+// The walk is depth-limited so that it terminates on its own. A cyclic
+// assignment (`a = b; b = a`) is normally rejected by expression evaluation
+// long before this point, but nothing about this code depends on that, and an
+// unbounded walk over attacker- or generator-supplied assembly would hang.
+static uint8_t resolveAliasedOther(const MCSymbolELF &Symbol, uint8_t Mask) {
+  if (!Mask)
+    return 0;
+  constexpr unsigned MaxDepth = 16;
+  const MCSymbolELF *Sym = &Symbol;
+  for (unsigned Depth = 0; Sym->isVariable() && Depth != MaxDepth; ++Depth) {
+    const auto *SRE = dyn_cast<MCSymbolRefExpr>(Sym->getVariableValue());
+    if (!SRE)
+      break;
+    Sym = static_cast<const MCSymbolELF *>(&SRE->getSymbol());
+    if (uint8_t Other = Sym->getOther() & Mask)
+      return Other;
+  }
+  return 0;
+}
+
 void ELFWriter::writeSymbol(SymbolTableWriter &Writer, uint32_t StringIndex,
                             ELFSymbolData &MSD) {
   auto &Symbol = static_cast<const MCSymbolELF &>(*MSD.Symbol);
@@ -428,7 +455,17 @@ void ELFWriter::writeSymbol(SymbolTableWriter &Writer, uint32_t StringIndex,
   // Other and Visibility share the same byte with Visibility using the lower
   // 2 bits
   uint8_t Visibility = Symbol.getVisibility();
-  uint8_t Other = Symbol.getOther() | Visibility;
+  // A weak alias such as `.weak foo; foo = bar` carries none of the inheritable
+  // st_other bits of its own, so take them from bar -- but only the bits the
+  // target says describe a procedure rather than something an alias must not
+  // acquire on its own.  The test has to be against those bits alone: getOther()
+  // returns the whole five-bit field, so asking whether it is zero would skip
+  // the inheritance for a symbol that merely carries some unrelated bit.
+  uint8_t Mask = Asm.getContext().getAsmInfo().getInheritedSTOtherMask();
+  uint8_t Other = Symbol.getOther();
+  if (!(Other & Mask))
+    Other |= resolveAliasedOther(Symbol, Mask);
+  Other |= Visibility;
 
   uint64_t Value = symbolValue(*MSD.Symbol);
   uint64_t Size = 0;
@@ -1193,7 +1230,14 @@ void ELFObjectWriter::executePostLayoutBinding() {
     // This is the first place we are able to copy this information.
     Alias->setBinding(Symbol.getBinding());
     Alias->setVisibility(Symbol.getVisibility());
-    Alias->setOther(Symbol.getOther());
+    // Resolve .set alias chains so target-specific st_other bits (e.g.,
+    // STO_ALPHA_STD_GPLOAD) are inherited even when the .symver source is
+    // itself a .set alias that did not have those bits set explicitly.
+    uint8_t Mask = getContext().getAsmInfo().getInheritedSTOtherMask();
+    uint8_t Other = Symbol.getOther();
+    if (!(Other & Mask))
+      Other |= resolveAliasedOther(Symbol, Mask);
+    Alias->setOther(Other);
 
     if (!Symbol.isUndefined() && S.KeepOriginalSym)
       continue;
