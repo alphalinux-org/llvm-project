@@ -29,6 +29,7 @@ static uint64_t adjustFixupValue(unsigned Kind, uint64_t Value) {
     // after the branch: disp = (target - (branch + 4)) / 4.
     return ((Value - 4) >> 2) & 0x1fffff;
   case Alpha::fixup_alpha_literal:
+  case Alpha::fixup_alpha_gprel16:
   case Alpha::fixup_alpha_gprellow:
   case Alpha::fixup_alpha_tprello:
   case Alpha::fixup_alpha_gottprel:
@@ -54,21 +55,15 @@ public:
   MCFixupKindInfo getFixupKindInfo(MCFixupKind Kind) const override {
     // {name, offset, bits, flags}
     const static MCFixupKindInfo Infos[Alpha::NumTargetFixupKinds] = {
-        {"fixup_alpha_braddr", 0, 21, 0},
-        {"fixup_alpha_literal", 0, 16, 0},
-        {"fixup_alpha_gprelhigh", 0, 16, 0},
-        {"fixup_alpha_gprellow", 0, 16, 0},
-        {"fixup_alpha_gpdisp", 0, 16, 0},
-        {"fixup_alpha_tprelhi", 0, 16, 0},
-        {"fixup_alpha_tprello", 0, 16, 0},
-        {"fixup_alpha_gottprel", 0, 16, 0},
-        {"fixup_alpha_tlsgd", 0, 16, 0},
-        {"fixup_alpha_tlsldm", 0, 16, 0},
-        {"fixup_alpha_dtprelhi", 0, 16, 0},
-        {"fixup_alpha_dtprello", 0, 16, 0},
-        {"fixup_alpha_hint", 0, 14, 0},
-        {"fixup_alpha_lituse_jsr", 0, 0, 0},
-        {"fixup_alpha_brsgp", 0, 21, 0},
+        {"fixup_alpha_braddr", 0, 21, 0},    {"fixup_alpha_literal", 0, 16, 0},
+        {"fixup_alpha_gprelhigh", 0, 16, 0}, {"fixup_alpha_gprellow", 0, 16, 0},
+        {"fixup_alpha_gprel16", 0, 16, 0},   {"fixup_alpha_gpdisp", 0, 16, 0},
+        {"fixup_alpha_tprelhi", 0, 16, 0},   {"fixup_alpha_tprello", 0, 16, 0},
+        {"fixup_alpha_gottprel", 0, 16, 0},  {"fixup_alpha_tlsgd", 0, 16, 0},
+        {"fixup_alpha_tlsldm", 0, 16, 0},    {"fixup_alpha_dtprelhi", 0, 16, 0},
+        {"fixup_alpha_dtprello", 0, 16, 0},  {"fixup_alpha_hint", 0, 14, 0},
+        {"fixup_alpha_lituse_jsr", 0, 0, 0}, {"fixup_alpha_brsgp", 0, 21, 0},
+        {"fixup_alpha_gprel32", 0, 32, 0},
     };
     if (mc::isRelocation(Kind))
       return {};
@@ -88,6 +83,7 @@ public:
     bool AlwaysReloc = Kind == MCFixupKind(Alpha::fixup_alpha_literal) ||
                        Kind == MCFixupKind(Alpha::fixup_alpha_gprelhigh) ||
                        Kind == MCFixupKind(Alpha::fixup_alpha_gprellow) ||
+                       Kind == MCFixupKind(Alpha::fixup_alpha_gprel16) ||
                        Kind == MCFixupKind(Alpha::fixup_alpha_gpdisp) ||
                        Kind == MCFixupKind(Alpha::fixup_alpha_tprelhi) ||
                        Kind == MCFixupKind(Alpha::fixup_alpha_tprello) ||
