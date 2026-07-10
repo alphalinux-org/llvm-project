@@ -1725,8 +1725,10 @@ bool AsmParser::parseBinOpRHS(unsigned Precedence, const MCExpr *&Res,
 bool AsmParser::parseStatement(ParseStatementInfo &Info,
                                MCAsmParserSemaCallback *SI) {
   assert(!hasPendingError() && "parseStatement started with pending error");
-  // Eat initial spaces and comments
-  while (Lexer.is(AsmToken::Space))
+  // eatToEndOfStatement() lexes raw, so it can leave a block comment as the
+  // current token.  Taken as the start of a statement it produces a spurious
+  // "unexpected token at start of statement".
+  while (Lexer.is(AsmToken::Space) || Lexer.is(AsmToken::Comment))
     Lex();
   if (Lexer.is(AsmToken::EndOfStatement)) {
     // if this is a line comment we can drop it safely
