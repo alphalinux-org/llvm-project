@@ -174,6 +174,12 @@ features cannot lower the translation-unit ABI level;
   as a use of a C23 feature. They were previously an error under `-Werror` even
   in `-std=gnu11`, which GCC accepts.
 
+- `-Wuninitialized` no longer warns about an uninitialized variable passed to a
+  builtin that does not evaluate its arguments. It already made this exception
+  for `__builtin_object_size` and `__builtin_dynamic_object_size`; it now
+  applies to every builtin declared with unevaluated arguments, including
+  `__builtin_classify_type` and `__builtin_constant_p`.
+
 - Fixed bug in `-Wdocumentation` so that it correctly handles explicit
   function template instantiations (#64087).
 
