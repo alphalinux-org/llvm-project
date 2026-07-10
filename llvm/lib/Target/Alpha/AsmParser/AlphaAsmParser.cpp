@@ -14,6 +14,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringSwitch.h"
+#include "llvm/BinaryFormat/ELF.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
@@ -379,6 +380,8 @@ ParseStatus AlphaAsmParser::parseDirective(AsmToken DirectiveID) {
       return Error(getParser().getTok().getLoc(),
                    "expected symbol name after .ent");
     CurEntSym = getContext().getOrCreateSymbol(Name);
+    // Mark the symbol as a function, matching GAS behavior.
+    static_cast<MCSymbolELF *>(CurEntSym)->setType(ELF::STT_FUNC);
     getParser().eatToEndOfStatement();
     return ParseStatus::Success;
   }

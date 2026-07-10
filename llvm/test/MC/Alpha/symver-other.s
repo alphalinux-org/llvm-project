@@ -19,5 +19,5 @@ __fn:
 	.symver __old_fn, fn@VER_OLD
 	.symver __fn, fn@@VER_NEW
 
-# CHECK: NOTYPE  GLOBAL DEFAULT [<other: 0x88>] {{[0-9]+}} fn@VER_OLD
-# CHECK: NOTYPE  GLOBAL DEFAULT [<other: 0x88>] {{[0-9]+}} fn@@VER_NEW
+# CHECK: FUNC    GLOBAL DEFAULT [<other: 0x88>] {{[0-9]+}} fn@VER_OLD
+# CHECK: FUNC    GLOBAL DEFAULT [<other: 0x88>] {{[0-9]+}} fn@@VER_NEW

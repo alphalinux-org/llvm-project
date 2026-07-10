@@ -50,7 +50,7 @@ memcpy:
 
 # RELOC: R_ALPHA_BRSGP
 # .prologue 0 gives memcpy the STO_ALPHA_NOPV st_other (0x80) the linker checks.
-# RELOC: NOTYPE {{.*}}<other: 0x80>{{.*}} memcpy
+# RELOC: FUNC {{.*}}<other: 0x80>{{.*}} memcpy
 
 	.ent std_gpload
 std_gpload:
@@ -60,4 +60,4 @@ std_gpload:
 
 # .prologue 1 gives the function the STO_ALPHA_STD_GPLOAD st_other (0x88).
 # Bit 3 (0x08) was silently truncated by the old 3-bit st_other field.
-# RELOC: NOTYPE {{.*}}<other: 0x88>{{.*}} std_gpload
+# RELOC: FUNC {{.*}}<other: 0x88>{{.*}} std_gpload
