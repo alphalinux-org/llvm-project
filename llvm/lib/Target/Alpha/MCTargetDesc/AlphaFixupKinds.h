@@ -88,6 +88,10 @@ inline StringRef getSpecifierName(unsigned Kind) {
     return "dtprello";
   case fixup_alpha_brsgp:
     return "samegp";
+  // fixup_alpha_gprel32 is deliberately absent.  GNU as attaches a `!'-suffix
+  // to an instruction operand, never to a data directive, so there is no
+  // `!gprel32' to print; the only spelling is the .gprel32 directive, which
+  // AlphaAsmPrinter::emitJumpTableEntry writes.
   default:
     return "";
   }
