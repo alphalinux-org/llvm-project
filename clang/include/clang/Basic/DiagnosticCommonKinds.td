@@ -240,6 +240,12 @@ def ext_cxx_bitint_suffix : Extension<
 def ext_c23_bitint_suffix : ExtWarn<
   "'_BitInt' suffix for literals is a C23 extension">,
   InGroup<C23>;
+// In a GNU C mode before C23 the suffix is available as an extension, the same
+// way it is in C++, so diagnose it the same way rather than as a use of a C23
+// feature.
+def ext_c_bitint_suffix : Extension<
+  "'_BitInt' suffix for literals is a Clang extension">,
+  InGroup<BitIntExtension>;
 def warn_c23_compat_bitint_suffix : Warning<
   "'_BitInt' suffix for literals is incompatible with C standards before C23">,
   InGroup<CPre23Compat>, DefaultIgnore;

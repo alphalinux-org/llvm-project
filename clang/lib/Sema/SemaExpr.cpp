@@ -4054,6 +4054,7 @@ ExprResult Sema::ActOnNumericConstant(const Token &Tok, Scope *UDLScope) {
       PP.Diag(Tok.getLocation(),
               getLangOpts().CPlusPlus ? diag::ext_cxx_bitint_suffix
               : getLangOpts().C23     ? diag::warn_c23_compat_bitint_suffix
+              : getLangOpts().GNUMode ? diag::ext_c_bitint_suffix
                                       : diag::ext_c23_bitint_suffix);
 
     // Get the value in the widest-possible width. What is "widest" depends on

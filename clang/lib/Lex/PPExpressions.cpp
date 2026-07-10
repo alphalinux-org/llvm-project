@@ -338,10 +338,11 @@ static bool EvaluateValue(PPValue &Result, Token &PeekTok, DefinedTracker &DT,
     // 'wb/uwb' literals are a C23 feature.
     // '__wb/__uwb' are a C++ extension.
     if (Literal.isBitInt)
-      PP.Diag(PeekTok, PP.getLangOpts().CPlusPlus ? diag::ext_cxx_bitint_suffix
-                       : PP.getLangOpts().C23
-                           ? diag::warn_c23_compat_bitint_suffix
-                           : diag::ext_c23_bitint_suffix);
+      PP.Diag(PeekTok,
+              PP.getLangOpts().CPlusPlus ? diag::ext_cxx_bitint_suffix
+              : PP.getLangOpts().C23     ? diag::warn_c23_compat_bitint_suffix
+              : PP.getLangOpts().GNUMode ? diag::ext_c_bitint_suffix
+                                         : diag::ext_c23_bitint_suffix);
 
     // Parse the integer literal into Result.
     if (Literal.GetIntegerValue(Result.Val)) {
