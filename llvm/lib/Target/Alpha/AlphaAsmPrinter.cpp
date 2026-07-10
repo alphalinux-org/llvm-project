@@ -21,6 +21,7 @@
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineInstr.h"
+#include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCStreamer.h"
@@ -48,6 +49,9 @@ public:
   void emitFunctionBodyStart() override;
   void emitFunctionBodyEnd() override;
   void emitInstruction(const MachineInstr *MI) override;
+  void emitJumpTableEntry(const MachineJumpTableInfo &MJTI,
+                          const MachineBasicBlock *MBB,
+                          unsigned UID) const override;
 
   bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
                        const char *ExtraCode, raw_ostream &O) override;
@@ -165,6 +169,29 @@ void AlphaAsmPrinter::emitInstruction(const MachineInstr *MI) {
       OutMI.addOperand(MCOp);
   }
   EmitToStreamer(*OutStreamer, OutMI);
+}
+
+void AlphaAsmPrinter::emitJumpTableEntry(const MachineJumpTableInfo &MJTI,
+                                         const MachineBasicBlock *MBB,
+                                         unsigned UID) const {
+  // Each entry is a GP-relative 32-bit offset, which the object path expresses
+  // as a fixup built by LowerCustomJumpTableEntry.  In assembly the same thing
+  // is spelled with the .gprel32 directive, as gcc and GNU as write it: the
+  // `!'-suffix grammar attaches a relocation specifier to an instruction
+  // operand, not to a data directive, so there is no `.long x !gprel32' to
+  // print.  Without this the entry would come out as a bare `.long .LBB0_1',
+  // which reassembles to R_ALPHA_REFLONG and makes the jump table hold
+  // absolute addresses that the dispatch sequence then adds $29 to.
+  assert(MJTI.getEntryKind() == MachineJumpTableInfo::EK_Custom32 &&
+         "Alpha jump tables are EK_Custom32");
+  if (!OutStreamer->hasRawTextSupport())
+    return AsmPrinter::emitJumpTableEntry(MJTI, MBB, UID);
+
+  SmallString<128> Str;
+  raw_svector_ostream OS(Str);
+  OS << "\t.gprel32\t";
+  MBB->getSymbol()->print(OS, MAI);
+  OutStreamer->emitRawText(OS.str());
 }
 
 bool AlphaAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,

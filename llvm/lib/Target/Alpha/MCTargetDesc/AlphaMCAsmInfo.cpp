@@ -45,6 +45,7 @@ void AlphaMCAsmInfo::printSpecifierExpr(raw_ostream &OS,
   // (the specifier value is the Alpha fixup kind it selects).
   printExpr(OS, *Expr.getSubExpr());
   StringRef Name = Alpha::getSpecifierName(Expr.getSpecifier());
-  if (!Name.empty())
-    OS << " !" << Name;
+  assert(!Name.empty() &&
+         "a specifier with no `!' spelling reached the expression printer");
+  OS << " !" << Name;
 }
