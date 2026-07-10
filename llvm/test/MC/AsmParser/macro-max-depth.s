@@ -1,5 +1,6 @@
 // RUN: llvm-mc -triple x86_64-unknown-unknown -asm-macro-max-nesting-depth=42 %s | FileCheck %s -check-prefix=CHECK_PASS
-// RUN: not llvm-mc -triple x86_64-unknown-unknown %s 2> %t
+// Pin the limit rather than relying on the default, which is a tuning knob.
+// RUN: not llvm-mc -triple x86_64-unknown-unknown -asm-macro-max-nesting-depth=20 %s 2> %t
 // RUN: FileCheck -check-prefix=CHECK_FAIL < %t %s
 
 .macro rec head, tail:vararg
