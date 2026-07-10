@@ -260,6 +260,14 @@ protected:
   /// directive only.  Defaults to false.
   bool UsesELFSectionDirectiveForBSS = false;
 
+  /// Mask of st_other bits an alias inherits from the symbol it names, for
+  /// targets that keep procedure information there.  Zero, the default,
+  /// disables the inheritance: st_other is target-specific -- it holds
+  /// STO_MIPS_MICROMIPS, the PPC64 local-entry offset, STO_RISCV_VARIANT_CC and
+  /// STO_AARCH64_VARIANT_PCS -- and GNU as propagates it per target rather than
+  /// generically.
+  uint8_t InheritedSTOtherMask = 0;
+
   bool NeedsDwarfSectionOffsetDirective = false;
 
   //===--- Alignment Information ----------------------------------------===//
@@ -532,6 +540,8 @@ public:
   bool usesELFSectionDirectiveForBSS() const {
     return UsesELFSectionDirectiveForBSS;
   }
+
+  uint8_t getInheritedSTOtherMask() const { return InheritedSTOtherMask; }
 
   bool needsDwarfSectionOffsetDirective() const {
     return NeedsDwarfSectionOffsetDirective;
