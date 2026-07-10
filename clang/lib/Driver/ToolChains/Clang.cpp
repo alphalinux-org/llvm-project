@@ -2666,6 +2666,37 @@ static void CollectArgsForIntegratedAssembler(Compilation &C,
       switch (C.getDefaultToolChain().getArch()) {
       default:
         break;
+      case llvm::Triple::alpha:
+        // Alpha ISA-level flags passed to the assembler via -Wa,-mevN.
+        // Map them to the feature flags our integrated assembler understands.
+        if (Value == "-mev4" || Value == "-mev5")
+          continue; // base ISA; no additional features
+        if (Value == "-mev56" || Value == "-mpca56") {
+          CmdArgs.push_back("-target-feature");
+          CmdArgs.push_back("+bwx");
+          continue;
+        }
+        if (Value == "-mev6") {
+          CmdArgs.push_back("-target-feature");
+          CmdArgs.push_back("+bwx");
+          CmdArgs.push_back("-target-feature");
+          CmdArgs.push_back("+mvi");
+          CmdArgs.push_back("-target-feature");
+          CmdArgs.push_back("+fix");
+          continue;
+        }
+        if (Value == "-mev67") {
+          CmdArgs.push_back("-target-feature");
+          CmdArgs.push_back("+bwx");
+          CmdArgs.push_back("-target-feature");
+          CmdArgs.push_back("+mvi");
+          CmdArgs.push_back("-target-feature");
+          CmdArgs.push_back("+fix");
+          CmdArgs.push_back("-target-feature");
+          CmdArgs.push_back("+cix");
+          continue;
+        }
+        break;
       case llvm::Triple::x86:
       case llvm::Triple::x86_64:
         if (Equal.first == "-mrelax-relocations" ||
