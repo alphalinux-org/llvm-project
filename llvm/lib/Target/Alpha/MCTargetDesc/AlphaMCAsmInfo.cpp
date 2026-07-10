@@ -44,6 +44,11 @@ void AlphaMCAsmInfo::printSpecifierExpr(raw_ostream &OS,
   // A relocation specifier prints as the subexpression followed by `!name`
   // (the specifier value is the Alpha fixup kind it selects).
   printExpr(OS, *Expr.getSubExpr());
+  // Not every fixup has a `!name' spelling.  A .gprel32 entry names its
+  // relocation in the directive rather than in a suffix, so its specifier
+  // prints as the bare subexpression; asserting here would crash llvm-mc on
+  // `-filetype=asm' output of a jump table, and a release build would drop the
+  // relocation silently.
   StringRef Name = Alpha::getSpecifierName(Expr.getSpecifier());
   if (!Name.empty())
     OS << " !" << Name;
