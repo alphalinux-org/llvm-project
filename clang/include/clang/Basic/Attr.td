@@ -2423,6 +2423,16 @@ def NoInline : DeclOrStmtAttr {
   let SimpleHandler = 1;
 }
 
+def GCCNoClone : IgnoredAttr {
+  // GCC's noclone stops IPA from producing specialized copies of a function.
+  // It is accepted and ignored rather than rejected: it appears throughout the
+  // Linux kernel, almost always alongside noinline, and noinline already blocks
+  // the LLVM passes that would clone a body (function specialization, partial
+  // inlining).  A bare noclone is therefore the only case that loses anything,
+  // and matching GCC there would need a real attribute plus IPA support.
+  let Spellings = [GCC<"noclone">];
+}
+
 def NoOutline : DeclOrStmtAttr {
   let Spellings = [Clang<"no_outline">];
   let Subjects = SubjectList<[Function, ObjCMethod, Block], ErrorDiag>;
