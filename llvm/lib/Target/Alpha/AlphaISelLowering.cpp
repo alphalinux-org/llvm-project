@@ -12,6 +12,7 @@
 #include "AlphaMachineFunctionInfo.h"
 #include "AlphaSubtarget.h"
 #include "AlphaTargetMachine.h"
+#include "MCTargetDesc/AlphaFixupKinds.h"
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -23,6 +24,8 @@
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/IntrinsicsAlpha.h"
+#include "llvm/MC/MCContext.h"
+#include "llvm/MC/MCExpr.h"
 #include "llvm/Support/ErrorHandling.h"
 
 using namespace llvm;
@@ -2024,6 +2027,17 @@ SDValue AlphaTargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
   return DAG.getNode(AlphaISD::BR_NE, DL, MVT::Other, Chain, Cond, Dest);
 }
 
+const MCExpr *
+AlphaTargetLowering::LowerCustomJumpTableEntry(const MachineJumpTableInfo *,
+                                               const MachineBasicBlock *MBB,
+                                               unsigned, MCContext &Ctx) const {
+  // Emit each jump-table entry as a GP-relative 32-bit offset (R_ALPHA_GPREL32)
+  // so that the table itself carries no absolute addresses, matching GCC's PIC
+  // switch lowering and avoiding DT_TEXTREL in shared libraries.
+  return MCSpecifierExpr::create(MCSymbolRefExpr::create(MBB->getSymbol(), Ctx),
+                                 Alpha::fixup_alpha_gprel32, Ctx);
+}
+
 SDValue AlphaTargetLowering::LowerBR_JT(SDValue Op, SelectionDAG &DAG) const {
   // br_jt: chain, jump-table address, index.
   SDValue Chain = Op.getOperand(0);
@@ -2038,15 +2052,17 @@ SDValue AlphaTargetLowering::LowerBR_JT(SDValue Op, SelectionDAG &DAG) const {
   SDValue Hi = DAG.getNode(AlphaISD::GPREL_HI, DL, MVT::i64, TJT, GPReg);
   SDValue Table = DAG.getNode(AlphaISD::GPREL_LO, DL, MVT::i64, TJT, Hi);
 
-  // Each entry is an absolute 64-bit block address; load it and jump.
+  // Each entry is a 32-bit GP-relative offset (target - GP); load it, sign-
+  // extend to 64 bits, then add GP to recover the absolute target address.
   SDValue EntryAddr =
       DAG.getNode(ISD::ADD, DL, MVT::i64, Table,
                   DAG.getNode(ISD::SHL, DL, MVT::i64, Index,
-                              DAG.getConstant(3, DL, MVT::i64)));
-  SDValue Target =
-      DAG.getLoad(MVT::i64, DL, Chain, EntryAddr,
-                  MachinePointerInfo::getJumpTable(DAG.getMachineFunction()));
-  Chain = Target.getValue(1);
+                              DAG.getConstant(2, DL, MVT::i64)));
+  SDValue GPRel = DAG.getExtLoad(
+      ISD::SEXTLOAD, DL, MVT::i64, Chain, EntryAddr,
+      MachinePointerInfo::getJumpTable(DAG.getMachineFunction()), MVT::i32);
+  Chain = GPRel.getValue(1);
+  SDValue Target = DAG.getNode(ISD::ADD, DL, MVT::i64, GPReg, GPRel);
   return DAG.getNode(ISD::BRIND, DL, MVT::Other, Chain, Target);
 }
 

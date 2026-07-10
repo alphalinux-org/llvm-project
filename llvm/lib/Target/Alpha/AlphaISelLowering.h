@@ -171,10 +171,16 @@ public:
   Register getExceptionPointerRegister(const Constant *) const override;
   Register getExceptionSelectorRegister(const Constant *) const override;
 
-  // Jump-table entries are absolute 64-bit block addresses.
+  // Jump-table entries are 32-bit GP-relative offsets (target - GP), matching
+  // GCC's PIC switch lowering.  EK_Custom32 drives LowerCustomJumpTableEntry.
   unsigned getJumpTableEncoding() const override {
-    return MachineJumpTableInfo::EK_BlockAddress;
+    return MachineJumpTableInfo::EK_Custom32;
   }
+
+  const MCExpr *LowerCustomJumpTableEntry(const MachineJumpTableInfo *MJTI,
+                                          const MachineBasicBlock *MBB,
+                                          unsigned Uid,
+                                          MCContext &Ctx) const override;
 
   // Comparisons produce a 0/1 result in a 64-bit integer register.
   EVT getSetCCResultType(const DataLayout &DL, LLVMContext &Context,
