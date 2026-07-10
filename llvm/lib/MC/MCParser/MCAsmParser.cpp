@@ -23,8 +23,14 @@
 using namespace llvm;
 
 namespace llvm {
+// 100 is the number GNU as uses (max_macro_nest in gas/macro.c), and it is here
+// for the same reason it is there: to turn runaway recursion into a diagnostic
+// instead of a stack overflow.  20 rejected input GNU as accepts -- the Linux
+// Alpha port's PALcode and system-call macros reach the low thirties -- so
+// matching gas both clears what real assembly needs and stops the two
+// assemblers from disagreeing about which input is legal.
 cl::opt<unsigned> AsmMacroMaxNestingDepth(
-    "asm-macro-max-nesting-depth", cl::init(20), cl::Hidden,
+    "asm-macro-max-nesting-depth", cl::init(100), cl::Hidden,
     cl::desc("The maximum nesting depth allowed for assembly macros."));
 }
 
