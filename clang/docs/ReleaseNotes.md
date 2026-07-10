@@ -165,6 +165,11 @@ features cannot lower the translation-unit ABI level;
 
 - More consistent rendering of Unicode characters in diagnostic messages.
 
+- The `wb` and `uwb` `_BitInt` literal suffixes are now diagnosed as an
+  extension in GNU C modes before C23, under `-Wbit-int-extension`, rather than
+  as a use of a C23 feature. They were previously an error under `-Werror` even
+  in `-std=gnu11`, which GCC accepts.
+
 - Fixed bug in `-Wdocumentation` so that it correctly handles explicit
   function template instantiations (#64087).
 
