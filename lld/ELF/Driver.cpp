@@ -1328,9 +1328,10 @@ static SmallVector<StringRef, 0> getSymbolOrderingFile(Ctx &ctx,
 
 static bool getIsRela(Ctx &ctx, opt::InputArgList &args) {
   // The psABI specifies the default relocation entry format.
-  bool rela = is_contained({EM_AARCH64, EM_AMDGPU, EM_HEXAGON, EM_LOONGARCH,
-                            EM_PPC, EM_PPC64, EM_RISCV, EM_S390, EM_X86_64},
-                           ctx.arg.emachine);
+  bool rela =
+      is_contained({EM_AARCH64, EM_ALPHA, EM_AMDGPU, EM_HEXAGON, EM_LOONGARCH,
+                    EM_PPC, EM_PPC64, EM_RISCV, EM_S390, EM_X86_64},
+                   ctx.arg.emachine);
   // If -z rel or -z rela is specified, use the last option.
   for (auto *arg : args.filtered(OPT_z)) {
     StringRef s(arg->getValue());
@@ -2055,9 +2056,12 @@ static void setConfigs(Ctx &ctx, opt::InputArgList &args) {
   // if --apply-dynamic-relocs is used.
   // We default to not writing the addends when using RELA relocations since
   // any standard conforming tool can find it in r_addend.
+  // Alpha is an exception: glibc's R_ALPHA_RELATIVE handler adds the load bias
+  // to the value already in place and ignores r_addend, so the addend has to be
+  // written out even though the format is RELA.
   ctx.arg.writeAddends = args.hasFlag(OPT_apply_dynamic_relocs,
                                       OPT_no_apply_dynamic_relocs, false) ||
-                         !ctx.arg.isRela;
+                         !ctx.arg.isRela || ctx.arg.emachine == EM_ALPHA;
   // Validation of dynamic relocation addends is on by default for assertions
   // builds and disabled otherwise. This check is enabled when writeAddends is
   // true.
