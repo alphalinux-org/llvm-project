@@ -36,6 +36,7 @@ protected:
     case Alpha::fixup_alpha_tprelhi:
     case Alpha::fixup_alpha_tprello:
     case Alpha::fixup_alpha_gottprel:
+    case Alpha::fixup_alpha_gotdtprel:
     case Alpha::fixup_alpha_tlsgd:
     case Alpha::fixup_alpha_tlsldm:
     case Alpha::fixup_alpha_dtprelhi:
@@ -73,6 +74,8 @@ protected:
       return ELF::R_ALPHA_TPRELLO;
     case Alpha::fixup_alpha_gottprel:
       return ELF::R_ALPHA_GOTTPREL;
+    case Alpha::fixup_alpha_gotdtprel:
+      return ELF::R_ALPHA_GOTDTPREL;
     case Alpha::fixup_alpha_tlsgd:
       return ELF::R_ALPHA_TLSGD;
     case Alpha::fixup_alpha_tlsldm:
