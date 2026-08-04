@@ -53,6 +53,7 @@ enum { STO_ALPHA_NOPV = 0x80, STO_ALPHA_STD_GPLOAD = 0x88 };
 enum GotKind : uint32_t {
   GK_Addr,     // the symbol's address (R_ALPHA_LITERAL)
   GK_TpOff,    // the symbol's thread-pointer offset (R_ALPHA_GOTTPREL)
+  GK_DtpOff,   // the symbol's module-relative offset (R_ALPHA_GOTDTPREL)
   GK_DynTls,   // module index and dtp offset pair (R_ALPHA_TLSGD)
   GK_TlsIndex, // module index and zero pair (R_ALPHA_TLSLDM)
   GK_Max
@@ -172,6 +173,7 @@ RelExpr Alpha::getRelExpr(RelType type, const Symbol &s,
   case R_ALPHA_TLSGD:
   case R_ALPHA_TLSLDM:
   case R_ALPHA_GOTTPREL:
+  case R_ALPHA_GOTDTPREL:
     return R_NONE;
   case R_ALPHA_DTPREL64:
   case R_ALPHA_DTPRELHI:
@@ -236,6 +238,9 @@ static unsigned gotSlotsFor(RelType type, GotKind &kind) {
     return 1;
   case R_ALPHA_GOTTPREL:
     kind = GK_TpOff;
+    return 1;
+  case R_ALPHA_GOTDTPREL:
+    kind = GK_DtpOff;
     return 1;
   case R_ALPHA_TLSGD:
     kind = GK_DynTls;
@@ -348,12 +353,25 @@ uint64_t Alpha::getGotEntry(Symbol &sym, int64_t addend, GotKind kind) {
       got.addConstant({R_ABS, symbolicRel, off, addend, &sym});
     }
     break;
+  case GK_DtpOff:
+    // Local dynamic can reach an offset too large for R_ALPHA_DTPREL16 through
+    // the GOT instead. The dtp base is the TLS segment's address, which is
+    // what R_DTPREL computes.
+    if (sym.isPreemptible)
+      ctx.in.relaDyn->addSymbolReloc(tlsOffsetRel, got, off, sym, addend);
+    else
+      got.addConstant({R_DTPREL, symbolicRel, off, addend, &sym});
+    break;
   case GK_TpOff:
     if (localInExe)
-      got.addConstant({R_TPREL, symbolicRel, off, 0, &sym});
+      got.addConstant({R_TPREL, symbolicRel, off, addend, &sym});
+    else if (sym.isPreemptible)
+      ctx.in.relaDyn->addSymbolReloc(tlsGotRel, got, off, sym, addend);
     else
-      ctx.in.relaDyn->addAddendOnlyRelocIfNonPreemptible(tlsGotRel, got, off,
-                                                         sym, symbolicRel);
+      // addAddendOnlyRelocIfNonPreemptible, but carrying the addend: the
+      // entry is keyed on it, so sym+N needs N in the slot.
+      ctx.in.relaDyn->addReloc(/*isAgainstSymbol=*/false, tlsGotRel, got, off,
+                               sym, addend, R_ABS, symbolicRel);
     break;
   case GK_DynTls:
     // The module index, then the offset of the symbol within that module's TLS
@@ -363,9 +381,9 @@ uint64_t Alpha::getGotEntry(Symbol &sym, int64_t addend, GotKind kind) {
     else
       ctx.in.relaDyn->addSymbolReloc(tlsModuleIndexRel, got, off, sym);
     if (sym.isPreemptible)
-      ctx.in.relaDyn->addSymbolReloc(tlsOffsetRel, got, off + 8, sym);
+      ctx.in.relaDyn->addSymbolReloc(tlsOffsetRel, got, off + 8, sym, addend);
     else
-      got.addConstant({R_ABS, tlsOffsetRel, off + 8, 0, &sym});
+      got.addConstant({R_ABS, tlsOffsetRel, off + 8, addend, &sym});
     break;
   case GK_TlsIndex:
     // Only the module index matters; the second slot stays zero and the caller
@@ -432,11 +450,15 @@ void Alpha::scanSectionImpl(InputSectionBase &sec, Relocs<RelTy> rels,
       continue;
     case R_ALPHA_GOTTPREL:
       sec.addReloc({RE_ALPHA_GOT, type, offset,
-                    int64_t(getGotEntry(sym, 0, GK_TpOff)), &sym});
+                    int64_t(getGotEntry(sym, addend, GK_TpOff)), &sym});
+      continue;
+    case R_ALPHA_GOTDTPREL:
+      sec.addReloc({RE_ALPHA_GOT, type, offset,
+                    int64_t(getGotEntry(sym, addend, GK_DtpOff)), &sym});
       continue;
     case R_ALPHA_TLSGD:
       sec.addReloc({RE_ALPHA_GOT, type, offset,
-                    int64_t(getGotEntry(sym, 0, GK_DynTls)), &sym});
+                    int64_t(getGotEntry(sym, addend, GK_DynTls)), &sym});
       continue;
     case R_ALPHA_TLSLDM:
       // The symbol of a TLSLDM relocation is ignored: the result is always the
@@ -457,10 +479,6 @@ void Alpha::scanSectionImpl(InputSectionBase &sec, Relocs<RelTy> rels,
     case R_ALPHA_DTPRELLO:
     case R_ALPHA_DTPREL16:
       sec.addReloc({R_DTPREL, type, offset, addend, &sym});
-      continue;
-    case R_ALPHA_GOTDTPREL:
-      Err(ctx) << getErrorLoc(ctx, sec.content().data() + offset)
-               << "R_ALPHA_GOTDTPREL is not supported";
       continue;
     default:
       break;
@@ -599,6 +617,7 @@ void Alpha::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
   case R_ALPHA_TLSGD:
   case R_ALPHA_TLSLDM:
   case R_ALPHA_GOTTPREL:
+  case R_ALPHA_GOTDTPREL:
     checkInt(ctx, loc, val, 16, rel);
     writeImm16(loc, val);
     break;

@@ -36,19 +36,6 @@ static uint64_t adjustFixupValue(unsigned Kind, uint64_t Value, MCContext &Ctx,
     else if (!isInt<23>(int64_t(Value) - 4))
       Ctx.reportError(Loc, "branch target out of range");
     return ((Value - 4) >> 2) & 0x1fffff;
-  case Alpha::fixup_alpha_literal:
-  case Alpha::fixup_alpha_gprel16:
-  case Alpha::fixup_alpha_gprellow:
-  case Alpha::fixup_alpha_tprello:
-  case Alpha::fixup_alpha_gottprel:
-  case Alpha::fixup_alpha_tlsgd:
-  case Alpha::fixup_alpha_tlsldm:
-  case Alpha::fixup_alpha_dtprello:
-    return Value & 0xffff;
-  case Alpha::fixup_alpha_gprelhigh:
-  case Alpha::fixup_alpha_tprelhi:
-  case Alpha::fixup_alpha_dtprelhi:
-    return ((Value + 0x8000) >> 16) & 0xffff;
   case Alpha::fixup_alpha_disp16:
     if (!isInt<16>(int64_t(Value)))
       Ctx.reportError(Loc, "displacement out of range");
@@ -102,15 +89,25 @@ public:
   MCFixupKindInfo getFixupKindInfo(MCFixupKind Kind) const override {
     // {name, offset, bits, flags}
     const static MCFixupKindInfo Infos[Alpha::NumTargetFixupKinds] = {
-        {"fixup_alpha_braddr", 0, 21, 0},    {"fixup_alpha_literal", 0, 16, 0},
-        {"fixup_alpha_gprelhigh", 0, 16, 0}, {"fixup_alpha_gprellow", 0, 16, 0},
-        {"fixup_alpha_gprel16", 0, 16, 0},   {"fixup_alpha_gpdisp", 0, 16, 0},
-        {"fixup_alpha_tprelhi", 0, 16, 0},   {"fixup_alpha_tprello", 0, 16, 0},
-        {"fixup_alpha_gottprel", 0, 16, 0},  {"fixup_alpha_tlsgd", 0, 16, 0},
-        {"fixup_alpha_tlsldm", 0, 16, 0},    {"fixup_alpha_dtprelhi", 0, 16, 0},
-        {"fixup_alpha_dtprello", 0, 16, 0},  {"fixup_alpha_hint", 0, 14, 0},
-        {"fixup_alpha_lituse_jsr", 0, 0, 0}, {"fixup_alpha_brsgp", 0, 21, 0},
-        {"fixup_alpha_gprel32", 0, 32, 0},   {"fixup_alpha_disp16", 0, 16, 0},
+        {"fixup_alpha_braddr", 0, 21, 0},
+        {"fixup_alpha_literal", 0, 16, 0},
+        {"fixup_alpha_gprelhigh", 0, 16, 0},
+        {"fixup_alpha_gprellow", 0, 16, 0},
+        {"fixup_alpha_gprel16", 0, 16, 0},
+        {"fixup_alpha_gpdisp", 0, 16, 0},
+        {"fixup_alpha_tprelhi", 0, 16, 0},
+        {"fixup_alpha_tprello", 0, 16, 0},
+        {"fixup_alpha_gottprel", 0, 16, 0},
+        {"fixup_alpha_gotdtprel", 0, 16, 0},
+        {"fixup_alpha_tlsgd", 0, 16, 0},
+        {"fixup_alpha_tlsldm", 0, 16, 0},
+        {"fixup_alpha_dtprelhi", 0, 16, 0},
+        {"fixup_alpha_dtprello", 0, 16, 0},
+        {"fixup_alpha_hint", 0, 14, 0},
+        {"fixup_alpha_lituse_jsr", 0, 0, 0},
+        {"fixup_alpha_brsgp", 0, 21, 0},
+        {"fixup_alpha_gprel32", 0, 32, 0},
+        {"fixup_alpha_disp16", 0, 16, 0},
         {"fixup_alpha_lit8", 13, 8, 0},
     };
     // Infos is indexed positionally by Kind - FirstTargetFixupKind, so its
@@ -140,6 +137,7 @@ public:
                        Kind == MCFixupKind(Alpha::fixup_alpha_tprelhi) ||
                        Kind == MCFixupKind(Alpha::fixup_alpha_tprello) ||
                        Kind == MCFixupKind(Alpha::fixup_alpha_gottprel) ||
+                       Kind == MCFixupKind(Alpha::fixup_alpha_gotdtprel) ||
                        Kind == MCFixupKind(Alpha::fixup_alpha_tlsgd) ||
                        Kind == MCFixupKind(Alpha::fixup_alpha_tlsldm) ||
                        Kind == MCFixupKind(Alpha::fixup_alpha_dtprelhi) ||
