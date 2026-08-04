@@ -13,6 +13,13 @@
 // of .got, so a single GOT of up to 64KB is addressable with a signed 16-bit
 // displacement.
 //
+// A call also goes through the GOT: the caller loads the callee's address with
+// R_ALPHA_LITERAL and jumps to it. The PLT therefore exists only to support
+// lazy binding -- R_ALPHA_JMP_SLOT relocates the .got slot rather than a
+// .got.plt slot, and the PLT stub is what the slot points at until the first
+// call resolves it. We bind eagerly and emit no PLT at all, so a preemptible
+// callee simply gets R_ALPHA_GLOB_DAT on its GOT entry.
+//
 //===----------------------------------------------------------------------===//
 
 #include "InputFiles.h"
@@ -70,6 +77,12 @@ Alpha::Alpha(Ctx &ctx) : TargetInfo(ctx) {
   tlsGotRel = R_ALPHA_TPREL64;
   gotEntrySize = 8;
 
+  // On Alpha a call loads the callee's address from the ordinary GOT with
+  // R_ALPHA_LITERAL and jumps to it, so the PLT exists only as a lazy-binding
+  // trampoline: R_ALPHA_JMP_SLOT relocates the .got slot, not a .got.plt slot.
+  // We bind eagerly instead and emit no PLT at all, which needs no .got.plt.
+  gotPltHeaderEntriesNum = 0;
+
   // Alpha Linux runs with 8KB pages, but the ABI reserves 64KB of alignment
   // between segments, matching bfd's ELF_MAXPAGESIZE for elf64-alpha.
   defaultCommonPageSize = 8192;
@@ -95,7 +108,9 @@ RelExpr Alpha::getRelExpr(RelType type, const Symbol &s,
     return R_PC;
   case R_ALPHA_BRADDR:
   case R_ALPHA_BRSGP:
-    return R_PLT_PC;
+    // There is no PLT (see below), so a branch cannot reach a preemptible
+    // symbol. process() reports that as an error.
+    return R_PC;
   case R_ALPHA_HINT:
     // The hint only steers the branch predictor for an indirect jsr; a wrong
     // value costs performance, never correctness. A call to a preemptible
@@ -151,7 +166,18 @@ uint64_t Alpha::getLiteralGotOffset(Symbol &sym, int64_t addend) {
   auto [it, inserted] = literalGot.try_emplace({&sym, addend}, 0);
   if (inserted) {
     it->second = ctx.in.got->reserveEntry();
-    ctx.in.got->addConstant({R_ABS, R_ALPHA_REFQUAD, it->second, addend, &sym});
+    // A preemptible symbol's address is only known at run time, and no dynamic
+    // relocation can express symbol+addend, which is why bfd only ever forms
+    // these entries for local symbols.
+    if (sym.isPreemptible)
+      Err(ctx) << "R_ALPHA_LITERAL against preemptible symbol '" << &sym
+               << "' with a non-zero addend";
+    else if (ctx.arg.isPic)
+      ctx.in.relaDyn->addRelativeReloc(relativeRel, *ctx.in.got, it->second,
+                                       sym, addend, R_ALPHA_REFQUAD, R_ABS);
+    else
+      ctx.in.got->addConstant(
+          {R_ABS, R_ALPHA_REFQUAD, it->second, addend, &sym});
   }
   return it->second;
 }
@@ -180,12 +206,6 @@ void Alpha::scanSectionImpl(InputSectionBase &sec, Relocs<RelTy> rels,
     case R_ALPHA_LITERAL:
       if (addend == 0)
         break;
-      if (ctx.arg.isPic) {
-        Err(ctx) << getErrorLoc(ctx, sec.content().data() + offset)
-                 << "R_ALPHA_LITERAL against symbol+addend is not supported in "
-                    "position-independent output";
-        continue;
-      }
       // The GOT offset is known now, so carry it in the addend and let
       // relocate() turn it into a gp-relative displacement.
       sec.addReloc({R_ADDEND, type, offset,
@@ -239,11 +259,6 @@ void Alpha::finalizeRelocScan() {
   // Every function establishes gp from .got, so gp has to be well defined even
   // in a link that needs no GOT entries. Keep .got from being discarded.
   ctx.in.got->hasGotOffRel.store(true, std::memory_order_relaxed);
-
-  // The PLT and the dynamic relocation forms are not implemented yet, so
-  // refuse to emit output that would need them rather than emit it wrong.
-  if (ctx.arg.isPic || !ctx.sharedFiles.empty())
-    Err(ctx) << "Alpha does not support dynamic linking yet";
 }
 
 // Patch the 16-bit immediate field of a single instruction.
