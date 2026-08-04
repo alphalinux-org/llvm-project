@@ -505,6 +505,10 @@ void GotSection::addEntry(const Symbol &sym) {
   ctx.symAux.back().gotIdx = numEntries++;
 }
 
+uint64_t GotSection::reserveEntry() {
+  return numEntries++ * ctx.target->gotEntrySize;
+}
+
 void GotSection::addAuthEntry(const Symbol &sym) {
   authEntries.push_back(
       {(numEntries - 1) * ctx.target->gotEntrySize, sym.isFunc()});
