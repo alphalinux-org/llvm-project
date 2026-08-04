@@ -1331,6 +1331,10 @@ enum : unsigned {
   // for faster accesses
   SHF_HEX_GPREL = 0x10000000,
 
+  // Alpha-specific section flag. Sections holding small data reached with a
+  // gp-relative displacement are marked with it.
+  SHF_ALPHA_GPREL = 0x10000000,
+
   // Section contains text/data which may be replicated in other sections.
   // Linker must retain only one copy.
   SHF_MIPS_NODUPES = 0x01000000,
