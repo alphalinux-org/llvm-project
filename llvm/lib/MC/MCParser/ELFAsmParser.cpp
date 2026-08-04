@@ -310,9 +310,12 @@ static unsigned parseSectionFlags(const Triple &TT, StringRef flagsStr,
         return -1U;
       break;
     case 's':
-      if (TT.getArch() != Triple::hexagon)
+      if (TT.getArch() == Triple::hexagon)
+        flags |= ELF::SHF_HEX_GPREL;
+      else if (TT.getArch() == Triple::alpha)
+        flags |= ELF::SHF_ALPHA_GPREL;
+      else
         return -1U;
-      flags |= ELF::SHF_HEX_GPREL;
       break;
     case 'G':
       flags |= ELF::SHF_GROUP;
@@ -640,6 +643,22 @@ EndStmt:
       Type = ELF::SHT_LLVM_CALL_GRAPH;
     else if (TypeName.getAsInteger(0, Type))
       return TokError("unknown section type");
+  }
+
+  // bfd's Alpha special-section table (elf64_alpha_special_sections in
+  // bfd/elf64-alpha.c) gives .sbss and .sdata their type and SHF_ALPHA_GPREL
+  // from the name alone, and gas fills both in.  gcc's -msmall-data output
+  // relies on it: it writes `.section .sbss,"aw"' with no `s' and no type, so
+  // without this .sbss assembles as PROGBITS with no gp flag, bfd warns
+  // "section `.sbss' type changed to PROGBITS" on every link, and the output
+  // .sbss -- libc's included -- becomes file-backed.
+  if (getContext().getTargetTriple().getArch() == Triple::alpha) {
+    bool IsSBss = hasPrefix(SectionName, ".sbss");
+    if (IsSBss || hasPrefix(SectionName, ".sdata")) {
+      Flags |= ELF::SHF_ALPHA_GPREL;
+      if (TypeName.empty() && IsSBss)
+        Type = ELF::SHT_NOBITS;
+    }
   }
 
   if (UseLastGroup) {
