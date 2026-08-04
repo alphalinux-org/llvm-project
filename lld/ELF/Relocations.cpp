@@ -145,9 +145,9 @@ bool lld::elf::needsGot(RelExpr expr) {
 // True if this expression is of the form Sym - X, where X is a position in the
 // file (PC, or GOT for example).
 static bool isRelExpr(RelExpr expr) {
-  return oneof<R_PC, R_GOTREL, R_GOTPLTREL, RE_ARM_PCA, RE_MIPS_GOTREL,
-               RE_PPC64_CALL, RE_AARCH64_PAGE_PC, R_RELAX_GOT_PC,
-               RE_RISCV_PC_INDIRECT, RE_LOONGARCH_PAGE_PC,
+  return oneof<R_PC, R_GOTREL, R_GOTPLTREL, RE_ALPHA_GPREL, RE_ARM_PCA,
+               RE_MIPS_GOTREL, RE_PPC64_CALL, RE_AARCH64_PAGE_PC,
+               R_RELAX_GOT_PC, RE_RISCV_PC_INDIRECT, RE_LOONGARCH_PAGE_PC,
                RE_LOONGARCH_PC_INDIRECT>(expr);
 }
 
@@ -840,13 +840,14 @@ bool RelocScan::isStaticLinkTimeConstant(RelExpr e, RelType type,
                                          const Symbol &sym,
                                          uint64_t relOff) const {
   // These expressions always compute a constant
-  if (oneof<R_GOTPLT, R_GOT_OFF, R_RELAX_HINT, RE_MIPS_GOT_LOCAL_PAGE,
-            RE_MIPS_GOTREL, RE_MIPS_GOT_OFF, RE_MIPS_GOT_OFF32,
-            RE_MIPS_GOT_GP_PC, RE_AARCH64_GOT_PAGE_PC, R_GOT_PC, R_GOTONLY_PC,
-            R_GOTPLTONLY_PC, R_PLT_PC, R_PLT_GOTREL, R_PLT_GOTPLT,
-            R_GOTPLT_GOTREL, R_GOTPLT_PC, RE_PPC32_PLTREL, RE_PPC64_CALL_PLT,
-            RE_RISCV_ADD, RE_AARCH64_GOT_PAGE, RE_LOONGARCH_PLT_PAGE_PC,
-            RE_LOONGARCH_GOT, RE_LOONGARCH_GOT_PAGE_PC>(e))
+  if (oneof<R_GOTPLT, R_GOT_OFF, R_RELAX_HINT, RE_ALPHA_GPDISP,
+            RE_MIPS_GOT_LOCAL_PAGE, RE_MIPS_GOTREL, RE_MIPS_GOT_OFF,
+            RE_MIPS_GOT_OFF32, RE_MIPS_GOT_GP_PC, RE_AARCH64_GOT_PAGE_PC,
+            R_GOT_PC, R_GOTONLY_PC, R_GOTPLTONLY_PC, R_PLT_PC, R_PLT_GOTREL,
+            R_PLT_GOTPLT, R_GOTPLT_GOTREL, R_GOTPLT_PC, RE_PPC32_PLTREL,
+            RE_PPC64_CALL_PLT, RE_RISCV_ADD, RE_AARCH64_GOT_PAGE,
+            RE_LOONGARCH_PLT_PAGE_PC, RE_LOONGARCH_GOT,
+            RE_LOONGARCH_GOT_PAGE_PC>(e))
     return true;
 
   // These never do, except if the entire file is position dependent or if
@@ -1179,11 +1180,12 @@ template <class ELFT> void elf::scanRelocations(Ctx &ctx) {
 
   size_t numFiles = ctx.objectFiles.size();
   std::atomic<size_t> next{0};
-  // MIPS modifies MipsGotSection during relocation scanning, which is not
+  // MIPS modifies MipsGotSection during relocation scanning, and Alpha
+  // allocates GOT entries for symbol+addend pairs there, neither of which is
   // suitable for parallelism.
-  size_t numWorkers = ctx.arg.emachine == EM_MIPS
-                          ? 1
-                          : std::min<size_t>(ctx.arg.threadCount, numFiles + 1);
+  bool serial = ctx.arg.emachine == EM_MIPS || ctx.arg.emachine == EM_ALPHA;
+  size_t numWorkers =
+      serial ? 1 : std::min<size_t>(ctx.arg.threadCount, numFiles + 1);
   parallelFor(0, numWorkers, [&](unsigned shard) {
     // Tasks claim work items off a shared counter: item i < numFiles scans
     // ctx.objectFiles[i] while the last item scans special sections.

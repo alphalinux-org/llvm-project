@@ -778,6 +778,10 @@ static int64_t getTlsTpOffset(Ctx &ctx, const Symbol &s) {
     // to allow a signed 16-bit offset to reach 0x1000 of TCB/thread-library
     // data and 0xf000 of the program's TLS segment.
     return s.getVA(ctx, 0) + (tls->p_vaddr & (tls->p_align - 1)) - 0x7000;
+  case EM_ALPHA:
+    // Adjusted Variant 1. The main program's TLS block starts at
+    // TP + round_up(16, p_align), leaving room for the 16-byte TCB.
+    return s.getVA(ctx, 0) + alignTo(16, std::max<uint64_t>(tls->p_align, 1));
   case EM_LOONGARCH:
   case EM_RISCV:
     // For TLSDESC=>IE, R_RISCV_TLSDESC_{LOAD_LO12,ADD_LO12_I,CALL} reference
@@ -830,6 +834,16 @@ uint64_t InputSectionBase::getRelocTargetVA(Ctx &ctx, const Relocation &r,
     return r.sym->getGotVA(ctx) + a;
   case R_GOTONLY_PC:
     return ctx.in.got->getVA() + a - p;
+  case RE_ALPHA_GPDISP:
+    // The addend is the distance from the ldah to its paired lda, not a value
+    // to be added, so it is not part of the expression.
+    return ctx.in.got->getVA() + 0x8000 - p;
+  case RE_ALPHA_GPREL:
+    return r.sym->getVA(ctx, a) - (ctx.in.got->getVA() + 0x8000);
+  case RE_ALPHA_GOT:
+    // The addend is the offset of the GOT entry within .got, assigned while
+    // scanning, not a value to be added to the symbol.
+    return ctx.in.got->getVA() + a - (ctx.in.got->getVA() + 0x8000);
   case R_GOTPLTONLY_PC:
     return ctx.in.gotPlt->getVA() + a - p;
   case R_GOTREL:

@@ -29,6 +29,9 @@ from the [LLVM releases web site](https://llvm.org/releases/).
 
 ### ELF Improvements
 
+* Added support for the Alpha (`EM_ALPHA`) target: GP-relative addressing and
+  multi-GOT partitioning, and the four TLS models.
+
 ### Breaking changes
 
 ### COFF Improvements
