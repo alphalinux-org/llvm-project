@@ -65,6 +65,12 @@ enum GotKind : uint32_t {
 // holds, and the partition it belongs to.
 using GotKey = std::pair<Symbol *, std::pair<int64_t, uint32_t>>;
 
+// An ifunc we resolve ourselves with R_ALPHA_IRELATIVE. A preemptible one is
+// left to the dynamic linker, which resolves it like any other symbol.
+static bool isAlphaIfunc(Ctx &ctx, const Symbol &sym) {
+  return sym.isGnuIFunc() && !sym.isPreemptible;
+}
+
 namespace {
 class Alpha final : public TargetInfo {
 public:
@@ -112,6 +118,7 @@ Alpha::Alpha(Ctx &ctx) : TargetInfo(ctx) {
   gotRel = R_ALPHA_GLOB_DAT;
   pltRel = R_ALPHA_JMP_SLOT;
   relativeRel = R_ALPHA_RELATIVE;
+  iRelativeRel = R_ALPHA_IRELATIVE;
   symbolicRel = R_ALPHA_REFQUAD;
   tlsModuleIndexRel = R_ALPHA_DTPMOD64;
   tlsOffsetRel = R_ALPHA_DTPREL64;
@@ -156,7 +163,8 @@ RelExpr Alpha::getRelExpr(RelType type, const Symbol &s,
     // The hint only steers the branch predictor for an indirect jsr; a wrong
     // value costs performance, never correctness. A call to a preemptible
     // symbol is always out of range, so leave the field alone, as bfd does.
-    return s.isPreemptible ? R_NONE : R_PC;
+    // An ifunc has no link-time address to point at either.
+    return s.isPreemptible || s.isGnuIFunc() ? R_NONE : R_PC;
   case R_ALPHA_GPREL16:
   case R_ALPHA_GPREL32:
   case R_ALPHA_GPRELHIGH:
@@ -205,6 +213,7 @@ int64_t Alpha::getImplicitAddend(const uint8_t *buf, RelType type) const {
   case R_ALPHA_REFQUAD:
   case R_ALPHA_GLOB_DAT:
   case R_ALPHA_RELATIVE:
+  case R_ALPHA_IRELATIVE:
   case R_ALPHA_TPREL64:
   case R_ALPHA_DTPMOD64:
   case R_ALPHA_DTPREL64:
@@ -344,7 +353,13 @@ uint64_t Alpha::getGotEntry(Symbol &sym, int64_t addend, GotKind kind) {
 
   switch (kind) {
   case GK_Addr:
-    if (sym.isPreemptible) {
+    if (isAlphaIfunc(ctx, sym)) {
+      // The runtime calls the resolver named by the addend and stores its
+      // result here, so every reference through the GOT sees one address.
+      getIRelativeSection(ctx).addReloc(/*isAgainstSymbol=*/false, iRelativeRel,
+                                        got, off, sym, addend, R_ABS,
+                                        R_ALPHA_REFQUAD);
+    } else if (sym.isPreemptible) {
       // No dynamic relocation can express symbol+addend, which is why bfd only
       // ever forms such an entry for a symbol it can resolve itself.  The
       // scanner rejects that case before getting here, where the relocation it
@@ -447,6 +462,32 @@ void Alpha::scanSectionImpl(InputSectionBase &sec, Relocs<RelTy> rels,
     int64_t addend = rs.getAddend<ELFT>(*it, type);
 
     switch (type) {
+    case R_ALPHA_REFQUAD:
+      if (!isAlphaIfunc(ctx, sym))
+        break;
+      // A data reference to an ifunc is resolved at startup, so it has to
+      // land somewhere writable.
+      if (!(sec.flags & SHF_WRITE)) {
+        Err(ctx) << getErrorLoc(ctx, sec.content().data() + offset)
+                 << "cannot resolve ifunc '" << &sym
+                 << "' in read-only section " << sec.name;
+        continue;
+      }
+      getIRelativeSection(ctx).addReloc(/*isAgainstSymbol=*/false,
+                                        R_ALPHA_IRELATIVE, sec, offset, sym,
+                                        addend, R_ABS, R_ALPHA_REFQUAD);
+      continue;
+    case R_ALPHA_BRADDR:
+    case R_ALPHA_BRSGP:
+      // Without a PLT there is no stub to branch to, and an ifunc has no
+      // link-time address of its own.
+      if (isAlphaIfunc(ctx, sym)) {
+        Err(ctx) << getErrorLoc(ctx, sec.content().data() + offset)
+                 << "cannot branch directly to ifunc '" << &sym
+                 << "'; it must be called through the GOT";
+        continue;
+      }
+      break;
     // These consume a GOT entry. Allocate it now and carry its offset within
     // .got in the addend; RE_ALPHA_GOT turns that into a gp displacement.
     case R_ALPHA_LITERAL:
