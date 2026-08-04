@@ -1396,6 +1396,11 @@ constexpr EnumStringDef<unsigned, 2> ElfARMSectionFlagsDefs[] = {
     ENUM_ENT(SHF_ARM_PURECODE, "y")};
 constexpr auto ElfARMSectionFlags = BUILD_ENUM_STRINGS(ElfARMSectionFlagsDefs);
 
+constexpr EnumStringDef<unsigned, 2> ElfAlphaSectionFlagsDefs[] = {
+    ENUM_ENT(SHF_ALPHA_GPREL, "s")};
+constexpr auto ElfAlphaSectionFlags =
+    BUILD_ENUM_STRINGS(ElfAlphaSectionFlagsDefs);
+
 constexpr EnumStringDef<unsigned, 2> ElfHexagonSectionFlagsDefs[] = {
     ENUM_ENT(SHF_HEX_GPREL, "")};
 constexpr auto ElfHexagonSectionFlags =
@@ -1432,6 +1437,10 @@ getSectionFlagsForTarget(unsigned EOSAbi, unsigned EMachine) {
   switch (EMachine) {
   case EM_AARCH64:
     for (const auto &Entry : EnumStrings(ElfAArch64SectionFlags))
+      Ret.push_back(&Entry);
+    break;
+  case EM_ALPHA:
+    for (const auto &Entry : EnumStrings(ElfAlphaSectionFlags))
       Ret.push_back(&Entry);
     break;
   case EM_ARM:
