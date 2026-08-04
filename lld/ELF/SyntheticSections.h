@@ -120,6 +120,9 @@ public:
 
   void addConstant(const Relocation &r) { addReloc(r); }
   void addEntry(const Symbol &sym);
+  // Reserve an entry that is not keyed by a symbol alone and return its offset.
+  // Alpha uses this because R_ALPHA_LITERAL may reference symbol+addend.
+  uint64_t reserveEntry();
   void addAuthEntry(const Symbol &sym);
   bool addTlsDescEntry(const Symbol &sym);
   void addTlsDescAuthEntry();

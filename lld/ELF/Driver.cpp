@@ -155,6 +155,7 @@ static std::tuple<ELFKind, uint16_t, uint8_t> parseEmulation(Ctx &ctx,
       StringSwitch<std::pair<ELFKind, uint16_t>>(s)
           .Cases({"aarch64elf", "aarch64linux"}, {ELF64LEKind, EM_AARCH64})
           .Cases({"aarch64elfb", "aarch64linuxb"}, {ELF64BEKind, EM_AARCH64})
+          .Case("elf64alpha", {ELF64LEKind, EM_ALPHA})
           .Cases({"armelf", "armelf_linux_eabi"}, {ELF32LEKind, EM_ARM})
           .Cases({"armelfb", "armelfb_linux_eabi"}, {ELF32BEKind, EM_ARM})
           .Case("elf32_x86_64", {ELF32LEKind, EM_X86_64})

@@ -206,6 +206,7 @@ protected:
 };
 
 void setAArch64TargetInfo(Ctx &);
+void setAlphaTargetInfo(Ctx &);
 void setAMDGPUTargetInfo(Ctx &);
 void setARMTargetInfo(Ctx &);
 void setAVRTargetInfo(Ctx &);

@@ -1,0 +1,7 @@
+SECTIONS {
+  . = 0x120000000;
+  .text : { *(.text) }
+  . = 0x120010000;
+  .got : { *(.got) }
+  .data : { *(.data) }
+}
