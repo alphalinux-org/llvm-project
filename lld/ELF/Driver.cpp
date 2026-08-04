@@ -157,6 +157,7 @@ static std::tuple<ELFKind, uint16_t, uint8_t> parseEmulation(Ctx &ctx,
           .Cases({"aarch64elfb", "aarch64linuxb"}, {ELF64BEKind, EM_AARCH64})
           .Cases({"armelf", "armelf_linux_eabi"}, {ELF32LEKind, EM_ARM})
           .Cases({"armelfb", "armelfb_linux_eabi"}, {ELF32BEKind, EM_ARM})
+          .Case("elf64alpha", {ELF64LEKind, EM_ALPHA})
           .Case("elf32_x86_64", {ELF32LEKind, EM_X86_64})
           .Cases({"elf32btsmip", "elf32btsmipn32"}, {ELF32BEKind, EM_MIPS})
           .Cases({"elf32ltsmip", "elf32ltsmipn32"}, {ELF32LEKind, EM_MIPS})

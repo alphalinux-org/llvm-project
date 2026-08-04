@@ -55,6 +55,8 @@ void elf::setTarget(Ctx &ctx) {
   case EM_386:
   case EM_IAMCU:
     return setX86TargetInfo(ctx);
+  case EM_ALPHA:
+    return setAlphaTargetInfo(ctx);
   case EM_AARCH64:
     return setAArch64TargetInfo(ctx);
   case EM_AMDGPU:

@@ -83,6 +83,8 @@ enum RelExpr {
   // of a relocation type, there are some relocations whose semantics are
   // unique to a target. Such relocation are marked with RE_<TARGET_NAME>.
   RE_AARCH64_GOT_PAGE_PC,
+  // gp (= .got + 0x8000) relative to the ldah of a gp-load pair.
+  RE_ALPHA_GPDISP,
   RE_AARCH64_GOT_PAGE,
   RE_AARCH64_PAGE_PC,
   RE_AARCH64_TLSDESC_PAGE,
