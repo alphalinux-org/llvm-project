@@ -7,19 +7,18 @@
 # RUN: llvm-objdump -d --no-show-raw-insn %t | FileCheck %s
 # RUN: llvm-objdump -s -j .got %t | FileCheck --check-prefix=GOT %s
 
-## gp is .got + 0x8000 = 0x120018000. The two symbol+addend entries are
-## allocated first, then one entry each for a and b. The repeated reference to
-## a reuses its entry.
-# CHECK:      120000000: ldq $1, -32752($29)
-# CHECK-NEXT: 120000004: ldq $2, -32744($29)
-# CHECK-NEXT: 120000008: ldq $3, -32752($29)
-# CHECK-NEXT: 12000000c: ldq $4, -32768($29)
-# CHECK-NEXT: 120000010: ldq $5, -32760($29)
+## gp is .got + 0x8000 = 0x120018000. Entries are allocated in the order they
+## are referenced, and the repeated reference to a reuses its entry.
+# CHECK:      120000000: ldq $1, -32768($29)
+# CHECK-NEXT: 120000004: ldq $2, -32760($29)
+# CHECK-NEXT: 120000008: ldq $3, -32768($29)
+# CHECK-NEXT: 12000000c: ldq $4, -32752($29)
+# CHECK-NEXT: 120000010: ldq $5, -32744($29)
 
-## .data is at 0x120010020, so loc is 0x120010030 and loc2 is 0x120010038.
+## .data is at 0x120010020, so a is 0x120010020 and loc2 is 0x120010038.
 # GOT:      Contents of section .got:
-# GOT-NEXT: 120010000 30000120 01000000 38000120 01000000
-# GOT-NEXT: 120010010 20000120 01000000 28000120 01000000
+# GOT-NEXT: 120010000 20000120 01000000 28000120 01000000
+# GOT-NEXT: 120010010 30000120 01000000 38000120 01000000
 
 .text
 .globl _start
