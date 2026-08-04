@@ -12,21 +12,21 @@
 ## tp + 16: the high part is 0 and the low part is 16.
 # CHECK:      120000000: ldah $1, 0($31)
 # CHECK-NEXT: 120000004: lda $1, 16($1)
-## Initial Exec: a GOT entry holding the tp offset, at .got+0x20.
-# CHECK-NEXT: 120000008: ldq $2, -32736($29)
-## General Dynamic: a module index / offset pair at .got+0x10.
-# CHECK-NEXT: 12000000c: lda $16, -32752($29)
-## Local Dynamic: the shared module index pair at .got+0.
-# CHECK-NEXT: 120000010: lda $16, -32768($29)
+## Initial Exec: a GOT entry holding the tp offset, at .got+0.
+# CHECK-NEXT: 120000008: ldq $2, -32768($29)
+## General Dynamic: a module index / offset pair at .got+8.
+# CHECK-NEXT: 12000000c: lda $16, -32760($29)
+## Local Dynamic: the shared module index pair at .got+0x18.
+# CHECK-NEXT: 120000010: lda $16, -32744($29)
 ## dtpoff of x is 0.
 # CHECK-NEXT: 120000014: ldah $3, 0($16)
 # CHECK-NEXT: 120000018: lda $3, 0($3)
 
-## The module index of the executable is 1, and the IE entry holds 16.
+## The IE entry holds 16, and the module index of the executable is 1.
 # GOT:      Contents of section .got:
-# GOT-NEXT: 120010000 01000000 00000000 00000000 00000000
-# GOT-NEXT: 120010010 01000000 00000000 00000000 00000000
-# GOT-NEXT: 120010020 10000000 00000000
+# GOT-NEXT: 120010000 10000000 00000000 01000000 00000000
+# GOT-NEXT: 120010010 00000000 00000000 01000000 00000000
+# GOT-NEXT: 120010020 00000000 00000000
 
 .text
 .globl _start

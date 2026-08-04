@@ -13,17 +13,17 @@
 
 ## The script puts .got at 0x20000 and .data at 0x30000.
 # CHECK:      Section ({{.*}}) .rela.dyn {
-# CHECK-NEXT:   0x20010 R_ALPHA_RELATIVE - 0x30000
+# CHECK-NEXT:   0x20008 R_ALPHA_RELATIVE - 0x30000
 # CHECK-NEXT:   0x20000 R_ALPHA_GLOB_DAT ext 0x0
-# CHECK-NEXT:   0x20008 R_ALPHA_GLOB_DAT extvar 0x0
+# CHECK-NEXT:   0x20010 R_ALPHA_GLOB_DAT extvar 0x0
 # CHECK-NEXT:   0x30008 R_ALPHA_REFQUAD expvar 0x0
 # CHECK-NEXT: }
 
 ## glibc's R_ALPHA_RELATIVE handler adds the load bias to the value already in
 ## place and ignores r_addend, so the addend must also be written to .got.
 # GOT:      Contents of section .got:
-# GOT-NEXT: 20000 00000000 00000000 00000000 00000000
-# GOT-NEXT: 20010 00000300 00000000
+# GOT-NEXT: 20000 00000000 00000000 00000300 00000000
+# GOT-NEXT: 20010 00000000 00000000
 
 .text
 .globl fn

@@ -7,18 +7,19 @@
 # RUN: llvm-readobj -r %t.so | FileCheck %s
 # RUN: llvm-objdump -d --no-show-raw-insn %t.so | FileCheck --check-prefix=DIS %s
 
-## The script puts .got at 0x20000. The local dynamic module index pair comes
-## first, then the general dynamic pair for x, then x's tp offset.
+## The script puts .got at 0x20000. Entries are allocated in reference order:
+## the general dynamic pair for x, the local dynamic module index pair, then
+## x's tp offset.
 # CHECK:      Section ({{.*}}) .rela.dyn {
-# CHECK-NEXT:   0x20000 R_ALPHA_DTPMOD64 - 0x0
-# CHECK-NEXT:   0x20010 R_ALPHA_DTPMOD64 x 0x0
-# CHECK-NEXT:   0x20018 R_ALPHA_DTPREL64 x 0x0
+# CHECK-NEXT:   0x20010 R_ALPHA_DTPMOD64 - 0x0
+# CHECK-NEXT:   0x20000 R_ALPHA_DTPMOD64 x 0x0
+# CHECK-NEXT:   0x20008 R_ALPHA_DTPREL64 x 0x0
 # CHECK-NEXT:   0x20020 R_ALPHA_TPREL64 x 0x0
 # CHECK-NEXT: }
 
-## tlsgd -> .got+0x10, tlsldm -> .got+0, gottprel -> .got+0x20.
-# DIS:      lda $16, -32752($29)
-# DIS-NEXT: lda $16, -32768($29)
+## tlsgd -> .got+0, tlsldm -> .got+0x10, gottprel -> .got+0x20.
+# DIS:      lda $16, -32768($29)
+# DIS-NEXT: lda $16, -32752($29)
 ## y is at offset 8 in the TLS block, so dtpoff is 0 * 0x10000 + 8.
 # DIS-NEXT: ldah $3, 0($16)
 # DIS-NEXT: lda $3, 8($3)
