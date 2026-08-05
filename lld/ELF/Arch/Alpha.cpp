@@ -813,6 +813,35 @@ void Alpha::finalizeRelocScan() {
 // load stays and only the branch is rewritten, which remains correct because
 // the callee still derives its gp from $27.
 //
+// Whether the two words at this offset are the ldah/lda pair that establishes a
+// function's gp, which is what an R_ALPHA_GPDISP with an addend of 4 covers.
+// A function GNU as was told about says so in its st_other instead; this is for
+// the hand-written assembly that never declared itself.
+// The answer is memoised per callee section.  The question is asked once per
+// call site, and a linear scan of the callee's relocation list each time is
+// quadratic in the number of calls -- without -ffunction-sections a kernel
+// object puts tens of thousands of calls and their callees in one section pair.
+// The set is built by scanning rather than by searching a sorted list because
+// relaxTlsCall adds the relocations for a rewritten sequence at the offset of
+// each instruction it replaces, which are ahead of where the caller scan has
+// reached, so a section that contained one no longer holds its relocations in
+// offset order.
+using GpLoadCache =
+    llvm::DenseMap<const InputSectionBase *, llvm::DenseSet<uint64_t>>;
+
+static bool startsWithGpLoad(GpLoadCache &cache, const InputSectionBase &sec,
+                             uint64_t offset) {
+  auto it = cache.find(&sec);
+  if (it == cache.end()) {
+    llvm::DenseSet<uint64_t> offsets;
+    for (const Relocation &r : sec.relocations)
+      if (r.expr == RE_ALPHA_GPDISP && r.addend == 4)
+        offsets.insert(r.offset);
+    it = cache.try_emplace(&sec, std::move(offsets)).first;
+  }
+  return it->second.contains(offset);
+}
+
 // GOT entries are allocated during scanning, long before any address is known,
 // so an entry no surviving load reads has to be given back afterwards; see
 // reclaimGot. Doing that moves everything laid out after .got, which is why
@@ -823,6 +852,7 @@ bool Alpha::relaxOnce(int pass) const {
     return false;
 
   InputSection *cur = nullptr;
+  GpLoadCache gpLoadCache;
   // The relocations of `cur` by offset, so that the one on a jsr or on the load
   // can be found without rescanning the section for every call.
   DenseMap<uint64_t, unsigned> relocIndex;
@@ -831,6 +861,9 @@ bool Alpha::relaxOnce(int pass) const {
   auto flush = [&] {
     if (added.empty())
       return;
+    // The section's relocation list is about to change, so anything cached
+    // about it is stale.
+    gpLoadCache.erase(cur);
     llvm::append_range(cur->relocations, added);
     llvm::stable_sort(cur->relocations,
                       [](const Relocation &a, const Relocation &b) {
@@ -868,15 +901,20 @@ bool Alpha::relaxOnce(int pass) const {
     // lands on the callee itself. One marked STD_GPLOAD looks at it only to
     // compute a gp, which the call can skip by entering eight bytes in -- but
     // only if that is the gp the caller already has, which across GOT
-    // partitions it is not. bfd additionally recognizes an unmarked callee
-    // whose first two words carry a GPDISP; we take the marking at face value.
+    // partitions it is not. A callee that says nothing may still start with a
+    // gp load, which its R_ALPHA_GPDISP gives away.
     const Defined &d = cast<Defined>(*c.sym);
     auto *dsec = dyn_cast_or_null<InputSectionBase>(d.section);
     // st_other describes what the symbol's own entry point does with the
     // procedure value.  A literal carrying an addend names somewhere else,
     // where it says nothing -- entering eight bytes past that is not entering
-    // past a gp load, so there is nothing to skip.
+    // past a gp load.  Only the relocation-based test below can speak for it.
     unsigned pvUse = c.addend == 0 ? (d.stOther & STO_ALPHA_STD_GPLOAD) : 0;
+    // The assembler turns a reference to a local function into its section
+    // symbol plus an offset, so the entry point is not the symbol's own value.
+    if (pvUse == 0 && dsec &&
+        startsWithGpLoad(gpLoadCache, *dsec, d.value + c.addend))
+      pvUse = STO_ALPHA_STD_GPLOAD;
     bool skipGpLoad = pvUse == STO_ALPHA_STD_GPLOAD && dsec &&
                       getGp(c.sec->file) == getGp(dsec->file);
     bool dropLoad = c.onlyJsrUses && (pvUse == STO_ALPHA_NOPV || skipGpLoad);
