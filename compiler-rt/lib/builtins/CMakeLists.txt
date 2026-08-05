@@ -1082,6 +1082,16 @@ else ()
       cmake_push_check_state()
       # TODO: we should probably make most of the checks in builtin-config depend on the target flags.
       set(BUILTIN_CFLAGS_${arch} ${BUILTIN_CFLAGS})
+      # Alpha faults on an operation with a NaN or infinite operand unless the
+      # instruction asks for software completion, which -mieee turns on.  The
+      # builtins compute on whatever the program hands them -- __muldc3 of four
+      # finite doubles overflows to nan+infi on the way -- so they cannot
+      # afford to fault on one.  GCC builds all of libgcc for Alpha this way,
+      # from libgcc/config/alpha/t-ieee, which is on the tmake_file of every
+      # Alpha configuration.
+      if ("${arch}" MATCHES "alpha")
+        list(APPEND BUILTIN_CFLAGS_${arch} -mieee)
+      endif()
       # CMAKE_REQUIRED_FLAGS must be a space separated string
       # Join BUILTIN_CFLAGS_${arch} and TARGET_${arch}_CFLAGS as a
       # space-separated string.
