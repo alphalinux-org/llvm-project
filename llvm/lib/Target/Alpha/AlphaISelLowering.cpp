@@ -144,6 +144,12 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   setOperationAction(ISD::ROTL, MVT::i64, Expand);
   setOperationAction(ISD::ROTR, MVT::i64, Expand);
 
+  // i128 shifts arrive as *_PARTS nodes; there is no instruction that shifts a
+  // register pair, so expand them into the generic shift/select sequence.
+  setOperationAction(ISD::SHL_PARTS, MVT::i64, Expand);
+  setOperationAction(ISD::SRA_PARTS, MVT::i64, Expand);
+  setOperationAction(ISD::SRL_PARTS, MVT::i64, Expand);
+
   // umulh provides the high half of an unsigned 64x64 multiply; the signed high
   // multiply is expanded in terms of it.
   setOperationAction(ISD::MULHU, MVT::i64, Legal);
@@ -2083,6 +2089,15 @@ SDValue AlphaTargetLowering::LowerFormalArguments(
     }
   }
 
+  // Keep the hidden result pointer of a function returning in memory: it is
+  // returned again in $0 (see LowerReturn).
+  if (!Ins.empty() && Ins[0].Flags.isSRet()) {
+    auto *FI = MF.getInfo<AlphaMachineFunctionInfo>();
+    Register Reg = MF.getRegInfo().createVirtualRegister(&Alpha::GPRCRegClass);
+    FI->setSRetReturnReg(Reg);
+    Chain = DAG.getCopyToReg(Chain, DL, Reg, InVals[0]);
+  }
+
   if (IsVarArg) {
     // Save the unnamed argument registers to a save area so va_arg can reach
     // them.  Layout (from the base): integer registers at [base, base+48),
@@ -2252,6 +2267,15 @@ SDValue AlphaTargetLowering::LowerVAARG(SDValue Op, SelectionDAG &DAG) const {
   return DAG.getLoad(VT, DL, Chain, Addr, MachinePointerInfo());
 }
 
+bool AlphaTargetLowering::CanLowerReturn(
+    CallingConv::ID CallConv, MachineFunction &MF, bool IsVarArg,
+    const SmallVectorImpl<ISD::OutputArg> &Outs, LLVMContext &Context,
+    const Type *RetTy) const {
+  SmallVector<CCValAssign, 16> RVLocs;
+  CCState CCInfo(CallConv, IsVarArg, MF, RVLocs, Context);
+  return CCInfo.CheckReturn(Outs, RetCC_Alpha);
+}
+
 SDValue
 AlphaTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
                                  bool IsVarArg,
@@ -2272,6 +2296,16 @@ AlphaTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
     Chain = DAG.getCopyToReg(Chain, DL, VA.getLocReg(), OutVals[I], Glue);
     Glue = Chain.getValue(1);
     RetOps.push_back(DAG.getRegister(VA.getLocReg(), VA.getLocVT()));
+  }
+
+  // A function returning in memory hands the buffer pointer it was given back
+  // in $0, which is what GCC does.
+  if (Register SRetReg =
+          MF.getInfo<AlphaMachineFunctionInfo>()->getSRetReturnReg()) {
+    SDValue Ptr = DAG.getCopyFromReg(Chain, DL, SRetReg, MVT::i64);
+    Chain = DAG.getCopyToReg(Ptr.getValue(1), DL, Alpha::R0, Ptr, Glue);
+    Glue = Chain.getValue(1);
+    RetOps.push_back(DAG.getRegister(Alpha::R0, MVT::i64));
   }
 
   RetOps[0] = Chain;

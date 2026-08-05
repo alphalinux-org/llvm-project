@@ -25,13 +25,15 @@ def CC_Alpha : CallingConv<[
   CCIfType<[f32, f64], CCAssignToStack<8, 8>>
 ]>;
 
-// Return values: an integer in $0, a floating-point value in $f0.  Anything
-// larger than a register is returned in memory through a hidden pointer, as
-// GCC does, so only one integer return register is available here.
+// Return values: an integer in $0, a floating-point value in $f0, and the two
+// halves of a complex float or complex double in $f0/$f1.  Anything larger than
+// a register -- an aggregate, __int128, X_floating -- is returned in memory
+// through a hidden pointer the caller passes in $16, so only one integer
+// register is available here; see AlphaTargetLowering::CanLowerReturn.
 def RetCC_Alpha : CallingConv<[
   CCIfType<[i8, i16, i32], CCPromoteToType<i64>>,
   CCIfType<[i64], CCAssignToReg<[R0]>>,
-  CCIfType<[f32, f64], CCAssignToReg<[F0]>>
+  CCIfType<[f32, f64], CCAssignToReg<[F0, F1]>>
 ]>;
 
 // Registers preserved across a function (callee-saved): $9-$15, $f2-$f9, and

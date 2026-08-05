@@ -30,6 +30,11 @@ class AlphaMachineFunctionInfo : public MachineFunctionInfo {
   /// only when the function needs a frame pointer.  -1 if none.
   int FramePointerSaveIndex = -1;
 
+  /// The virtual register holding the incoming hidden result pointer of a
+  /// function returning in memory, which is returned again in $0.  0 if the
+  /// function has no such argument.
+  Register SRetReturnReg;
+
 public:
   AlphaMachineFunctionInfo() = default;
   AlphaMachineFunctionInfo(const Function &F, const TargetSubtargetInfo *STI) {}
@@ -45,6 +50,9 @@ public:
 
   int getFramePointerSaveIndex() const { return FramePointerSaveIndex; }
   void setFramePointerSaveIndex(int FI) { FramePointerSaveIndex = FI; }
+
+  Register getSRetReturnReg() const { return SRetReturnReg; }
+  void setSRetReturnReg(Register R) { SRetReturnReg = R; }
 };
 
 } // end namespace llvm
