@@ -83,21 +83,25 @@ enum RelExpr {
   // of a relocation type, there are some relocations whose semantics are
   // unique to a target. Such relocation are marked with RE_<TARGET_NAME>.
   RE_AARCH64_GOT_PAGE_PC,
+  RE_AARCH64_GOT_PAGE,
+  RE_AARCH64_PAGE_PC,
+  RE_AARCH64_TLSDESC_PAGE,
+  RE_AARCH64_AUTH,
   // The gp of the file being relocated, relative to the ldah of a gp-load pair.
   RE_ALPHA_GPDISP,
   // Relative to the gp of the file being relocated: a symbol's address, or the
   // address of a GOT entry whose offset within .got is carried in the addend.
   RE_ALPHA_GPREL,
   RE_ALPHA_GOT,
-  // Produced by --relax, which rewrites a GOT load and the jsr that consumes it
-  // into a direct branch: the address of the branch target relative to the jsr,
-  // and the now-dead GOT load, which becomes a nop.
+  // Produced by --relax, which rewrites calls and TLS sequences in place: the
+  // address of a branch target relative to the branch, and a whole replacement
+  // instruction word carried in the addend. A replacement is applied before any
+  // ordinary relocation at the same offset, which then fills in its immediate.
   RE_ALPHA_RELAX_JSR,
-  RE_ALPHA_RELAX_NOP,
-  RE_AARCH64_GOT_PAGE,
-  RE_AARCH64_PAGE_PC,
-  RE_AARCH64_TLSDESC_PAGE,
-  RE_AARCH64_AUTH,
+  RE_ALPHA_RELAX_INSN,
+  // The thread-pointer offset of this module's own TLS block, which a relaxed
+  // local-dynamic sequence computes in place of calling __tls_get_addr.
+  RE_ALPHA_TPREL_BASE,
   RE_ARM_PCA,
   RE_ARM_SBREL,
   RE_MIPS_GOTREL,
