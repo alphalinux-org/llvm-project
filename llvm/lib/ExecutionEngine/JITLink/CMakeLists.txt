@@ -21,6 +21,7 @@ add_llvm_component_library(LLVMJITLink
   # ELF
   ELF.cpp
   ELFLinkGraphBuilder.cpp
+  ELF_alpha.cpp
   ELF_aarch32.cpp
   ELF_aarch64.cpp
   ELF_hexagon.cpp
@@ -43,6 +44,7 @@ add_llvm_component_library(LLVMJITLink
   XCOFFLinkGraphBuilder.cpp
 
   # Architectures:
+  alpha.cpp
   aarch32.cpp
   aarch64.cpp
   hexagon.cpp
