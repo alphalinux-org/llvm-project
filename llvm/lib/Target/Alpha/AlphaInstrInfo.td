@@ -588,14 +588,6 @@ class FSign<bits<11> func, dag ins, string asmstr, list<dag> pattern>
   let Inst{15-5} = func;
   let Inst{4-0} = Rc;
 }
-
-// A plain register move: cpys Rb, Rb, Rc.
-class FMov<list<dag> pat> : FSign<0x020, (ins FPRC:$Rb), "cpys $Rb, $Rb, $Rc",
-                                  pat> {
-  bits<5> Rb;
-  let fa = Rb;
-  let fb = Rb;
-}
 // fabs: cpys $f31, Rb, Rc.
 class FAbs<list<dag> pat> : FSign<0x020, (ins FPRC:$Rb), "cpys $$f31, $Rb, $Rc",
                                   pat> {
@@ -614,6 +606,14 @@ class FNeg<list<dag> pat> : FSign<0x021, (ins FPRC:$Rb), "cpysn $Rb, $Rb, $Rc",
 }
 let isCodeGenOnly = 1 in def FNEGS : FNeg<[(set f32:$Rc, (fneg f32:$Rb))]>;
 let isCodeGenOnly = 1 in def FNEGT : FNeg<[(set f64:$Rc, (fneg f64:$Rb))]>;
+// A plain register move: cpys Rb, Rb, Rc.
+class FMov<list<dag> pat> : FSign<0x020, (ins FPRC:$Rb), "cpys $Rb, $Rb, $Rc",
+                                  pat> {
+  bits<5> Rb;
+  let fa = Rb;
+  let fb = Rb;
+}
+
 // fcopysign: cpys Rb, Ra, Rc (sign of Rb, magnitude of Ra).
 class FCpys<list<dag> pat>
     : FSign<0x020, (ins FPRC:$Ra, FPRC:$Rb), "cpys $Rb, $Ra, $Rc", pat> {
@@ -676,6 +676,7 @@ let TrapClass = 5 in
 def CVTST : FP_r<0x16, 0x2ac, "cvtst", []>;
 let isCodeGenOnly = 1, Predicates = [NotIEEE] in
 def FPEXTST : FMov<[(set f64:$Rc, (fpextend f32:$Rb))]>;
+
 // cvtst/s: S-to-T with software completion, used in hand-written asm under -mieee
 // (e.g. glibc s_rintf.c).
 def CVTST_S : FP_r<0x16, 0x6ac, "cvtst/s", []>;
@@ -860,6 +861,9 @@ def LDTg : MFormD<0x23, (outs FPRC:$Rc), (ins gprellow_sym:$disp, GPRC:$Rb),
                   "ldt $Rc, $disp($Rb)\t\t!gprellow", []>;
 def LDSg : MFormD<0x22, (outs FPRC:$Rc), (ins gprellow_sym:$disp, GPRC:$Rb),
                   "lds $Rc, $disp($Rb)\t\t!gprellow", []>;
+let isCodeGenOnly = 1 in
+def LDSgf64 : MFormD<0x22, (outs FPRC:$Rc), (ins gprellow_sym:$disp, GPRC:$Rb),
+                     "lds $Rc, $disp($Rb)\t\t!gprellow", []>;
 }
 // The corresponding stores, used for small-data globals.
 let mayStore = 1, hasSideEffects = 0, isCodeGenOnly = 1 in {
@@ -891,6 +895,10 @@ def : Pat<(f64 (load (AlphaGprelLo sym:$s, GPRC:$b))),
           (LDTg sym:$s, GPRC:$b)>;
 def : Pat<(f32 (load (AlphaGprelLo sym:$s, GPRC:$b))),
           (LDSg sym:$s, GPRC:$b)>;
+let Predicates = [NotIEEE] in
+def : Pat<(f64 (extloadf32 (AlphaGprelLo sym:$s, GPRC:$b))),
+          (LDSgf64 sym:$s, GPRC:$b)>;
+let Predicates = [HasIEEE] in
 def : Pat<(f64 (extloadf32 (AlphaGprelLo sym:$s, GPRC:$b))),
           (CVTST (LDSg sym:$s, GPRC:$b))>;
 def : Pat<(truncstorei32 GPRC:$v, (AlphaGprelLo sym:$s, GPRC:$b)),
@@ -1241,7 +1249,10 @@ def FTOIS : FForm<0x1c, 0x078, (outs GPRC:$Rc), (ins FPRC:$Ra),
 def : Pat<(f64 (sint_to_fp GPRC:$x)), (CVTQT (MOVi2f GPRC:$x))>;
 def : Pat<(f32 (sint_to_fp GPRC:$x)), (CVTQS (MOVi2f GPRC:$x))>;
 def : Pat<(i64 (fp_to_sint f64:$x)), (MOVf2i (CVTTQ f64:$x))>;
-def : Pat<(i64 (fp_to_sint f32:$x)), (MOVf2i (CVTTQ (CVTST f32:$x)))>;
+// A float in a register is already in T_floating form, so cvttq converts it
+// directly; widening first would only add an instruction (and, without -mieee,
+// one that faults on an infinity or a NaN).
+def : Pat<(i64 (fp_to_sint f32:$x)), (MOVf2i (CVTTQ f32:$x))>;
 
 // An AND whose mask keeps or clears whole bytes (each byte is 0x00 or 0xFF) is a
 // single zapnot, so it needs no materialized constant.  This covers zero-
@@ -1408,6 +1419,11 @@ def LDT : MForm<0x23, (outs FPRC:$Ra), (ins memri:$addr), "ldt $Ra, $addr",
                 [(set f64:$Ra, (load ADDRri:$addr))]>;
 def LDS : MForm<0x22, (outs FPRC:$Ra), (ins memri:$addr), "lds $Ra, $addr",
                 [(set f32:$Ra, (load ADDRri:$addr))]>;
+// lds expands the S_floating value it loads into T_floating form, so the same
+// instruction also loads a float straight into a double.
+let isCodeGenOnly = 1 in
+def LDSf64 : MForm<0x22, (outs FPRC:$Ra), (ins memri:$addr), "lds $Ra, $addr",
+                   []>;
 }
 
 // Software-directed prefetch: a load whose destination is R31 or F31 brings a
@@ -1449,6 +1465,9 @@ def : Pat<(i64 (zextloadi32 ADDRri:$addr)), (ZAPNOTi (LDL memri:$addr), 15)>;
 
 // An f32 loaded and widened to f64 (e.g. an f32-encoded double constant): lds
 // loads the S_floating value and cvtst widens it exactly.
+let Predicates = [NotIEEE] in
+def : Pat<(f64 (extloadf32 ADDRri:$addr)), (LDSf64 memri:$addr)>;
+let Predicates = [HasIEEE] in
 def : Pat<(f64 (extloadf32 ADDRri:$addr)), (CVTST (LDS memri:$addr))>;
 
 // Byte and word memory access (BWX extension, ev56 and later).  ldbu/ldwu

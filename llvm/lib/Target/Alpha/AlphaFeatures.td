@@ -16,6 +16,10 @@ def HasBWX : Predicate<"Subtarget->hasBWX()">,
              AssemblerPredicate<(all_of FeatureBWX)>;
 def NotBWX : Predicate<"!Subtarget->hasBWX()">;
 
+// -mieee: floating point traps are completed in software.
+def HasIEEE : Predicate<"Subtarget->hasIEEE()">;
+def NotIEEE : Predicate<"!Subtarget->hasIEEE()">;
+
 // Motion Video Instructions.  (GCC spells the enabling flag -mmax, but DEC's
 // name for the instruction set is MVI.)
 def FeatureMVI : SubtargetFeature<"mvi", "HasMVI", "true",
@@ -148,7 +152,3 @@ foreach i = 0 ... 31 in
   def FeatureReserveR#i : SubtargetFeature<"reserve-r"#i,
       "ReserveRegister["#i#" + Alpha::R0]", "true",
       "Reserve integer register $"#i>;
-
-// -mieee: floating point traps are completed in software.
-def HasIEEE : Predicate<"Subtarget->hasIEEE()">;
-def NotIEEE : Predicate<"!Subtarget->hasIEEE()">;

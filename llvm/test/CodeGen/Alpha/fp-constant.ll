@@ -2,7 +2,9 @@
 
 ; Floating-point constants live in the constant pool and are addressed
 ; GP-relative: ldah !gprelhigh forms the high part of the offset from $gp, lda
-; !gprellow the low part.  A double encoded as f32 is widened with cvtst.
+; !gprellow the low part.  A double whose value is exact as an f32 is stored as
+; one: lds already expands it into the T_floating form the register holds, so no
+; widening instruction is needed (it takes a cvtst/s under -mieee).
 
 ; The !gprellow low part is folded into the load, so only the ldah !gprelhigh is
 ; needed to form the address.
@@ -10,7 +12,7 @@
 ; CHECK:       ldgp $29, 0($27)
 ; CHECK:       ldah $0, .LCPI0_0($29){{.*}}!gprelhigh
 ; CHECK:       lds $f0, .LCPI0_0($0){{.*}}!gprellow
-; CHECK:       cvtst $f0, $f0
+; CHECK-NOT:   cvtst
 ; CHECK:       addt $f16, $f0, $f0
 ; CHECK:       ret
 define double @add1(double %x) {

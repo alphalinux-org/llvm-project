@@ -199,6 +199,7 @@ multiclass AlphaInstRW {
   def : InstRW<[Wr_IStore, Rd_StData], (instrs RMW_USTORE)>;
   def : InstRW<[Wr_JSR], (instrs JSRt)>;
   def : InstRW<[Wr_JSR], (instrs RETabh)>;
+  def : InstRW<[Wr_FLoad], (instrs LDSf64, LDSgf64)>;
 }
 
 //===----------------------------------------------------------------------===//
