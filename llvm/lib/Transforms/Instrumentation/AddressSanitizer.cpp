@@ -113,6 +113,10 @@ static const uint64_t kMIPS64_ShadowOffset64 = 1ULL << 37;
 static const uint64_t kAArch64_ShadowOffset64 = 1ULL << 36;
 static const uint64_t kLoongArch64_ShadowOffset64 = 1ULL << 46;
 static const uint64_t kRISCV64_ShadowOffset64 = kDynamicShadowSentinel;
+// Alpha/Linux has a 42-bit user address space (TASK_SIZE is 0x40000000000 in
+// arch/alpha/include/asm/processor.h), so the shadow has to live below that.
+// Keep this in sync with ASAN_SHADOW_OFFSET_CONST in asan_mapping.h.
+static const uint64_t kAlpha_ShadowOffset64 = 0x30000000000;
 static const uint64_t kFreeBSD_ShadowOffset32 = 1ULL << 30;
 static const uint64_t kFreeBSD_ShadowOffset64 = 1ULL << 46;
 static const uint64_t kFreeBSDAArch64_ShadowOffset64 = 1ULL << 47;
@@ -514,6 +518,7 @@ static ShadowMapping getShadowMapping(const Triple &TargetTriple, int LongSize,
                    TargetTriple.getArch() == Triple::aarch64_be;
   bool IsLoongArch64 = TargetTriple.isLoongArch64();
   bool IsRISCV64 = TargetTriple.getArch() == Triple::riscv64;
+  bool IsAlpha = TargetTriple.isAlpha();
   bool IsWindows = TargetTriple.isOSWindows();
   bool IsFuchsia = TargetTriple.isOSFuchsia();
   bool IsAMDGPU = TargetTriple.isAMDGPU();
@@ -591,6 +596,8 @@ static ShadowMapping getShadowMapping(const Triple &TargetTriple, int LongSize,
       Mapping.Offset = kLoongArch64_ShadowOffset64;
     else if (IsRISCV64)
       Mapping.Offset = kRISCV64_ShadowOffset64;
+    else if (IsAlpha)
+      Mapping.Offset = kAlpha_ShadowOffset64;
     else if (IsAMDGPU)
       Mapping.Offset = (kSmallX86_64ShadowOffsetBase &
                         (kSmallX86_64ShadowOffsetAlignMask << Mapping.Scale));
