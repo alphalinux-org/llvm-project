@@ -15,6 +15,7 @@
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/ExecutionEngine/JITLink/ELF_aarch32.h"
 #include "llvm/ExecutionEngine/JITLink/ELF_aarch64.h"
+#include "llvm/ExecutionEngine/JITLink/ELF_alpha.h"
 #include "llvm/ExecutionEngine/JITLink/ELF_hexagon.h"
 #include "llvm/ExecutionEngine/JITLink/ELF_loongarch.h"
 #include "llvm/ExecutionEngine/JITLink/ELF_ppc64.h"
@@ -104,6 +105,8 @@ createLinkGraphFromELFObject(MemoryBufferRef ObjectBuffer,
     return createLinkGraphFromELFObject_riscv(ObjectBuffer, std::move(SSP));
   case ELF::EM_S390:
     return createLinkGraphFromELFObject_systemz(ObjectBuffer, std::move(SSP));
+  case ELF::EM_ALPHA:
+    return createLinkGraphFromELFObject_alpha(ObjectBuffer, std::move(SSP));
   case ELF::EM_X86_64:
     return createLinkGraphFromELFObject_x86_64(ObjectBuffer, std::move(SSP));
   case ELF::EM_386:
@@ -146,6 +149,9 @@ void link_ELF(std::unique_ptr<LinkGraph> G,
     return;
   case Triple::systemz:
     link_ELF_systemz(std::move(G), std::move(Ctx));
+    return;
+  case Triple::alpha:
+    link_ELF_alpha(std::move(G), std::move(Ctx));
     return;
   case Triple::x86_64:
     link_ELF_x86_64(std::move(G), std::move(Ctx));
