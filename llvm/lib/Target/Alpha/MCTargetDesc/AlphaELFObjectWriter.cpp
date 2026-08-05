@@ -8,6 +8,7 @@
 
 #include "AlphaFixupKinds.h"
 #include "AlphaMCTargetDesc.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCELFObjectWriter.h"
@@ -26,6 +27,88 @@ public:
       : MCELFObjectTargetWriter(/*Is64Bit=*/true, OSABI, ELF::EM_ALPHA,
                                 /*HasRelocationAddend=*/true) {}
   ~AlphaELFObjectWriter() override = default;
+
+  // GNU as writes an R_ALPHA_LITUSE immediately after the R_ALPHA_LITERAL it
+  // names, pairing them by the sequence number written on both
+  // (alpha_adjust_relocs, gas/config/tc-alpha.c), and bfd depends on the
+  // adjacency: elf64_alpha_relax_section summarizes how a literal is used by
+  // walking the relocations that follow it until the first non-LITUSE, and
+  // relaxes `ldq $27,f!literal / jsr ($27)!lituse_jsr' into `bsr f' when it
+  // finds a JSR use.  Relocations are otherwise emitted in offset order, so a
+  // second literal load scheduled between the first and the call -- which
+  // gcc's scheduler does routinely at -O2 -- puts the LITUSE after the wrong
+  // LITERAL, and bfd relaxes the call to the wrong function.
+  //
+  // The assembler tags both halves of a pair with a placeholder relocation
+  // holding the sequence number (fixup_alpha_seqmark).  Move each use next to
+  // its literal and drop the placeholders.  Codegen emits its pairs adjacent
+  // already and tags nothing, so this leaves them alone.
+  void sortRelocs(std::vector<ELFRelocationEntry> &Relocs) override {
+    // The tag's addend is the sequence number, with the high bit set on the
+    // literal's side.  Nothing to do unless the assembler wrote some.
+    auto IsMark = [](const ELFRelocationEntry &R) {
+      return R.Type == ELF::R_ALPHA_NONE && R.Addend != 0 &&
+             (R.Addend & ~uint64_t(0xff)) == 0;
+    };
+    if (none_of(Relocs, IsMark))
+      return;
+
+    // Where each literal's LITERAL entry sits, by sequence number.
+    DenseMap<unsigned, uint64_t> LiteralOffset;
+    // The sequence number a use at a given offset belongs to.
+    DenseMap<uint64_t, unsigned> UseSeq;
+    for (const ELFRelocationEntry &R : Relocs) {
+      if (!IsMark(R))
+        continue;
+      if (R.Addend & 0x80)
+        LiteralOffset[R.Addend & 0x7f] = R.Offset;
+      else
+        UseSeq[R.Offset] = R.Addend;
+    }
+
+    // The uses to move, keyed by the offset of the literal they belong to.
+    // Collecting them first is what lets a use be moved backwards: it is
+    // written where its literal is, whichever of the two came first here.
+    DenseMap<uint64_t, SmallVector<ELFRelocationEntry, 2>> Moved;
+    DenseSet<uint64_t> MovedFrom;
+    for (const ELFRelocationEntry &R : Relocs) {
+      if (R.Type != ELF::R_ALPHA_LITUSE)
+        continue;
+      auto Use = UseSeq.find(R.Offset);
+      if (Use == UseSeq.end())
+        continue;
+      auto Lit = LiteralOffset.find(Use->second);
+      // A use whose literal produced no relocation -- it was resolved rather
+      // than relocated -- keeps its place; there is nothing to sit behind.
+      if (Lit == LiteralOffset.end())
+        continue;
+      Moved[Lit->second].push_back(R);
+      MovedFrom.insert(R.Offset);
+    }
+
+    std::vector<ELFRelocationEntry> Out;
+    Out.reserve(Relocs.size());
+    for (const ELFRelocationEntry &R : Relocs) {
+      // The markers themselves are the assembler's bookkeeping and are dropped
+      // here, so no R_ALPHA_NONE reaches the file.
+      if (IsMark(R))
+        continue;
+      if (R.Type == ELF::R_ALPHA_LITUSE && MovedFrom.contains(R.Offset))
+        continue;
+      Out.push_back(R);
+      if (R.Type == ELF::R_ALPHA_LITERAL) {
+        auto It = Moved.find(R.Offset);
+        if (It != Moved.end()) {
+          Out.insert(Out.end(), It->second.begin(), It->second.end());
+          Moved.erase(It);
+        }
+      }
+    }
+    // Anything still here named an offset that carried no LITERAL relocation.
+    for (auto &KV : Moved)
+      Out.insert(Out.end(), KV.second.begin(), KV.second.end());
+    Relocs = std::move(Out);
+  }
 
 protected:
   unsigned getRelocType(const MCFixup &Fixup, const MCValue &Target,
@@ -87,6 +170,10 @@ protected:
       return ELF::R_ALPHA_HINT;
     case Alpha::fixup_alpha_lituse_jsr:
       return ELF::R_ALPHA_LITUSE;
+    case Alpha::fixup_alpha_seqmark:
+      // sortRelocs drops these; the type only has to be one that carries a
+      // plain addend and no symbol.
+      return ELF::R_ALPHA_NONE;
     case Alpha::fixup_alpha_disp16:
     case Alpha::fixup_alpha_lit8:
       // No relocation can fill a bare displacement or operate literal, so the

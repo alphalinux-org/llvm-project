@@ -60,6 +60,13 @@ enum Fixups {
   // it is an error if it cannot.
   fixup_alpha_disp16,
   fixup_alpha_lit8,
+  // Not a relocation anyone asked for: a placeholder emitted next to a
+  // `!literal!N' and to the `!lituse_*!N' that names it, carrying N so that
+  // AlphaELFObjectWriter::sortRelocs can put the pair next to each other in
+  // .rela.text the way GNU as does.  It writes nothing into the instruction
+  // and is removed from the relocation table before the object is written, so
+  // it never reaches a file.
+  fixup_alpha_seqmark,
 
   fixup_alpha_invalid,
   NumTargetFixupKinds = fixup_alpha_invalid - FirstTargetFixupKind

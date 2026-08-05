@@ -83,6 +83,7 @@ public:
         {"fixup_alpha_lituse_jsr", 0, 0, 0}, {"fixup_alpha_brsgp", 0, 21, 0},
         {"fixup_alpha_gprel32", 0, 32, 0},   {"fixup_alpha_disp16", 0, 16, 0},
         {"fixup_alpha_lit8", 13, 8, 0},
+        {"fixup_alpha_seqmark", 0, 0, 0},
     };
     // Infos is indexed positionally by Kind - FirstTargetFixupKind, so its
     // rows stay in the order of enum Fixups in AlphaFixupKinds.h.
@@ -117,7 +118,8 @@ public:
                        Kind == MCFixupKind(Alpha::fixup_alpha_dtprello) ||
                        Kind == MCFixupKind(Alpha::fixup_alpha_hint) ||
                        Kind == MCFixupKind(Alpha::fixup_alpha_lituse_jsr) ||
-                       Kind == MCFixupKind(Alpha::fixup_alpha_brsgp);
+                       Kind == MCFixupKind(Alpha::fixup_alpha_brsgp) ||
+                       Kind == MCFixupKind(Alpha::fixup_alpha_seqmark);
     maybeAddReloc(F, Fixup, Target, Value, AlwaysReloc ? false : IsResolved);
     if (mc::isRelocation(Kind) || AlwaysReloc)
       return;

@@ -164,16 +164,40 @@ enum : unsigned {
   // The use type of an R_ALPHA_LITUSE the assembler was asked for with a
   // !lituse_* suffix.  That relocation names no operand -- only its addend
   // matters, and it says which kind of use this is -- so it belongs to the
-  // instruction rather than to any field of it, and travels here.  0 is none.
+  // instruction rather than to any field of it, and travels here.  Stored
+  // biased by one, because LITUSE_ALPHA_ADDR is use type 0 and a zero field
+  // has to keep meaning "no !lituse_* was written".
   LituseShift = 14,
   LituseMask = 0x7u << LituseShift,
+  // The sequence number pairing a `!literal!N' with the `!lituse_*!N' that
+  // names it, renumbered by the assembler into a small dense id so it fits
+  // here.  Both halves carry it; SeqIsLiteral says which half this is.  It
+  // exists only so the relocation table can be written with the pair adjacent
+  // -- see AlphaELFObjectWriter::sortRelocs -- and 0 means none.
+  SeqShift = 17,
+  SeqMask = 0x7fu << SeqShift,
+  SeqIsLiteral = 1u << 24,
 };
 
-inline unsigned encodeLituse(unsigned UseType) {
-  return (UseType << LituseShift) & LituseMask;
+inline unsigned encodeSeq(unsigned Seq, bool IsLiteral) {
+  return ((Seq << SeqShift) & SeqMask) | (IsLiteral ? unsigned(SeqIsLiteral) : 0u);
 }
+inline unsigned getSeq(unsigned Flags) {
+  return (Flags & SeqMask) >> SeqShift;
+}
+inline bool seqIsLiteral(unsigned Flags) { return Flags & SeqIsLiteral; }
+// The addend the placeholder relocation carries: the sequence number, with the
+// high bit marking the literal's half of the pair.
+inline unsigned seqMarkValue(unsigned Flags) {
+  return getSeq(Flags) | (seqIsLiteral(Flags) ? 0x80 : 0);
+}
+
+inline unsigned encodeLituse(unsigned UseType) {
+  return ((UseType + 1) << LituseShift) & LituseMask;
+}
+inline bool hasLituse(unsigned Flags) { return Flags & LituseMask; }
 inline unsigned getLituse(unsigned Flags) {
-  return (Flags & LituseMask) >> LituseShift;
+  return ((Flags & LituseMask) >> LituseShift) - 1;
 }
 
 inline unsigned encodeFPQual(unsigned TrapBits, unsigned RoundMode) {

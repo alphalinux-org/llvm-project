@@ -282,6 +282,58 @@ class AlphaAsmParser : public MCTargetAsmParser {
       getStreamer().emitValueToAlignment(A);
   }
 
+  MCInst buildInst(SMLoc IDLoc, unsigned Opc, ArrayRef<MCOperand> Ops) {
+    MCInst I;
+    I.setOpcode(Opc);
+    for (const MCOperand &O : Ops)
+      I.addOperand(O);
+    I.setLoc(IDLoc);
+    return I;
+  }
+
+  // The operands the matcher hands us are all AlphaOperands; naming that once
+  // keeps the macro expansions below readable.
+  static AlphaOperand &op(const OperandVector &Operands, unsigned I) {
+    return static_cast<AlphaOperand &>(*Operands[I]);
+  }
+
+  // Emit an instruction built here rather than by the matcher, carrying any
+  // !lituse_* written on the line.  That relocation names the instruction it
+  // is written on, so a line that expands into several gives it to the first
+  // -- except the jsr/jmp-to-symbol macros, which hand it to the call they
+  // end with, since the load they start with already has the literal.
+  void emitInst(MCInst &I, MCStreamer &Out) {
+    if (PendingLituse) {
+      I.setFlags(I.getFlags() | Alpha::encodeLituse(PendingLituse - 1));
+      PendingLituse = 0;
+    }
+    if (PendingSeq) {
+      I.setFlags(I.getFlags() |
+                 Alpha::encodeSeq(PendingSeq, PendingSeqIsLiteral));
+      PendingSeq = 0;
+    }
+    Out.emitInstruction(I, getSTI());
+  }
+
+  // Build an instruction the parser assembles itself -- one of the macro
+  // expansions below, or a piece of one -- and emit it through emitInst, so it
+  // takes any !lituse_*/!literal!N written on the line.
+  void emitAt(MCStreamer &Out, SMLoc IDLoc, unsigned Opc,
+              ArrayRef<MCOperand> Ops) {
+    MCInst I = buildInst(IDLoc, Opc, Ops);
+    emitInst(I, Out);
+  }
+
+  // The same, but handed to the streamer directly.  A macro that opens with a
+  // load of a GOT entry uses this for that load: the literal relocation is
+  // already on it, and the pending relocation belongs to the instruction the
+  // macro ends with.
+  void emitAtRaw(MCStreamer &Out, SMLoc IDLoc, unsigned Opc,
+                 ArrayRef<MCOperand> Ops) {
+    MCInst I = buildInst(IDLoc, Opc, Ops);
+    Out.emitInstruction(I, getSTI());
+  }
+
   // The field a relocation specifier is written into, to be compared with the
   // one the matched encoding has.  Every GOT-, GP- and TLS-relative specifier
   // fills a 16-bit memory displacement; !samegp fills a 21-bit branch.
@@ -295,6 +347,20 @@ class AlphaAsmParser : public MCTargetAsmParser {
   // field the matched encoding actually has once it is known.
   unsigned PendingSpecifier = 0;
   SMLoc PendingSpecifierLoc;
+  // The R_ALPHA_LITUSE use type a !lituse_* suffix asked for, biased by one so
+  // that 0 can mean none: LITUSE_ALPHA_ADDR is use type 0.
+  unsigned PendingLituse = 0;
+  // The `!literal!N' / `!lituse_*!N' pair this instruction belongs to: the
+  // dense id given to N (0 meaning none) and which half of the pair this is.
+  // It exists only so the relocation table can be written with the pair
+  // adjacent -- see AlphaELFObjectWriter::sortRelocs.
+  unsigned PendingSeq = 0;
+  bool PendingSeqIsLiteral = false;
+  // The sequence number a `!literal!N' was written with, mapped to that dense
+  // id.  A number can be reused once its pair is done, so a later literal
+  // simply overwrites the entry.
+  DenseMap<unsigned, unsigned> LiteralSeqIds;
+  unsigned NextSeqId = 0;
   // Whether a data directive aligns itself first.  GNU as starts with it on and
   // `.align 0' turns it off, until the next `.align N' or section change.
   bool AutoAlignOn = true;
@@ -906,6 +972,8 @@ bool AlphaAsmParser::parseInstruction(ParseInstructionInfo &Info,
   // The lexer splits "divt/c" into three tokens (divt, /, c), so we must
   // reassemble the full mnemonic before looking it up.
   PendingSpecifier = 0;
+  PendingLituse = 0;
+  PendingSeq = 0;
   PendingFPQual = 0;
   PendingFPQualIsV = false;
   PendingFPQualBase = StringRef();
@@ -987,19 +1055,69 @@ bool AlphaAsmParser::parseInstruction(ParseInstructionInfo &Info,
                         .Case("dtprello", Alpha::fixup_alpha_dtprello)
                         .Case("samegp", Alpha::fixup_alpha_brsgp)
                         .Default(0);
-    if (!Spec)
+    // The lituse relocations name no field: only the addend matters, and it
+    // says which kind of use the instruction makes of the literal that came
+    // before.  So one belongs to the instruction, not to any operand, and it
+    // is attached to any instruction at all -- including a `jsr $26, ($27)'
+    // written without the hint operand, where there is no expression for it to
+    // sit on.  Carry the use type to matchAndEmitInstruction instead.
+    // The full set GNU as accepts, with the LITUSE_ALPHA_* addends bfd reads
+    // (include/elf/alpha.h).  lituse_jsrdirect is the one gcc emits itself, on
+    // the millicode calls behind every integer / and %, so leaving it out
+    // failed 16 of 237 gcc -O2 translation units outright.
+    unsigned Lituse = StringSwitch<unsigned>(R)
+                          .Case("lituse_addr", 0)
+                          .Case("lituse_base", 1)
+                          .Case("lituse_bytoff", 2)
+                          .Case("lituse_jsr", 3)
+                          .Case("lituse_tlsgd", 4)
+                          .Case("lituse_tlsldm", 5)
+                          .Case("lituse_jsrdirect", 6)
+                          .Default(~0u);
+    if (!Spec && Lituse == ~0u)
       return Error(getLexer().getLoc(), "unknown relocation name");
     SMLoc SpecLoc = getLexer().getLoc();
     getParser().Lex(); // name
 
-    // Parse the optional !seq sequence number used to pair !gpdisp relocations.
+    // Parse the optional !seq sequence number used to pair !gpdisp relocations
+    // and to tie a !lituse_* to the !literal it uses.
     unsigned GpDispSeq = 0;
+    bool HasSeq = false;
     if (getLexer().is(AsmToken::Exclaim)) {
       getParser().Lex(); // !
       if (getLexer().isNot(AsmToken::Integer))
         return Error(getLexer().getLoc(), "expected sequence number");
       GpDispSeq = getLexer().getTok().getIntVal();
+      HasSeq = true;
       getParser().Lex(); // number
+    }
+
+    if (Lituse != ~0u) {
+      // GNU as requires the number: it is how the use is tied to its literal,
+      // and a use with no literal to relax against says nothing.
+      if (!HasSeq)
+        return Error(SpecLoc, "no sequence number after !" + R);
+      // The number has to name a literal already seen; GNU as says so too, and
+      // a use with nothing to relax against would silently do nothing.
+      auto It = LiteralSeqIds.find(GpDispSeq);
+      if (It == LiteralSeqIds.end())
+        return Error(SpecLoc, "no !literal!" + Twine(GpDispSeq) + " was found");
+      PendingSeq = It->second;
+      PendingSeqIsLiteral = false;
+      PendingLituse = Lituse + 1;
+      if (getLexer().isNot(AsmToken::EndOfStatement))
+        return Error(getLexer().getLoc(), "unexpected token");
+      return false;
+    }
+
+    if (Spec == Alpha::fixup_alpha_literal && HasSeq) {
+      // Give the number a dense id small enough to travel in the instruction
+      // flags.  127 outstanding literals in one file is far past anything gas
+      // or gcc writes; wrapping there costs an ordering, not correctness.
+      NextSeqId = NextSeqId % 127 + 1;
+      LiteralSeqIds[GpDispSeq] = NextSeqId;
+      PendingSeq = NextSeqId;
+      PendingSeqIsLiteral = true;
     }
 
     if (Spec == Alpha::fixup_alpha_gpdisp && GpDispSeq != 0) {
@@ -1077,20 +1195,13 @@ void AlphaAsmParser::emitConstantSteps(MCRegister Rc,
 
 void AlphaAsmParser::emitLoadImm(MCRegister Rc, int64_t V, SMLoc L,
                                  MCStreamer &Out) {
-  auto emit1 = [&](unsigned Op, ArrayRef<MCOperand> Ops) {
-    MCInst I;
-    I.setOpcode(Op);
-    for (const MCOperand &O : Ops)
-      I.addOperand(O);
-    I.setLoc(L);
-    Out.emitInstruction(I, getSTI());
-  };
   // A 16-bit value is a single lda; a value that fits 32 bits is an ldah/lda
   // pair (with a zapnot to clear the sign extension of an unsigned 32-bit value
   // whose bit 31 is set).  Anything wider is built from both halves, which is
   // what buildConstantSteps does on its own.
   if (SignExtend64<16>(V) == V) {
-    emit1(Alpha::LDAi, {MCOperand::createReg(Rc), MCOperand::createImm(V)});
+    emitAtRaw(Out, L, Alpha::LDAi,
+              {MCOperand::createReg(Rc), MCOperand::createImm(V)});
     return;
   }
   SmallVector<Alpha::ConstantStep, 8> Steps;
@@ -1101,8 +1212,9 @@ void AlphaAsmParser::emitLoadImm(MCRegister Rc, int64_t V, SMLoc L,
     Alpha::buildConstantSteps(V, Steps);
   emitConstantSteps(Rc, Steps, Alpha::R31, L, Out);
   if (Fits32 && !isInt<32>(V))
-    emit1(Alpha::ZAPNOTi, {MCOperand::createReg(Rc), MCOperand::createReg(Rc),
-                           MCOperand::createImm(0xf)});
+    emitAtRaw(Out, L, Alpha::ZAPNOTi,
+              {MCOperand::createReg(Rc), MCOperand::createReg(Rc),
+               MCOperand::createImm(0xf)});
 }
 
 // A parsed operand that is exactly the constant `V`.  The full spellings of
@@ -1129,7 +1241,7 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     Out.emitLabel(Sym);
   PendingPreInsnLabels.clear();
 
-  StringRef Mnemonic = static_cast<AlphaOperand &>(*Operands[0]).getToken();
+  StringRef Mnemonic = op(Operands, 0).getToken();
 
   // ldgp $Ra, disp($Rb): expand to ldah/lda with a GPDISP relocation (addend
   // 4) referencing the parsed base register.
@@ -1144,29 +1256,20 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     if (!Operands[2]->isMem())
       return Error(Operands[2]->getStartLoc(),
                    "expected memory operand of the form disp($reg)");
-    MCRegister Dst = static_cast<AlphaOperand &>(*Operands[1]).getReg();
-    MCRegister Base = static_cast<AlphaOperand &>(*Operands[2]).getMemBase();
-    const MCExpr *Off = static_cast<AlphaOperand &>(*Operands[2]).getMemOff();
+    MCRegister Dst = op(Operands, 1).getReg();
+    MCRegister Base = op(Operands, 2).getMemBase();
+    const MCExpr *Off = op(Operands, 2).getMemOff();
     const MCExpr *GpDisp =
         MCSpecifierExpr::create(MCConstantExpr::create(4, getContext()),
                                 Alpha::fixup_alpha_gpdisp, getContext());
-    MCInst Ldah;
-    Ldah.setOpcode(Alpha::LDAHm);
-    Ldah.addOperand(MCOperand::createReg(Dst));
-    Ldah.addOperand(MCOperand::createReg(Base));
-    Ldah.addOperand(MCOperand::createExpr(GpDisp));
-    Ldah.setLoc(IDLoc);
-    Out.emitInstruction(Ldah, getSTI());
-    MCInst Lda;
-    Lda.setOpcode(Alpha::LEA);
-    Lda.addOperand(MCOperand::createReg(Dst));
-    Lda.addOperand(MCOperand::createReg(Dst));
-    if (const auto *CE = dyn_cast<MCConstantExpr>(Off))
-      Lda.addOperand(MCOperand::createImm(CE->getValue()));
-    else
-      Lda.addOperand(MCOperand::createExpr(Off));
-    Lda.setLoc(IDLoc);
-    Out.emitInstruction(Lda, getSTI());
+    emitAt(Out, IDLoc, Alpha::LDAHm,
+           {MCOperand::createReg(Dst), MCOperand::createReg(Base),
+            MCOperand::createExpr(GpDisp)});
+    const auto *CE = dyn_cast<MCConstantExpr>(Off);
+    emitAt(Out, IDLoc, Alpha::LEA,
+           {MCOperand::createReg(Dst), MCOperand::createReg(Dst),
+            CE ? MCOperand::createImm(CE->getValue())
+               : MCOperand::createExpr(Off)});
     return false;
   }
 
@@ -1175,14 +1278,9 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   // read the wrong member of the operand union.
   if (Mnemonic == "jsr" && Operands.size() == 3 && Operands[1]->isReg() &&
       Operands[2]->isMem()) {
-    MCInst Inst;
-    Inst.setOpcode(Alpha::JSRr);
-    Inst.addOperand(MCOperand::createReg(
-        static_cast<AlphaOperand &>(*Operands[1]).getReg()));
-    Inst.addOperand(MCOperand::createReg(
-        static_cast<AlphaOperand &>(*Operands[2]).getMemBase()));
-    Inst.setLoc(IDLoc);
-    Out.emitInstruction(Inst, getSTI());
+    emitAt(Out, IDLoc, Alpha::JSRr,
+           {MCOperand::createReg(op(Operands, 1).getReg()),
+            MCOperand::createReg(op(Operands, 2).getMemBase())});
     return false;
   }
 
@@ -1190,23 +1288,15 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   // as's jsr-to-symbol macro).  Load the target's address from its GOT entry
   // into $27 (the procedure value) and jsr through it.
   if (Mnemonic == "jsr" && Operands.size() == 3 && Operands[1]->isReg() &&
-      Operands[2]->isImm() &&
-      !isa<MCConstantExpr>(
-          static_cast<AlphaOperand &>(*Operands[2]).getImm())) {
-    MCRegister Ra = static_cast<AlphaOperand &>(*Operands[1]).getReg();
-    const MCExpr *Sym = static_cast<AlphaOperand &>(*Operands[2]).getImm();
-    MCInst Ptr; // ldq $27, symbol($gp) !literal
-    Ptr.setOpcode(Alpha::LDQl);
-    Ptr.addOperand(MCOperand::createReg(Alpha::R27));
-    Ptr.addOperand(MCOperand::createExpr(Sym));
-    Ptr.setLoc(IDLoc);
-    Out.emitInstruction(Ptr, getSTI());
-    MCInst Call; // jsr $Ra, ($27)
-    Call.setOpcode(Alpha::JSRr);
-    Call.addOperand(MCOperand::createReg(Ra));
-    Call.addOperand(MCOperand::createReg(Alpha::R27));
-    Call.setLoc(IDLoc);
-    Out.emitInstruction(Call, getSTI());
+      Operands[2]->isImm() && !isa<MCConstantExpr>(op(Operands, 2).getImm())) {
+    MCRegister Ra = op(Operands, 1).getReg();
+    const MCExpr *Sym = op(Operands, 2).getImm();
+    // ldq $27, symbol($gp) !literal
+    emitAtRaw(Out, IDLoc, Alpha::LDQl,
+              {MCOperand::createReg(Alpha::R27), MCOperand::createExpr(Sym)});
+    // jsr $Ra, ($27)
+    emitAt(Out, IDLoc, Alpha::JSRr,
+           {MCOperand::createReg(Ra), MCOperand::createReg(Alpha::R27)});
     return false;
   }
 
@@ -1216,11 +1306,10 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   // still holds no hint of its own, so only the canonical 1 is taken here.
   if (Mnemonic == "ret" && Operands.size() == 4 && Operands[1]->isReg() &&
       Operands[2]->isMem() && isConstImm(*Operands[3], 1) &&
-      static_cast<AlphaOperand &>(*Operands[1]).getReg() == Alpha::R31) {
+      op(Operands, 1).getReg() == Alpha::R31) {
     MCInst Inst;
     Inst.setOpcode(Alpha::RETb);
-    Inst.addOperand(MCOperand::createReg(
-        static_cast<AlphaOperand &>(*Operands[2]).getMemBase()));
+    Inst.addOperand(MCOperand::createReg(op(Operands, 2).getMemBase()));
     Inst.setLoc(IDLoc);
     Out.emitInstruction(Inst, getSTI());
     return false;
@@ -1231,11 +1320,10 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   // fields the encoding can hold is taken here.
   if (Mnemonic == "jmp" && Operands.size() == 4 && Operands[1]->isReg() &&
       Operands[2]->isMem() && isConstImm(*Operands[3], 0) &&
-      static_cast<AlphaOperand &>(*Operands[1]).getReg() == Alpha::R31) {
+      op(Operands, 1).getReg() == Alpha::R31) {
     MCInst Inst;
     Inst.setOpcode(Alpha::JMP);
-    Inst.addOperand(MCOperand::createReg(
-        static_cast<AlphaOperand &>(*Operands[2]).getMemBase()));
+    Inst.addOperand(MCOperand::createReg(op(Operands, 2).getMemBase()));
     Inst.setLoc(IDLoc);
     Out.emitInstruction(Inst, getSTI());
     return false;
@@ -1244,36 +1332,13 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   // jmp $Ra, symbol: a jump to a symbol reached through the GOT, expanded like
   // jsr but discarding the return address.
   if (Mnemonic == "jmp" && Operands.size() == 3 && Operands[1]->isReg() &&
-      Operands[2]->isImm() &&
-      !isa<MCConstantExpr>(
-          static_cast<AlphaOperand &>(*Operands[2]).getImm())) {
-    const MCExpr *Sym = static_cast<AlphaOperand &>(*Operands[2]).getImm();
-    MCInst Ptr; // ldq $27, symbol($gp) !literal
-    Ptr.setOpcode(Alpha::LDQl);
-    Ptr.addOperand(MCOperand::createReg(Alpha::R27));
-    Ptr.addOperand(MCOperand::createExpr(Sym));
-    Ptr.setLoc(IDLoc);
-    Out.emitInstruction(Ptr, getSTI());
-    MCInst Jmp; // jmp $31, ($27)
-    Jmp.setOpcode(Alpha::JMP);
-    Jmp.addOperand(MCOperand::createReg(Alpha::R27));
-    Jmp.setLoc(IDLoc);
-    Out.emitInstruction(Jmp, getSTI());
-    return false;
-  }
-
-  // jsr $Ra, ($Rb), hint: a computed call whose third operand is a
-  // branch-prediction hint (an R_ALPHA_HINT we do not need to emit).
-  if (Mnemonic == "jsr" && Operands.size() == 4 && Operands[1]->isReg() &&
-      Operands[2]->isMem()) {
-    MCInst Inst;
-    Inst.setOpcode(Alpha::JSRr);
-    Inst.addOperand(MCOperand::createReg(
-        static_cast<AlphaOperand &>(*Operands[1]).getReg()));
-    Inst.addOperand(MCOperand::createReg(
-        static_cast<AlphaOperand &>(*Operands[2]).getMemBase()));
-    Inst.setLoc(IDLoc);
-    Out.emitInstruction(Inst, getSTI());
+      Operands[2]->isImm() && !isa<MCConstantExpr>(op(Operands, 2).getImm())) {
+    const MCExpr *Sym = op(Operands, 2).getImm();
+    // ldq $27, symbol($gp) !literal
+    emitAtRaw(Out, IDLoc, Alpha::LDQl,
+              {MCOperand::createReg(Alpha::R27), MCOperand::createExpr(Sym)});
+    // jmp $31, ($27)
+    emitAt(Out, IDLoc, Alpha::JMP, {MCOperand::createReg(Alpha::R27)});
     return false;
   }
 
@@ -1290,7 +1355,7 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
                          .Default(0);
   if (DerefOp && Operands.size() == 3 && Operands[1]->isReg() &&
       Operands[2]->isImm()) {
-    const MCExpr *Sym = static_cast<AlphaOperand &>(*Operands[2]).getImm();
+    const MCExpr *Sym = op(Operands, 2).getImm();
     if (!isa<MCConstantExpr>(Sym)) {
       // The dereference is a real instruction and has to be available.  GNU as
       // expands the byte and word cases into an ldq_u/ext pair when the target
@@ -1301,20 +1366,14 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
           !getSTI().hasFeature(Alpha::FeatureBWX))
         return Error(IDLoc, "instruction requires the following: "
                             "Byte/word extension (BWX)");
-      MCRegister R = static_cast<AlphaOperand &>(*Operands[1]).getReg();
-      MCInst Ptr; // ldq $R, symbol($gp) !literal  (the GOT slot is a quadword)
-      Ptr.setOpcode(Alpha::LDQl);
-      Ptr.addOperand(MCOperand::createReg(R));
-      Ptr.addOperand(MCOperand::createExpr(Sym));
-      Ptr.setLoc(IDLoc);
-      Out.emitInstruction(Ptr, getSTI());
-      MCInst Deref; // <load> $R, 0($R)  (the load itself, of the given width)
-      Deref.setOpcode(DerefOp);
-      Deref.addOperand(MCOperand::createReg(R));
-      Deref.addOperand(MCOperand::createReg(R));
-      Deref.addOperand(MCOperand::createImm(0));
-      Deref.setLoc(IDLoc);
-      Out.emitInstruction(Deref, getSTI());
+      MCRegister R = op(Operands, 1).getReg();
+      // ldq $R, symbol($gp) !literal  (the GOT slot is a quadword)
+      emitAtRaw(Out, IDLoc, Alpha::LDQl,
+                {MCOperand::createReg(R), MCOperand::createExpr(Sym)});
+      // <load> $R, 0($R)  (the load itself, of the given width)
+      emitAt(Out, IDLoc, DerefOp,
+             {MCOperand::createReg(R), MCOperand::createReg(R),
+              MCOperand::createImm(0)});
       return false;
     }
   }
@@ -1325,15 +1384,12 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   // instead.
   if (Mnemonic == "lda" && Operands.size() == 3 && Operands[1]->isReg() &&
       Operands[2]->isImm()) {
-    const MCExpr *Sym = static_cast<AlphaOperand &>(*Operands[2]).getImm();
+    const MCExpr *Sym = op(Operands, 2).getImm();
     if (!isa<MCConstantExpr>(Sym)) {
-      MCInst Ptr; // ldq $R, symbol($gp) !literal
-      Ptr.setOpcode(Alpha::LDQl);
-      Ptr.addOperand(MCOperand::createReg(
-          static_cast<AlphaOperand &>(*Operands[1]).getReg()));
-      Ptr.addOperand(MCOperand::createExpr(Sym));
-      Ptr.setLoc(IDLoc);
-      Out.emitInstruction(Ptr, getSTI());
+      // ldq $R, symbol($gp) !literal
+      emitAtRaw(Out, IDLoc, Alpha::LDQl,
+                {MCOperand::createReg(op(Operands, 1).getReg()),
+                 MCOperand::createExpr(Sym)});
       return false;
     }
   }
@@ -1351,8 +1407,7 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
       (Operands[2]->isMem() || Operands[2]->isImm())) {
     bool HasBase = Operands[2]->isMem();
     const MCExpr *Off =
-        HasBase ? static_cast<AlphaOperand &>(*Operands[2]).getMemOff()
-                : static_cast<AlphaOperand &>(*Operands[2]).getImm();
+        HasBase ? op(Operands, 2).getMemOff() : op(Operands, 2).getImm();
     auto *CE = dyn_cast<MCConstantExpr>(Off);
     // A bare symbol reference is a GOT address; a wide constant is
     // materialized. A symbol difference, a relocation specifier, or a small
@@ -1377,45 +1432,34 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     bool BigConst = CE && !isInt<16>(CE->getValue());
     bool Sym = isa<MCSymbolRefExpr>(Sub);
     if (BigConst || Sym) {
-      MCRegister Rc = static_cast<AlphaOperand &>(*Operands[1]).getReg();
-      MCRegister Rb =
-          HasBase ? static_cast<AlphaOperand &>(*Operands[2]).getMemBase()
-                  : Alpha::R31;
+      MCRegister Rc = op(Operands, 1).getReg();
+      MCRegister Rb = HasBase ? op(Operands, 2).getMemBase() : Alpha::R31;
       if (Rc == Rb)
         return Error(IDLoc, "lda of this displacement needs a scratch register "
                             "distinct from the base");
       if (BigConst) {
         emitLoadImm(Rc, CE->getValue(), IDLoc, Out);
       } else {
-        MCInst Ptr; // ldq $Rc, symbol($gp) !literal
-        Ptr.setOpcode(Alpha::LDQl);
-        Ptr.addOperand(MCOperand::createReg(Rc));
-        Ptr.addOperand(MCOperand::createExpr(Sub));
-        Ptr.setLoc(IDLoc);
-        Out.emitInstruction(Ptr, getSTI());
+        // ldq $Rc, symbol($gp) !literal
+        emitAtRaw(Out, IDLoc, Alpha::LDQl,
+                  {MCOperand::createReg(Rc), MCOperand::createExpr(Sub)});
         if (Addend) {
           if (!isInt<16>(Addend))
             return Error(IDLoc, "lda addend does not fit a 16-bit "
                                 "displacement");
-          MCInst Off2; // lda $Rc, Addend($Rc)
-          Off2.setOpcode(Alpha::LDA);
-          Off2.addOperand(MCOperand::createReg(Rc));
-          Off2.addOperand(MCOperand::createImm(Addend));
-          Off2.addOperand(MCOperand::createReg(Rc));
-          Off2.setLoc(IDLoc);
-          Out.emitInstruction(Off2, getSTI());
+          // lda $Rc, Addend($Rc)
+          emitAt(Out, IDLoc, Alpha::LDA,
+                 {MCOperand::createReg(Rc), MCOperand::createImm(Addend),
+                  MCOperand::createReg(Rc)});
         }
       }
       // $31 reads as zero, so adding it changes nothing; GNU as leaves the add
       // out rather than emitting a no-op.
       if (Rb != Alpha::R31) {
-        MCInst Add; // addq $Rc, $Rb, $Rc
-        Add.setOpcode(Alpha::ADDQ);
-        Add.addOperand(MCOperand::createReg(Rc));
-        Add.addOperand(MCOperand::createReg(Rc));
-        Add.addOperand(MCOperand::createReg(Rb));
-        Add.setLoc(IDLoc);
-        Out.emitInstruction(Add, getSTI());
+        // addq $Rc, $Rb, $Rc
+        emitAt(Out, IDLoc, Alpha::ADDQ,
+               {MCOperand::createReg(Rc), MCOperand::createReg(Rc),
+                MCOperand::createReg(Rb)});
       }
       return false;
     }
@@ -1428,21 +1472,16 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   // does fit assembles to a different instruction from the one lda gives.
   if (Mnemonic == "mov" && Operands.size() == 3 && Operands[1]->isImm() &&
       Operands[2]->isReg()) {
-    const MCExpr *E = static_cast<AlphaOperand &>(*Operands[1]).getImm();
+    const MCExpr *E = op(Operands, 1).getImm();
     if (auto *CE = dyn_cast<MCConstantExpr>(E)) {
       int64_t V = CE->getValue();
       if (!isUInt<8>(V))
         return Error(Operands[1]->getStartLoc(),
                      "operand out of range (" + Twine(V) +
                          " is not between 0 and 255)");
-      MCInst Inst;
-      Inst.setOpcode(Alpha::BISi);
-      Inst.addOperand(MCOperand::createReg(
-          static_cast<AlphaOperand &>(*Operands[2]).getReg()));
-      Inst.addOperand(MCOperand::createReg(Alpha::R31));
-      Inst.addOperand(MCOperand::createImm(V));
-      Inst.setLoc(IDLoc);
-      Out.emitInstruction(Inst, getSTI());
+      emitAt(Out, IDLoc, Alpha::BISi,
+             {MCOperand::createReg(op(Operands, 2).getReg()),
+              MCOperand::createReg(Alpha::R31), MCOperand::createImm(V)});
       return false;
     }
   }
@@ -1450,10 +1489,9 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   // ldi/ldiq $Rc, imm: load an immediate constant, materializing it in code.
   if ((Mnemonic == "ldi" || Mnemonic == "ldiq") && Operands.size() == 3 &&
       Operands[1]->isReg() && Operands[2]->isImm()) {
-    const MCExpr *E = static_cast<AlphaOperand &>(*Operands[2]).getImm();
+    const MCExpr *E = op(Operands, 2).getImm();
     if (auto *CE = dyn_cast<MCConstantExpr>(E)) {
-      emitLoadImm(static_cast<AlphaOperand &>(*Operands[1]).getReg(),
-                  CE->getValue(), IDLoc, Out);
+      emitLoadImm(op(Operands, 1).getReg(), CE->getValue(), IDLoc, Out);
       return false;
     }
   }
@@ -1509,6 +1547,11 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   switch (Result) {
   case Match_Success:
     Inst.setLoc(IDLoc);
+    if (PendingLituse)
+      Inst.setFlags(Inst.getFlags() | Alpha::encodeLituse(PendingLituse - 1));
+    if (PendingSeq)
+      Inst.setFlags(Inst.getFlags() |
+                    Alpha::encodeSeq(PendingSeq, PendingSeqIsLiteral));
     // Whatever was written is what this instruction carries -- including
     // nothing, which is a qualifier too.  Recording it stops -mieee from
     // turning a written `addt' into `addt/su'.  A mnemonic spelled with its
@@ -1517,7 +1560,7 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     if (MII.get(Inst.getOpcode()).TSFlags & Alpha::TrapClassMask)
       Inst.setFlags(Flags ? Flags
                           : Alpha::encodeFPQual(0, Alpha::FPRoundNormal));
-    Out.emitInstruction(Inst, getSTI());
+    emitInst(Inst, Out);
     return false;
   case Match_MnemonicFail:
     return Error(IDLoc, "unrecognized instruction mnemonic");
