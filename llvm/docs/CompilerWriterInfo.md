@@ -11,6 +11,23 @@ welcome.
 
 ## Hardware
 
+### Alpha
+
+Only the first of these has a stable URL; the rest are named by title and order
+number, which is what a scan of them is filed under.
+
+* [Alpha Architecture Handbook](https://download.majix.org/dec/alpha_arch_ref.pdf)
+
+* Alpha Architecture Reference Manual, Richard L. Sites and Richard T. Witek,
+  Digital Press.  The 1992 first edition and the 1995 second edition are both
+  scanned on bitsavers under `pdf/dec/alpha/`.
+
+* Alpha 21164 Microprocessor Hardware Reference Manual, Digital Equipment
+  Corporation, order number EC-QAEQA-TE.
+
+* Alpha 21264/EV67 Microprocessor Hardware Reference Manual, Compaq Computer
+  Corporation, order number DS-0027A-TE.
+
 ### AArch64 & ARM
 
 * [ARMv8-A Architecture Reference Manual](https://developer.arm.com/docs/ddi0487/latest) This document covers both AArch64 and ARM instructions
@@ -142,6 +159,8 @@ Refer to {doc}`AMDGPUUsage` for additional documentation.
 
 ### Linux
 
+* Calling Standard for Alpha Systems, Digital Equipment Corporation, order
+  number AA-PY8AC-TE
 * [Linux extensions to gabi](https://github.com/hjl-tools/linux-abi/wiki/Linux-Extensions-to-gABI)
 * [64-Bit ELF V2 ABI Specification: Power Architecture](https://openpowerfoundation.org/?resource_lib=64-bit-elf-v2-abi-specification-power-architecture)
 

@@ -80,6 +80,12 @@ Makes programs 10x faster by doing Special New Thing.
 
 ### Changes to the ARM Backend
 
+### Changes to the Alpha Backend
+
+* An experimental Alpha backend was added, targeting `alpha-unknown-linux-gnu`.
+  It is not built by default; use
+  `-DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=Alpha` to enable it.
+
 ### Changes to the AVR Backend
 
 ### Changes to the DirectX Backend
