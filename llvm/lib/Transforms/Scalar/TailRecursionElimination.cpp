@@ -172,6 +172,17 @@ struct AllocaDerivedValueTracker {
       case Instruction::Call:
       case Instruction::Invoke: {
         auto &CB = cast<CallBase>(*I);
+        // llvm.stackrestore consumes the token llvm.stacksave produced. It
+        // writes memory and does not name its argument nocapture, so without
+        // this the token lands in EscapePoints and every call after a VLA scope
+        // or a __builtin_stack_save loses its tail marking. Only the token is
+        // exempt: an alloca handed to llvm.stackrestore still escapes.
+        if (auto *II = dyn_cast<IntrinsicInst>(I);
+            II && II->getIntrinsicID() == Intrinsic::stackrestore) {
+          auto *Save = dyn_cast<IntrinsicInst>(U->get());
+          if (Save && Save->getIntrinsicID() == Intrinsic::stacksave)
+            continue;
+        }
         // If the alloca-derived argument is passed byval it is not an escape
         // point, or a use of an alloca. Calling with byval copies the contents
         // of the alloca into argument registers or stack slots, which exist
@@ -236,16 +247,34 @@ static bool markTails(Function &F, OptimizationRemarkEmitter *ORE,
   if (F.callsFunctionThatReturnsTwice())
     return false;
 
-  // The local stack holds all alloca instructions and all byval arguments.
+  // The local stack holds all alloca instructions, all byval arguments, and
+  // anything that names the frame itself: llvm.frameaddress and friends hand
+  // out a pointer into the frame a tail call tears down before the callee runs.
   AllocaDerivedValueTracker Tracker;
   for (Argument &Arg : F.args()) {
     if (Arg.hasByValAttr())
       Tracker.walk(&Arg);
   }
   for (auto &BB : F) {
-    for (auto &I : BB)
-      if (AllocaInst *AI = dyn_cast<AllocaInst>(&I))
+    for (auto &I : BB) {
+      if (AllocaInst *AI = dyn_cast<AllocaInst>(&I)) {
         Tracker.walk(AI);
+        continue;
+      }
+      if (auto *II = dyn_cast<IntrinsicInst>(&I))
+        switch (II->getIntrinsicID()) {
+        case Intrinsic::frameaddress:
+        case Intrinsic::localaddress:
+        case Intrinsic::addressofreturnaddress:
+        case Intrinsic::sponentry:
+        case Intrinsic::stacksave:
+        case Intrinsic::eh_dwarf_cfa:
+          Tracker.walk(II);
+          break;
+        default:
+          break;
+        }
+    }
   }
 
   bool Modified = false;
