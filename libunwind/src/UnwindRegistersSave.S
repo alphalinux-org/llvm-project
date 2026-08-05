@@ -1332,6 +1332,32 @@ DEFINE_LIBUNWIND_FUNCTION(__unw_getcontext)
   move     $a0, $zero  // UNW_ESUCCESS
   jr       $ra
 
+#elif defined(__alpha__)
+
+#
+# extern int __unw_getcontext(unw_context_t* thread_state)
+#
+# On entry:
+#  thread_state pointer is in $16
+#
+  .p2align 2
+DEFINE_LIBUNWIND_FUNCTION(__unw_getcontext)
+  .set noat
+  .irp i,FROM_0_TO_31
+    stq $\i, (8 * \i)($16)
+  .endr
+  // Alpha has no PC register.  Resuming here means returning to the caller,
+  // so the return address is the pc of this context.
+  stq  $26, (8 * 32)($16)
+
+  .irp i,FROM_0_TO_31
+    stt $f\i, (8 * 33 + 8 * \i)($16)
+  .endr
+
+  mov  $31, $0             // UNW_ESUCCESS
+  ret  $31, ($26), 1
+  .set at
+
 #endif
 
 #ifdef __arm64ec__

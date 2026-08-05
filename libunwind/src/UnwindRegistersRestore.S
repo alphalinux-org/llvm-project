@@ -1308,6 +1308,57 @@ DEFINE_LIBUNWIND_FUNCTION(_ZN9libunwind19Registers_loongarch6jumptoEv)
 
   jr      $ra
 
+#elif defined(__alpha__)
+
+//
+// void libunwind::Registers_alpha::jumpto()
+//
+// On entry:
+//  thread_state pointer is in $16
+//
+  .p2align 2
+DEFINE_LIBUNWIND_FUNCTION(_ZN9libunwind15Registers_alpha6jumptoEv)
+  .set noat
+  .irp i,FROM_0_TO_31
+    ldt $f\i, (8 * 33 + 8 * \i)($16)
+  .endr
+
+  // Jump through $28 ($at).  It is a scratch register that no unwind
+  // information describes, so nothing expects it to be restored.
+  ldq $28, (8 * 32)($16)
+
+  // $31 is hardwired to zero and $16 holds the context pointer, so restore
+  // neither here.
+  .irp i,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15
+    ldq $\i, (8 * \i)($16)
+  .endr
+  .irp i,17,18,19,20,21,22,23,24,25,26,27,29,30
+    ldq $\i, (8 * \i)($16)
+  .endr
+  ldq $16, (8 * 16)($16)   // restore $16 last
+
+  // Resume with the address being resumed at in $26, overriding the value the
+  // unwind information gave it.  A landing pad is reached with $gp holding the
+  // unwinder's own value and has to rebuild it before it can reach anything
+  // through the GOT.  gcc rebuilds it with an ldah/lda !gpdisp pair relative to
+  // $26, so a landing pad it compiled reaches __cxa_begin_catch, and everything
+  // else it needs from the GOT, through whatever this leaves there.  libgcc
+  // arrives at the same state by a different route: its __builtin_eh_return
+  // writes the handler over the saved return address (EH_RETURN_HANDLER_RTX
+  // aliases that slot on Alpha) and returns through it.
+  //
+  // A landing pad clang compiled does not depend on this: it rebuilds $gp from
+  // its own address instead, because libunwind restores $26 from the frame's
+  // unwind information rather than leaving the handler there.  This is for the
+  // gcc-compiled frames in the same process.
+  //
+  // Clobbering $26 is safe because a frame that has a landing pad has made a
+  // call, so it saved $26 in its own frame and reloads it before returning.
+  mov $28, $26
+
+  jmp $31, ($28), 0
+  .set at
+
 #endif
 
 #endif /* !defined(__USING_SJLJ_EXCEPTIONS__) */
