@@ -11,6 +11,16 @@ welcome.
 
 ## Hardware
 
+### Alpha
+
+* [Alpha Architecture Handbook](https://download.majix.org/dec/alpha_arch_ref.pdf)
+
+* [Alpha Architecture Reference Manual, 4th edition](https://bitsavers.org/pdf/dec/alpha/Sites-AlphaArchitectureReferenceManual-4thEd-2002.pdf)
+
+* [Alpha 21264 Microprocessor Hardware Reference Manual](https://bitsavers.org/components/dec/alpha/21264/EC-RJRZA-TE_21264_HRM_7-1999.pdf)
+
+* [Alpha 21164 Microprocessor Hardware Reference Manual](https://bitsavers.org/components/dec/alpha/21164/EC-QAEQE-TE_21164_HRM_1998.pdf)
+
 ### AArch64 & ARM
 
 * [ARMv8-A Architecture Reference Manual](https://developer.arm.com/docs/ddi0487/latest) This document covers both AArch64 and ARM instructions
@@ -142,6 +152,7 @@ Refer to {doc}`AMDGPUUsage` for additional documentation.
 
 ### Linux
 
+* [Calling Standard for Alpha Systems](https://bitsavers.org/pdf/dec/alpha/archpubs/AA-PY8AC-TE_Calling_Standard_for_Alpha_Systems_Aug1996.pdf)
 * [Linux extensions to gabi](https://github.com/hjl-tools/linux-abi/wiki/Linux-Extensions-to-gABI)
 * [64-Bit ELF V2 ABI Specification: Power Architecture](https://openpowerfoundation.org/?resource_lib=64-bit-elf-v2-abi-specification-power-architecture)
 
