@@ -55,7 +55,7 @@ inline StringRef getFPTrapSuffix(unsigned TrapClass, bool IEEE, bool Inexact,
 }
 
 // The amount added to the instruction's function field for the trap qualifier:
-// 0x500 for su/sv, 0x700 for sui/svi, 0x100 for a bare u/v.
+// 0x500 for su/sv, 0x700 for sui/svi, 0x400 for a bare s, 0x100 for a bare u/v.
 inline unsigned getFPTrapFuncBits(StringRef Suffix) {
   if (Suffix.empty())
     return 0;

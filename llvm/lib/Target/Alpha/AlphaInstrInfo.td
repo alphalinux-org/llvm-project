@@ -898,6 +898,9 @@ def LDTg : MFormD<0x23, (outs FPRC:$Ra), (ins gprellow_sym:$disp, GPRC:$Rb),
                   "ldt $Ra, $disp($Rb)\t\t!gprellow", []>;
 def LDSg : MFormD<0x22, (outs FPRC:$Ra), (ins gprellow_sym:$disp, GPRC:$Rb),
                   "lds $Ra, $disp($Rb)\t\t!gprellow", []>;
+let isCodeGenOnly = 1 in
+def LDSgf64 : MFormD<0x22, (outs FPRC:$Ra), (ins gprellow_sym:$disp, GPRC:$Rb),
+                     "lds $Ra, $disp($Rb)\t\t!gprellow", []>;
 }
 // The corresponding stores, used for small-data globals.
 let mayStore = 1, hasSideEffects = 0, isCodeGenOnly = 1 in {
@@ -929,8 +932,12 @@ def : Pat<(f64 (load (AlphaGprelLo sym:$s, GPRC:$b))),
           (LDTg sym:$s, GPRC:$b)>;
 def : Pat<(f32 (load (AlphaGprelLo sym:$s, GPRC:$b))),
           (LDSg sym:$s, GPRC:$b)>;
+let Predicates = [NotIEEE] in
 def : Pat<(f64 (extloadf32 (AlphaGprelLo sym:$s, GPRC:$b))),
-          (CVTST (LDSg sym:$s, GPRC:$b))>;
+          (LDSgf64 sym:$s, GPRC:$b)>;
+let Predicates = [HasIEEE] in
+def : Pat<(f64 (extloadf32 (AlphaGprelLo sym:$s, GPRC:$b))),
+          (CVTST_S (LDSg sym:$s, GPRC:$b))>;
 def : Pat<(truncstorei32 GPRC:$v, (AlphaGprelLo sym:$s, GPRC:$b)),
           (STLg GPRC:$v, sym:$s, GPRC:$b)>;
 def : Pat<(store GPRC:$v, (AlphaGprelLo sym:$s, GPRC:$b)),
@@ -1289,7 +1296,10 @@ def FTOIS : FForm<0x1c, 0x078, (outs GPRC:$Rc), (ins FPRC:$Ra),
 def : Pat<(f64 (sint_to_fp GPRC:$x)), (CVTQT (MOVi2f GPRC:$x))>;
 def : Pat<(f32 (sint_to_fp GPRC:$x)), (CVTQS (MOVi2f GPRC:$x))>;
 def : Pat<(i64 (fp_to_sint f64:$x)), (MOVf2i (CVTTQ f64:$x))>;
-def : Pat<(i64 (fp_to_sint f32:$x)), (MOVf2i (CVTTQ (CVTST f32:$x)))>;
+// A float in a register is already in T_floating form, so cvttq converts it
+// directly; widening first would only add an instruction (and, without -mieee,
+// one that faults on an infinity or a NaN).
+def : Pat<(i64 (fp_to_sint f32:$x)), (MOVf2i (CVTTQ f32:$x))>;
 
 // An AND whose mask keeps or clears whole bytes (each byte is 0x00 or 0xFF) is a
 // single zapnot, so it needs no materialized constant.  This covers zero-
@@ -1456,6 +1466,11 @@ def LDT : MForm<0x23, (outs FPRC:$Ra), (ins memri:$addr), "ldt $Ra, $addr",
                 [(set f64:$Ra, (load ADDRri:$addr))]>;
 def LDS : MForm<0x22, (outs FPRC:$Ra), (ins memri:$addr), "lds $Ra, $addr",
                 [(set f32:$Ra, (load ADDRri:$addr))]>;
+// lds expands the S_floating value it loads into T_floating form, so the same
+// instruction also loads a float straight into a double.
+let isCodeGenOnly = 1 in
+def LDSf64 : MForm<0x22, (outs FPRC:$Ra), (ins memri:$addr), "lds $Ra, $addr",
+                   []>;
 }
 
 // Software-directed prefetch: a load whose destination is R31 or F31 brings a
@@ -1499,7 +1514,10 @@ def : Pat<(i64 (zextloadi32 ADDRri:$addr)), (ZAPNOTi (LDL memri:$addr), 15)>;
 
 // An f32 loaded and widened to f64 (e.g. an f32-encoded double constant): lds
 // loads the S_floating value and cvtst widens it exactly.
-def : Pat<(f64 (extloadf32 ADDRri:$addr)), (CVTST (LDS memri:$addr))>;
+let Predicates = [NotIEEE] in
+def : Pat<(f64 (extloadf32 ADDRri:$addr)), (LDSf64 memri:$addr)>;
+let Predicates = [HasIEEE] in
+def : Pat<(f64 (extloadf32 ADDRri:$addr)), (CVTST_S (LDS memri:$addr))>;
 
 // Byte and word memory access (BWX extension, ev56 and later).  ldbu/ldwu
 // zero-extend; stb/stw store the low 8/16 bits.  Signed byte/word loads are
