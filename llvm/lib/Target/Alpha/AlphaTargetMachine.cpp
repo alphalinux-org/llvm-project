@@ -12,6 +12,10 @@
 #include "AlphaTargetObjectFile.h"
 #include "AlphaTargetTransformInfo.h"
 #include "TargetInfo/AlphaTargetInfo.h"
+#include "llvm/CodeGen/GlobalISel/IRTranslator.h"
+#include "llvm/CodeGen/GlobalISel/InstructionSelect.h"
+#include "llvm/CodeGen/GlobalISel/Legalizer.h"
+#include "llvm/CodeGen/GlobalISel/RegBankSelect.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
@@ -21,6 +25,9 @@ using namespace llvm;
 
 extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeAlphaTarget() {
   RegisterTargetMachine<AlphaTargetMachine> X(getTheAlphaTarget());
+  // The GlobalISel passes this target's pass config adds have to be registered
+  // before anything can require them.
+  initializeGlobalISel(*PassRegistry::getPassRegistry());
 }
 
 static Reloc::Model getEffectiveRelocModel(bool JIT,
@@ -91,6 +98,10 @@ public:
 
   void addIRPasses() override;
   bool addInstSelector() override;
+  bool addIRTranslator() override;
+  bool addLegalizeMachineIR() override;
+  bool addRegBankSelect() override;
+  bool addGlobalInstructionSelect() override;
   bool addILPOpts() override;
   void addPreEmitPass() override;
 };
@@ -117,6 +128,26 @@ void AlphaPassConfig::addPreEmitPass() {
 
 bool AlphaPassConfig::addInstSelector() {
   addPass(createAlphaISelDag(getAlphaTargetMachine(), getOptLevel()));
+  return false;
+}
+
+bool AlphaPassConfig::addIRTranslator() {
+  addPass(new IRTranslator(getOptLevel()));
+  return false;
+}
+
+bool AlphaPassConfig::addLegalizeMachineIR() {
+  addPass(new Legalizer());
+  return false;
+}
+
+bool AlphaPassConfig::addRegBankSelect() {
+  addPass(new RegBankSelect());
+  return false;
+}
+
+bool AlphaPassConfig::addGlobalInstructionSelect() {
+  addPass(new InstructionSelect(getOptLevel()));
   return false;
 }
 

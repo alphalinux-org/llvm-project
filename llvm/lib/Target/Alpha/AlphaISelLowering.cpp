@@ -1556,7 +1556,7 @@ SDValue AlphaTargetLowering::LowerDivRem(SDValue Op, SelectionDAG &DAG) const {
 // covering a signed 32-bit displacement, which reaches anywhere in the data
 // segment, so the only question is whether the linker will let this reference
 // see the definition's own address.  This mirrors gcc's local_symbolic_operand.
-static bool isGprelAddressable(const GlobalValue &GV) {
+bool llvm::isAlphaGprelAddressable(const GlobalValue &GV) {
   // A preemptible symbol's address is whatever the dynamic linker picks.
   if (!GV.isDSOLocal())
     return false;
@@ -1594,7 +1594,7 @@ SDValue AlphaTargetLowering::LowerGlobalAddress(SDValue Op,
   // is reached through the GOT -- gcc does exactly this, emitting `.sbss'
   // placement together with an `!literal' load for a default-visibility global
   // built -fPIC -msmall-data.
-  if (isGprelAddressable(*N->getGlobal())) {
+  if (isAlphaGprelAddressable(*N->getGlobal())) {
     SDValue GP = DAG.getRegister(Alpha::R29, MVT::i64);
     SDValue Hi = DAG.getNode(AlphaISD::GPREL_HI, DL, MVT::i64, TGA, GP);
     return DAG.getNode(AlphaISD::GPREL_LO, DL, MVT::i64, TGA, Hi);

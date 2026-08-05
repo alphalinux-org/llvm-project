@@ -7,7 +7,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "AlphaSubtarget.h"
+#include "Alpha.h"
 #include "AlphaTargetMachine.h"
+#include "GISel/AlphaCallLowering.h"
+#include "GISel/AlphaLegalizerInfo.h"
+#include "GISel/AlphaRegisterBankInfo.h"
 
 #define DEBUG_TYPE "alpha-subtarget"
 
@@ -31,4 +35,27 @@ AlphaSubtarget::AlphaSubtarget(const Triple &TT, StringRef CPU, StringRef FS,
       ReserveRegister(TM.getMCRegisterInfo().getNumRegs()),
       InstrInfo(initializeSubtargetDependencies(CPU, FS)),
       TLInfo(static_cast<const AlphaTargetMachine &>(TM), *this),
-      FrameLowering(*this) {}
+      FrameLowering(*this) {
+  CallLoweringInfo.reset(new AlphaCallLowering(*getTargetLowering()));
+  Legalizer.reset(new AlphaLegalizerInfo(*this));
+  auto *RBI = new AlphaRegisterBankInfo(*getRegisterInfo());
+  RegBankInfo.reset(RBI);
+  InstSelector.reset(createAlphaInstructionSelector(
+      static_cast<const AlphaTargetMachine &>(TM), *this, *RBI));
+}
+
+const CallLowering *AlphaSubtarget::getCallLowering() const {
+  return CallLoweringInfo.get();
+}
+
+InstructionSelector *AlphaSubtarget::getInstructionSelector() const {
+  return InstSelector.get();
+}
+
+const LegalizerInfo *AlphaSubtarget::getLegalizerInfo() const {
+  return Legalizer.get();
+}
+
+const RegisterBankInfo *AlphaSubtarget::getRegBankInfo() const {
+  return RegBankInfo.get();
+}
