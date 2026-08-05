@@ -236,16 +236,32 @@ static bool markTails(Function &F, OptimizationRemarkEmitter *ORE,
   if (F.callsFunctionThatReturnsTwice())
     return false;
 
-  // The local stack holds all alloca instructions and all byval arguments.
+  // The local stack holds all alloca instructions, all byval arguments, and
+  // anything that names the frame itself: llvm.frameaddress and friends hand
+  // out a pointer into the frame a tail call tears down before the callee runs.
   AllocaDerivedValueTracker Tracker;
   for (Argument &Arg : F.args()) {
     if (Arg.hasByValAttr())
       Tracker.walk(&Arg);
   }
   for (auto &BB : F) {
-    for (auto &I : BB)
-      if (AllocaInst *AI = dyn_cast<AllocaInst>(&I))
+    for (auto &I : BB) {
+      if (AllocaInst *AI = dyn_cast<AllocaInst>(&I)) {
         Tracker.walk(AI);
+        continue;
+      }
+      if (auto *II = dyn_cast<IntrinsicInst>(&I))
+        switch (II->getIntrinsicID()) {
+        case Intrinsic::frameaddress:
+        case Intrinsic::addressofreturnaddress:
+        case Intrinsic::sponentry:
+        case Intrinsic::stacksave:
+          Tracker.walk(II);
+          break;
+        default:
+          break;
+        }
+    }
   }
 
   bool Modified = false;
