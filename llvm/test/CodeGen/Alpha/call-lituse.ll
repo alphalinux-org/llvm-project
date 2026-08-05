@@ -2,10 +2,11 @@
 ; RUN:   -filetype=obj < %s | llvm-readobj -r - | FileCheck %s
 
 ; A direct call carries relocations on its jsr that let the linker optimize it.
-; A dso-local callee is tagged with only lituse_jsr (addend 3) so the linker can
-; relax the GOT-load-and-jsr into a direct bsr; a branch-prediction hint, which
-; would inhibit that relaxation, is emitted only for a non-local callee (which
-; cannot be relaxed anyway).
+; Both callees are tagged with lituse_jsr (addend 3) so the linker can relax the
+; GOT-load-and-jsr into a direct bsr; a branch-prediction hint is emitted only
+; for a non-local callee, matching gcc.  The lituse comes first, as GNU as
+; writes it: bfd only inspects the relocation immediately after a literal's use
+; and would not find a lituse hidden behind a hint.
 
 ; The lituse comes first, as GNU as writes it: bfd only inspects the relocation
 ; immediately after a literal's use and would not find a lituse hidden behind a
