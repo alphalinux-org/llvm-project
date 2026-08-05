@@ -2,19 +2,24 @@
 ; RUN:   -filetype=obj < %s | llvm-readobj -r - | FileCheck %s
 
 ; A direct call carries relocations on its jsr that let the linker optimize it.
-; A dso-local callee is tagged with only lituse_jsr (addend 3) so the linker can
-; relax the GOT-load-and-jsr into a direct bsr; a branch-prediction hint, which
-; would inhibit that relaxation, is emitted only for a non-local callee (which
-; cannot be relaxed anyway).
+; Both callees are tagged with lituse_jsr (addend 3) so the linker can relax the
+; GOT-load-and-jsr into a direct bsr; a branch-prediction hint is emitted only
+; for a non-local callee, matching gcc.  The lituse comes first, as GNU as
+; writes it: bfd only inspects the relocation immediately after a literal's use
+; and would not find a lituse hidden behind a hint.
 
-; The local callee produces a lituse_jsr but no hint; the external callee
-; produces both.  So exactly one R_ALPHA_HINT and two R_ALPHA_LITUSE appear.
+; The local call: a literal to load the callee's address and a lituse on the jsr
+; that uses it, with the addend naming which use it is -- 3 is lituse_jsr, and a
+; wrong one would have the linker relax the wrong instruction.  No hint.
+; CHECK:      R_ALPHA_LITERAL loc 0x0
+; CHECK-NEXT: R_ALPHA_LITUSE - 0x3
+; CHECK-NOT:  R_ALPHA_HINT
 
-; CHECK-NOT: R_ALPHA_HINT
-; CHECK:     R_ALPHA_LITUSE
-; CHECK:     R_ALPHA_HINT ext
-; CHECK:     R_ALPHA_LITUSE
-; CHECK-NOT: R_ALPHA_HINT
+; The external one carries the hint as well, on the same offset as the lituse.
+; CHECK:      R_ALPHA_LITERAL ext 0x0
+; CHECK-NEXT: [[EJSR:0x[0-9A-F]+]] R_ALPHA_LITUSE - 0x3
+; CHECK-NEXT: [[EJSR]] R_ALPHA_HINT ext 0x0
+; CHECK-NOT:  R_ALPHA_HINT
 
 declare dso_local i32 @loc(i32)
 declare i32 @ext(i32)

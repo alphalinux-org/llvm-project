@@ -707,6 +707,7 @@ bool AlphaAsmParser::parseInstruction(ParseInstructionInfo &Info,
                         .Case("dtprelhi", Alpha::fixup_alpha_dtprelhi)
                         .Case("dtprello", Alpha::fixup_alpha_dtprello)
                         .Case("samegp", Alpha::fixup_alpha_brsgp)
+                        .Case("lituse_jsr", Alpha::fixup_alpha_lituse_jsr)
                         .Default(0);
     if (!Spec)
       return Error(getLexer().getLoc(), "unknown relocation name");
@@ -952,21 +953,6 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     Jmp.addOperand(MCOperand::createReg(Alpha::R27));
     Jmp.setLoc(IDLoc);
     Out.emitInstruction(Jmp, getSTI());
-    return false;
-  }
-
-  // jsr $Ra, ($Rb), hint: a computed call whose third operand is a
-  // branch-prediction hint (an R_ALPHA_HINT we do not need to emit).
-  if (Mnemonic == "jsr" && Operands.size() == 4 && Operands[1]->isReg() &&
-      Operands[2]->isMem()) {
-    MCInst Inst;
-    Inst.setOpcode(Alpha::JSRr);
-    Inst.addOperand(MCOperand::createReg(
-        static_cast<AlphaOperand &>(*Operands[1]).getReg()));
-    Inst.addOperand(MCOperand::createReg(
-        static_cast<AlphaOperand &>(*Operands[2]).getMemBase()));
-    Inst.setLoc(IDLoc);
-    Out.emitInstruction(Inst, getSTI());
     return false;
   }
 
