@@ -29,6 +29,9 @@
 // file as we reach it and starting a new partition when it will not fit in what
 // is left of the current one.
 //
+// --relax undoes some of that indirection: a call whose target the linker can
+// see and reach is rewritten into a direct branch. See finalizeRelax.
+//
 //===----------------------------------------------------------------------===//
 
 #include "InputFiles.h"
@@ -47,6 +50,15 @@ using namespace lld::elf;
 // st_other bits describing a function's gp-load prologue. A !samegp caller
 // may skip the two-instruction gp load of a STO_ALPHA_STD_GPLOAD callee.
 enum { STO_ALPHA_NOPV = 0x80, STO_ALPHA_STD_GPLOAD = 0x88 };
+
+// The addend of an R_ALPHA_LITUSE says how the annotated instruction uses the
+// literal it was paired with. Only a call can become a direct branch.
+enum { LITUSE_ALPHA_JSR = 3 };
+
+// The instruction opcodes --relax has to recognize or produce, and the unop
+// (`ldq_u $31, 0($30)`) that replaces a load it deletes.
+enum { OP_JSR = 0x1a, OP_LDQ = 0x29, OP_BSR = 0x34 };
+constexpr uint32_t INSN_UNOP = 0x2ffe0000;
 
 // The kinds of value a GOT entry can hold. Two kinds for the same symbol are
 // distinct entries.
@@ -86,6 +98,7 @@ public:
                        unsigned shard);
   void relocate(uint8_t *loc, const Relocation &rel,
                 uint64_t val) const override;
+  void finalizeRelax(int passes) const override;
 
   uint64_t getGp(const InputFile *f) const override;
 
@@ -93,6 +106,20 @@ private:
   unsigned gotDemand(InputFile *f) const;
   uint64_t allocGot(unsigned slots);
   uint64_t getGotEntry(Symbol &sym, int64_t addend, GotKind kind);
+
+  // A GOT literal load together with the calls that consume it, recorded while
+  // scanning so that --relax can consider them once addresses are known.
+  struct RelaxCall {
+    InputSection *sec;
+    Symbol *sym;
+    int64_t addend;
+    uint64_t litOffset;
+    // Offsets of the jsr instructions annotated with LITUSE_ALPHA_JSR.
+    SmallVector<uint64_t, 1> jsrOffsets;
+    // Whether those calls are the only uses of the literal.
+    bool onlyJsrUses;
+  };
+  SmallVector<RelaxCall, 0> relaxCalls;
 
   // gp is defined to be 0x8000 bytes past the start of its GOT partition, so
   // the partition spans [gp - 32768, gp + 32767].
@@ -143,8 +170,8 @@ RelExpr Alpha::getRelExpr(RelType type, const Symbol &s,
   switch (type) {
   case R_ALPHA_NONE:
   // R_ALPHA_LITUSE only annotates the instruction that consumes a preceding
-  // R_ALPHA_LITERAL. It is used by --relax, which we do not implement, and
-  // never contributes a value.
+  // R_ALPHA_LITERAL. It never contributes a value; scanSectionImpl collects it
+  // for --relax.
   case R_ALPHA_LITUSE:
     return R_NONE;
   case R_ALPHA_REFLONG:
@@ -424,6 +451,13 @@ void Alpha::scanSectionImpl(InputSectionBase &sec, Relocs<RelTy> rels,
   RelocScan rs(ctx, &sec, shard);
   sec.relocations.reserve(rels.size());
 
+  // Only code can be relaxed, and only in a section whose bytes are laid out
+  // as-is; relaxCalls indexes into sec.relocations later on.
+  auto *isec = dyn_cast<InputSection>(&sec);
+  bool canRelax = ctx.arg.relax && isec && (sec.flags & SHF_EXECINSTR);
+  // The candidate the R_ALPHA_LITUSE relocations being scanned belong to.
+  int curLit = -1;
+
   // All of a file's code shares one gp, so a partition can only be closed at a
   // file boundary. Close it whenever what is left of it cannot hold everything
   // the file about to be scanned might ask for.
@@ -455,6 +489,18 @@ void Alpha::scanSectionImpl(InputSectionBase &sec, Relocs<RelTy> rels,
         rs.maybeReportUndefined(cast<Undefined>(sym), offset))
       continue;
     int64_t addend = rs.getAddend<ELFT>(*it, type);
+
+    // An R_ALPHA_LITUSE annotates the instruction that uses the literal loaded
+    // for the R_ALPHA_LITERAL it follows, so anything else in between ends the
+    // group -- except an R_ALPHA_HINT, which shares the jsr's offset and so
+    // sits alongside the LITUSE rather than between it and the literal. Both
+    // GNU as and our own emitter write the LITUSE first, which is why no test
+    // can reach this arm: by the time the hint is seen the call has already
+    // been recorded. It is here so that the order stays a detail of the
+    // producer rather than something correctness rests on.
+    if (type != R_ALPHA_LITERAL && type != R_ALPHA_LITUSE &&
+        type != R_ALPHA_HINT)
+      curLit = -1;
 
     switch (type) {
     case R_ALPHA_REFQUAD:
@@ -488,6 +534,24 @@ void Alpha::scanSectionImpl(InputSectionBase &sec, Relocs<RelTy> rels,
     case R_ALPHA_LITERAL:
       sec.addReloc({RE_ALPHA_GOT, type, offset,
                     int64_t(getGotEntry(sym, addend, GK_Addr)), &sym});
+      // Remember the load in case a call turns out to consume it. A preemptible
+      // symbol has no link-time address to branch to, and an ifunc's address is
+      // whatever its resolver returns, so neither can ever be relaxed.
+      curLit = -1;
+      if (canRelax && isa<Defined>(sym) && !sym.isPreemptible &&
+          !sym.isGnuIFunc()) {
+        curLit = relaxCalls.size();
+        relaxCalls.push_back({isec, &sym, addend, offset, {}, true});
+      }
+      continue;
+    case R_ALPHA_LITUSE:
+      // Any use other than a call means the loaded address is still needed.
+      if (curLit >= 0) {
+        if (addend == LITUSE_ALPHA_JSR)
+          relaxCalls[curLit].jsrOffsets.push_back(offset);
+        else
+          relaxCalls[curLit].onlyJsrUses = false;
+      }
       continue;
     case R_ALPHA_GOTTPREL:
       sec.addReloc({RE_ALPHA_GOT, type, offset,
@@ -542,6 +606,107 @@ void Alpha::finalizeRelocScan() {
   ctx.in.got->hasGotOffRel.store(true, std::memory_order_relaxed);
 }
 
+// --relax turns a call made through the GOT,
+//
+//     ldq $27, callee($gp)   !literal
+//     jsr $26, ($27)         !lituse_jsr
+//
+// into a direct `bsr $26, callee`, which needs no GOT load at run time and is
+// predicted rather than speculated. It applies whenever the callee is close
+// enough for the 21-bit displacement to reach it.
+//
+// Dropping the load as well is only sound if the callee does not need its own
+// address: a function whose st_other advertises the standard two-instruction gp
+// load can be entered eight bytes in, but only if it would compute the same gp
+// the caller already has, which with multi-GOT is not a given. Otherwise the
+// load stays and only the branch is rewritten, which remains correct because
+// the callee still derives its gp from $27.
+//
+// GOT entries are allocated during scanning, long before any address is known,
+// so an entry a relaxed call no longer reads is left behind unused. bfd, which
+// relaxes as part of layout, reclaims them.
+void Alpha::finalizeRelax(int passes) const {
+  InputSection *cur = nullptr;
+  // The relocations of `cur` by offset, so that the one on a jsr or on the load
+  // can be found without rescanning the section for every call.
+  DenseMap<uint64_t, unsigned> relocIndex;
+  SmallVector<Relocation, 0> added;
+
+  auto flush = [&] {
+    if (added.empty())
+      return;
+    llvm::append_range(cur->relocations, added);
+    llvm::stable_sort(cur->relocations,
+                      [](const Relocation &a, const Relocation &b) {
+                        return a.offset < b.offset;
+                      });
+    added.clear();
+  };
+
+  for (const RelaxCall &c : relaxCalls) {
+    if (c.sec != cur) {
+      flush();
+      cur = c.sec;
+      relocIndex.clear();
+      for (auto [i, r] : llvm::enumerate(cur->relocations))
+        relocIndex[r.offset] = i;
+    }
+    if (!c.sec->isLive() || c.jsrOffsets.empty())
+      continue;
+
+    // The literal has to have been loaded by a ldq for the calls to be using
+    // the register this says they are.
+    ArrayRef<uint8_t> content = c.sec->content();
+    if (c.litOffset + 4 > content.size())
+      continue;
+    uint32_t lit = read32le(content.data() + c.litOffset);
+    if ((lit >> 26) != OP_LDQ)
+      continue;
+    unsigned pv = (lit >> 21) & 31;
+
+    const Defined &d = cast<Defined>(*c.sym);
+    auto *dsec = dyn_cast_or_null<InputSectionBase>(d.section);
+    bool skipGpLoad =
+        c.onlyJsrUses && dsec &&
+        (d.stOther & STO_ALPHA_STD_GPLOAD) == STO_ALPHA_STD_GPLOAD &&
+        getGp(c.sec->file) == getGp(dsec->file);
+    int64_t addend = c.addend + (skipGpLoad ? 8 : 0);
+    uint64_t dest = d.getVA(ctx, addend);
+
+    unsigned relaxed = 0;
+    for (uint64_t off : c.jsrOffsets) {
+      if (off + 4 > content.size())
+        continue;
+      // A jmp or a ret leaves the return address somewhere a bsr would not, and
+      // a call through some other register is not this literal's use at all.
+      uint32_t insn = read32le(content.data() + off);
+      if ((insn >> 26) != OP_JSR || ((insn >> 14) & 3) != 1 ||
+          ((insn >> 16) & 31) != pv)
+        continue;
+      // Displacements are measured from the instruction after the branch.
+      int64_t disp = int64_t(dest) - int64_t(c.sec->getVA(off) + 4);
+      if ((disp & 3) || !isInt<23>(disp))
+        continue;
+
+      // A call to a symbol outside this object also carries an R_ALPHA_HINT on
+      // the jsr. Replace it: its 14-bit field overlaps the displacement the
+      // branch now needs, so it must not be applied on top.
+      Relocation r{RE_ALPHA_RELAX_JSR, R_ALPHA_BRADDR, off, addend, c.sym};
+      if (auto it = relocIndex.find(off); it != relocIndex.end())
+        c.sec->relocations[it->second] = r;
+      else
+        added.push_back(r);
+      ++relaxed;
+    }
+
+    // The load is dead only once every one of its uses is gone.
+    if (skipGpLoad && relaxed == c.jsrOffsets.size())
+      c.sec->relocations[relocIndex.find(c.litOffset)->second].expr =
+          RE_ALPHA_RELAX_NOP;
+  }
+  flush();
+}
+
 // Patch the 16-bit immediate field of a single instruction.
 static void writeImm16(uint8_t *loc, uint64_t val) {
   write32le(loc, (read32le(loc) & 0xffff0000) | (val & 0xffff));
@@ -582,6 +747,23 @@ static void relocateGpDisp(Ctx &ctx, uint8_t *loc, const Relocation &rel,
 }
 
 void Alpha::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
+  // A relaxed call replaces the instruction rather than patching a field, so it
+  // is keyed on the expression; the type stays the one the result needs.
+  switch (rel.expr) {
+  case RE_ALPHA_RELAX_NOP:
+    write32le(loc, INSN_UNOP);
+    return;
+  case RE_ALPHA_RELAX_JSR: {
+    // bsr keeps the return-address register the jsr named in Ra.
+    int64_t disp = int64_t(val) - 4;
+    write32le(loc, (uint32_t(OP_BSR) << 26) | (read32le(loc) & 0x03e00000) |
+                       ((disp >> 2) & 0x1fffff));
+    return;
+  }
+  default:
+    break;
+  }
+
   switch (rel.type) {
   case R_ALPHA_NONE:
   case R_ALPHA_LITUSE:

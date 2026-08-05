@@ -844,6 +844,11 @@ uint64_t InputSectionBase::getRelocTargetVA(Ctx &ctx, const Relocation &r,
     // The addend is the offset of the GOT entry within .got, assigned while
     // scanning, not a value to be added to the symbol.
     return ctx.in.got->getVA() + a - ctx.target->getGp(file);
+  case RE_ALPHA_RELAX_JSR:
+    return r.sym->getVA(ctx, a) - p;
+  case RE_ALPHA_RELAX_NOP:
+    // The instruction is overwritten wholesale; there is no value to compute.
+    return 0;
   case R_GOTPLTONLY_PC:
     return ctx.in.gotPlt->getVA() + a - p;
   case R_GOTREL:
