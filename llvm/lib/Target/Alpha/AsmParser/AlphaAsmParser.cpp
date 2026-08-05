@@ -903,21 +903,6 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     return false;
   }
 
-  // jsr $Ra, ($Rb), hint: a computed call whose third operand is a
-  // branch-prediction hint (an R_ALPHA_HINT we do not need to emit).
-  if (Mnemonic == "jsr" && Operands.size() == 4 && Operands[1]->isReg() &&
-      Operands[2]->isMem()) {
-    MCInst Inst;
-    Inst.setOpcode(Alpha::JSRr);
-    Inst.addOperand(MCOperand::createReg(
-        static_cast<AlphaOperand &>(*Operands[1]).getReg()));
-    Inst.addOperand(MCOperand::createReg(
-        static_cast<AlphaOperand &>(*Operands[2]).getMemBase()));
-    Inst.setLoc(IDLoc);
-    Out.emitInstruction(Inst, getSTI());
-    return false;
-  }
-
   // ldq/ldl/ldbu/ldwu $R, symbol: in large-data (GOT) mode GNU as expands a
   // load from a bare symbol into a load of the symbol's GOT entry (its address)
   // followed by a dereference of the requested width.  (GNU as also tags the
