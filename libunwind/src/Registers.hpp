@@ -49,6 +49,7 @@ enum {
   REGISTERS_VE,
   REGISTERS_S390X,
   REGISTERS_LOONGARCH,
+  REGISTERS_ALPHA,
 };
 
 #if defined(_LIBUNWIND_TARGET_I386)
@@ -5565,6 +5566,257 @@ inline void Registers_loongarch::setVectorRegister(int, v128) {
   _LIBUNWIND_ABORT("loongarch vector support not implemented");
 }
 #endif //_LIBUNWIND_TARGET_LOONGARCH
+
+#if defined(_LIBUNWIND_TARGET_ALPHA)
+/// Registers_alpha holds the register state of a thread in an Alpha process.
+class _LIBUNWIND_HIDDEN Registers_alpha {
+public:
+  Registers_alpha();
+  Registers_alpha(const void *registers);
+
+  typedef uint64_t reg_t;
+  typedef uint64_t link_reg_t;
+  typedef const link_reg_t &link_hardened_reg_arg_t;
+
+  bool validRegister(int num) const;
+  uint64_t getRegister(int num) const;
+  void setRegister(int num, uint64_t value);
+  bool validFloatRegister(int num) const;
+  double getFloatRegister(int num) const;
+  void setFloatRegister(int num, double value);
+  bool validVectorRegister(int num) const;
+  v128 getVectorRegister(int num) const;
+  void setVectorRegister(int num, v128 value);
+  static const char *getRegisterName(int num);
+  void jumpto();
+  static constexpr int lastDwarfRegNum() {
+    return _LIBUNWIND_HIGHEST_DWARF_REGISTER_ALPHA;
+  }
+  static int getArch() { return REGISTERS_ALPHA; }
+
+  uint64_t getSP() const { return _registers.__r[30]; }
+  void setSP(uint64_t value) { _registers.__r[30] = value; }
+  uint64_t getIP() const { return _registers.__pc; }
+  void setIP(uint64_t value) { _registers.__pc = value; }
+
+private:
+  struct alpha_thread_state_t {
+    uint64_t __r[32];
+    uint64_t __pc;
+  };
+
+  alpha_thread_state_t _registers;
+  double _floats[32];
+};
+
+inline Registers_alpha::Registers_alpha(const void *registers) {
+  static_assert((check_fit<Registers_alpha, unw_context_t>::does_fit),
+                "alpha registers do not fit into unw_context_t");
+  memcpy(&_registers, registers, sizeof(_registers));
+  static_assert(sizeof(_registers) == 0x108,
+                "expected float registers to be at offset 264");
+  memcpy(_floats, static_cast<const uint8_t *>(registers) + sizeof(_registers),
+         sizeof(_floats));
+}
+
+inline Registers_alpha::Registers_alpha() {
+  memset(&_registers, 0, sizeof(_registers));
+  memset(&_floats, 0, sizeof(_floats));
+}
+
+inline bool Registers_alpha::validRegister(int regNum) const {
+  if (regNum == UNW_REG_IP || regNum == UNW_REG_SP)
+    return true;
+  if (regNum >= UNW_ALPHA_R0 && regNum <= UNW_ALPHA_R31)
+    return true;
+  return regNum == UNW_ALPHA_PC;
+}
+
+inline uint64_t Registers_alpha::getRegister(int regNum) const {
+  if (regNum >= UNW_ALPHA_R0 && regNum <= UNW_ALPHA_R31)
+    return _registers.__r[regNum - UNW_ALPHA_R0];
+  if (regNum == UNW_REG_IP || regNum == UNW_ALPHA_PC)
+    return _registers.__pc;
+  if (regNum == UNW_REG_SP)
+    return _registers.__r[30];
+  _LIBUNWIND_ABORT("unsupported alpha register");
+}
+
+inline void Registers_alpha::setRegister(int regNum, uint64_t value) {
+  if (regNum >= UNW_ALPHA_R0 && regNum <= UNW_ALPHA_R31)
+    _registers.__r[regNum - UNW_ALPHA_R0] = value;
+  else if (regNum == UNW_REG_IP || regNum == UNW_ALPHA_PC)
+    _registers.__pc = value;
+  else if (regNum == UNW_REG_SP)
+    _registers.__r[30] = value;
+  else
+    _LIBUNWIND_ABORT("unsupported alpha register");
+}
+
+inline const char *Registers_alpha::getRegisterName(int regNum) {
+  switch (regNum) {
+  case UNW_REG_IP:
+  case UNW_ALPHA_PC:
+    return "$pc";
+  case UNW_REG_SP:
+    return "$sp";
+  case UNW_ALPHA_R0:
+    return "$0";
+  case UNW_ALPHA_R1:
+    return "$1";
+  case UNW_ALPHA_R2:
+    return "$2";
+  case UNW_ALPHA_R3:
+    return "$3";
+  case UNW_ALPHA_R4:
+    return "$4";
+  case UNW_ALPHA_R5:
+    return "$5";
+  case UNW_ALPHA_R6:
+    return "$6";
+  case UNW_ALPHA_R7:
+    return "$7";
+  case UNW_ALPHA_R8:
+    return "$8";
+  case UNW_ALPHA_R9:
+    return "$9";
+  case UNW_ALPHA_R10:
+    return "$10";
+  case UNW_ALPHA_R11:
+    return "$11";
+  case UNW_ALPHA_R12:
+    return "$12";
+  case UNW_ALPHA_R13:
+    return "$13";
+  case UNW_ALPHA_R14:
+    return "$14";
+  case UNW_ALPHA_R15:
+    return "$15";
+  case UNW_ALPHA_R16:
+    return "$16";
+  case UNW_ALPHA_R17:
+    return "$17";
+  case UNW_ALPHA_R18:
+    return "$18";
+  case UNW_ALPHA_R19:
+    return "$19";
+  case UNW_ALPHA_R20:
+    return "$20";
+  case UNW_ALPHA_R21:
+    return "$21";
+  case UNW_ALPHA_R22:
+    return "$22";
+  case UNW_ALPHA_R23:
+    return "$23";
+  case UNW_ALPHA_R24:
+    return "$24";
+  case UNW_ALPHA_R25:
+    return "$25";
+  case UNW_ALPHA_R26:
+    return "$26";
+  case UNW_ALPHA_R27:
+    return "$27";
+  case UNW_ALPHA_R28:
+    return "$28";
+  case UNW_ALPHA_R29:
+    return "$29";
+  case UNW_ALPHA_R30:
+    return "$30";
+  case UNW_ALPHA_R31:
+    return "$31";
+  case UNW_ALPHA_F0:
+    return "$f0";
+  case UNW_ALPHA_F1:
+    return "$f1";
+  case UNW_ALPHA_F2:
+    return "$f2";
+  case UNW_ALPHA_F3:
+    return "$f3";
+  case UNW_ALPHA_F4:
+    return "$f4";
+  case UNW_ALPHA_F5:
+    return "$f5";
+  case UNW_ALPHA_F6:
+    return "$f6";
+  case UNW_ALPHA_F7:
+    return "$f7";
+  case UNW_ALPHA_F8:
+    return "$f8";
+  case UNW_ALPHA_F9:
+    return "$f9";
+  case UNW_ALPHA_F10:
+    return "$f10";
+  case UNW_ALPHA_F11:
+    return "$f11";
+  case UNW_ALPHA_F12:
+    return "$f12";
+  case UNW_ALPHA_F13:
+    return "$f13";
+  case UNW_ALPHA_F14:
+    return "$f14";
+  case UNW_ALPHA_F15:
+    return "$f15";
+  case UNW_ALPHA_F16:
+    return "$f16";
+  case UNW_ALPHA_F17:
+    return "$f17";
+  case UNW_ALPHA_F18:
+    return "$f18";
+  case UNW_ALPHA_F19:
+    return "$f19";
+  case UNW_ALPHA_F20:
+    return "$f20";
+  case UNW_ALPHA_F21:
+    return "$f21";
+  case UNW_ALPHA_F22:
+    return "$f22";
+  case UNW_ALPHA_F23:
+    return "$f23";
+  case UNW_ALPHA_F24:
+    return "$f24";
+  case UNW_ALPHA_F25:
+    return "$f25";
+  case UNW_ALPHA_F26:
+    return "$f26";
+  case UNW_ALPHA_F27:
+    return "$f27";
+  case UNW_ALPHA_F28:
+    return "$f28";
+  case UNW_ALPHA_F29:
+    return "$f29";
+  case UNW_ALPHA_F30:
+    return "$f30";
+  case UNW_ALPHA_F31:
+    return "$f31";
+  default:
+    return "unknown register";
+  }
+}
+
+inline bool Registers_alpha::validFloatRegister(int regNum) const {
+  return regNum >= UNW_ALPHA_F0 && regNum <= UNW_ALPHA_F31;
+}
+
+inline double Registers_alpha::getFloatRegister(int regNum) const {
+  assert(validFloatRegister(regNum));
+  return _floats[regNum - UNW_ALPHA_F0];
+}
+
+inline void Registers_alpha::setFloatRegister(int regNum, double value) {
+  assert(validFloatRegister(regNum));
+  _floats[regNum - UNW_ALPHA_F0] = value;
+}
+
+inline bool Registers_alpha::validVectorRegister(int) const { return false; }
+
+inline v128 Registers_alpha::getVectorRegister(int) const {
+  _LIBUNWIND_ABORT("alpha vector support not implemented");
+}
+
+inline void Registers_alpha::setVectorRegister(int, v128) {
+  _LIBUNWIND_ABORT("alpha vector support not implemented");
+}
+#endif // _LIBUNWIND_TARGET_ALPHA
 
 } // namespace libunwind
 

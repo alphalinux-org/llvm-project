@@ -79,6 +79,8 @@ _LIBUNWIND_HIDDEN int __unw_init_local(unw_cursor_t *cursor,
 # define REGISTER_KIND Registers_s390x
 #elif defined(__loongarch__) && __loongarch_grlen == 64
 #define REGISTER_KIND Registers_loongarch
+#elif defined(__alpha__)
+#define REGISTER_KIND Registers_alpha
 #else
 # error Architecture not supported
 #endif
