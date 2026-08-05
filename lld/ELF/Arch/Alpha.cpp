@@ -797,6 +797,22 @@ void Alpha::finalizeRelocScan() {
 // load stays and only the branch is rewritten, which remains correct because
 // the callee still derives its gp from $27.
 //
+// Whether the two words at this offset are the ldah/lda pair that establishes a
+// function's gp, which is what an R_ALPHA_GPDISP with an addend of 4 covers.
+// A function GNU as was told about says so in its st_other instead; this is for
+// the hand-written assembly that never declared itself.
+static bool startsWithGpLoad(const InputSectionBase &sec, uint64_t offset) {
+  // Relocations are kept in offset order, so the first one at or past the entry
+  // point is the only one that can be it.
+  auto it = llvm::lower_bound(
+      sec.relocations, offset,
+      [](const Relocation &r, uint64_t off) { return r.offset < off; });
+  for (; it != sec.relocations.end() && it->offset == offset; ++it)
+    if (it->expr == RE_ALPHA_GPDISP && it->addend == 4)
+      return true;
+  return false;
+}
+
 // GOT entries are allocated during scanning, long before any address is known,
 // so an entry no surviving load reads has to be given back afterwards; see
 // reclaimGot. Doing that moves everything laid out after .got, which is why
@@ -852,11 +868,15 @@ bool Alpha::relaxOnce(int pass) const {
     // lands on the callee itself. One marked STD_GPLOAD looks at it only to
     // compute a gp, which the call can skip by entering eight bytes in -- but
     // only if that is the gp the caller already has, which across GOT
-    // partitions it is not. bfd additionally recognizes an unmarked callee
-    // whose first two words carry a GPDISP; we take the marking at face value.
+    // partitions it is not. A callee that says nothing may still start with a
+    // gp load, which its R_ALPHA_GPDISP gives away.
     const Defined &d = cast<Defined>(*c.sym);
     auto *dsec = dyn_cast_or_null<InputSectionBase>(d.section);
     unsigned pvUse = d.stOther & STO_ALPHA_STD_GPLOAD;
+    // The assembler turns a reference to a local function into its section
+    // symbol plus an offset, so the entry point is not the symbol's own value.
+    if (pvUse == 0 && dsec && startsWithGpLoad(*dsec, d.value + c.addend))
+      pvUse = STO_ALPHA_STD_GPLOAD;
     bool skipGpLoad = pvUse == STO_ALPHA_STD_GPLOAD && dsec &&
                       getGp(c.sec->file) == getGp(dsec->file);
     bool dropLoad = c.onlyJsrUses && (pvUse == STO_ALPHA_NOPV || skipGpLoad);
