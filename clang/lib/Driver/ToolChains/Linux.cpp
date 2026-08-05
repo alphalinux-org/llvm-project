@@ -989,6 +989,7 @@ Linux::getSupportedSanitizers(BoundArch BA,
   const bool IsSystemZ = getTriple().getArch() == llvm::Triple::systemz;
   const bool IsHexagon = getTriple().getArch() == llvm::Triple::hexagon;
   const bool IsAndroid = getTriple().isAndroid();
+  const bool IsAlpha = getTriple().isAlpha();
   SanitizerMask Res = ToolChain::getSupportedSanitizers(BA, DeviceOffloadKind);
   Res |= SanitizerKind::Address;
   Res |= SanitizerKind::PointerCompare;
@@ -1024,7 +1025,9 @@ Linux::getSupportedSanitizers(BoundArch BA,
   }
   if (IsX86_64)
     Res |= SanitizerKind::NumericalStability;
-  if (!IsAndroid)
+  // MemorySanitizer has no Alpha shadow mapping; advertising it would make the
+  // instrumentation pass abort with "unsupported architecture".
+  if (!IsAndroid && !IsAlpha)
     Res |= SanitizerKind::Memory;
 
   // Work around "Cannot represent a difference across sections".
