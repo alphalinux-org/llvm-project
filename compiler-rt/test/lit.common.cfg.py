@@ -248,6 +248,14 @@ if compiler_libdir:
             config.compiler_rt_libdir = compiler_libdir
         lit_config.note(f'Testing using libraries in "{config.compiler_rt_libdir}"')
 
+# Alpha faults on an operation with a NaN or infinite operand unless the
+# instruction asks for software completion, which -mieee turns on.  The checks a
+# sanitizer plants in the program compare the value they are checking, so a test
+# that feeds one a NaN takes the fault before the runtime ever sees it.  The
+# runtime itself is built with the flag for the same reason.
+if config.target_arch == "alpha":
+    config.target_cflags += " -mieee"
+
 # If needed, add cflag for shadow scale.
 if config.asan_shadow_scale != "":
     config.target_cflags += " -mllvm -asan-mapping-scale=" + config.asan_shadow_scale

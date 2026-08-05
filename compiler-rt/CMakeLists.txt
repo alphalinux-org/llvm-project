@@ -614,6 +614,14 @@ if("${COMPILER_RT_DEFAULT_TARGET_ARCH}" MATCHES "mips")
   list(APPEND SANITIZER_COMMON_LINK_LIBS atomic)
 endif()
 
+# Alpha faults on an operation with a NaN or infinite operand unless the
+# instruction asks for software completion, which -mieee turns on.  A runtime
+# handles values taken from the program under test -- printing the float that
+# overflowed a cast, say -- so it cannot afford to fault on one of those.
+if("${COMPILER_RT_DEFAULT_TARGET_ARCH}" MATCHES "alpha")
+  list(APPEND SANITIZER_COMMON_CFLAGS -mieee)
+endif()
+
 if (COMPILER_RT_USE_BUILTINS_LIBRARY)
   string(REPLACE "-Wl,-z,defs" "" CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS}")
 else()
