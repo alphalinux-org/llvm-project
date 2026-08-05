@@ -44,16 +44,15 @@ inline StringRef getFPTrapSuffix(unsigned TrapClass, bool IEEE, bool Inexact,
     return IEEE ? (Inexact ? "svi" : "sv") : (TrapU ? "v" : StringRef());
   case 4: // Integer-to-float: inexact only.
     return (IEEE && Inexact) ? "sui" : StringRef();
-  case 5:
-    return IEEE ? "s"
-                : StringRef(); // S-to-T convert (software completion only).
+  case 5: // S-to-T convert: software completion only, and no inexact form.
+    return IEEE ? "s" : StringRef();
   default:
     return StringRef();
   }
 }
 
 // The amount added to the instruction's function field for the trap qualifier:
-// 0x500 for su/sv, 0x700 for sui/svi, 0x100 for a bare u/v.
+// 0x500 for su/sv, 0x700 for sui/svi, 0x400 for a bare s, 0x100 for a bare u/v.
 inline unsigned getFPTrapFuncBits(StringRef Suffix) {
   if (Suffix.empty())
     return 0;
