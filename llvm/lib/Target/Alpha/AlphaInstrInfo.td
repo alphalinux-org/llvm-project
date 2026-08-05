@@ -1190,6 +1190,25 @@ let isCall = 1 in
 def JSRr : MbrForm<0b01, (outs), (ins GPRC:$Ra, parenGPR:$Rb),
                    "jsr $Ra, $Rb", []>;
 
+// The call target of a jsr written in assembly, which only carries relocations:
+// an R_ALPHA_HINT filling the branch-prediction field, preceded by an
+// R_ALPHA_LITUSE when a !lituse_jsr suffix marks the call as the use of a GOT
+// literal.  A plain number, as in `jsr $26, ($27), 0`, encodes no relocation.
+def jsrtarget : Operand<i64> {
+  let EncoderMethod = "getCallTargetEncoding";
+}
+
+// jsr $Ra, ($Rb), target: the three-operand form hand-written and GNU-generated
+// assembly uses.  The target does not change the encoding beyond the hint field
+// the relocations fill in, so nothing decodes to this form: a jsr word reaches
+// JSRr, and only when its hint field is zero.
+let isCall = 1, isAsmParserOnly = 1 in
+def JSRt : MbrForm<0b01, (outs), (ins GPRC:$Ra, parenGPR:$Rb, jsrtarget:$sym),
+                   "jsr $Ra, $Rb, $sym", []> {
+  bits<14> sym;
+  let hint = sym;
+}
+
 // Division millicode call: enter __divq etc. through $23; the routine preserves
 // all but a handful of registers, so no ldgp reload is needed afterwards.
 let isCall = 1, Uses = [R24, R25, R27],

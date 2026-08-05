@@ -230,6 +230,19 @@ class AlphaAsmParser : public MCTargetAsmParser {
   // the mnemonic without it.  Set while parsing and consumed when matching:
   // most qualified operates are spelled `addt/su' with no def of their own, so
   // the match is retried against the base name with the qualifier recorded.
+  // Emit an instruction built here rather than by the matcher, carrying any
+  // !lituse_* written on the line.  That relocation names the instruction it
+  // is written on, so a line that expands into several gives it to the first
+  // -- except the jsr/jmp-to-symbol macros, which hand it to the call they
+  // end with, since the load they start with already has the literal.
+  void emitInst(MCInst &I, MCStreamer &Out) {
+    if (PendingLituse) {
+      I.setFlags(I.getFlags() | Alpha::encodeLituse(PendingLituse));
+      PendingLituse = 0;
+    }
+    Out.emitInstruction(I, getSTI());
+  }
+
   // The field a relocation specifier is written into, to be compared with the
   // one the matched encoding has.  Every GOT-, GP- and TLS-relative specifier
   // fills a 16-bit memory displacement; !samegp fills a 21-bit branch.
@@ -243,6 +256,8 @@ class AlphaAsmParser : public MCTargetAsmParser {
   // field the matched encoding actually has once it is known.
   unsigned PendingSpecifier = 0;
   SMLoc PendingSpecifierLoc;
+  // The R_ALPHA_LITUSE use type a !lituse_* suffix asked for, or 0.
+  unsigned PendingLituse = 0;
   unsigned PendingFPQual = 0;
   bool PendingFPQualIsV = false;
   StringRef PendingFPQualBase;
@@ -647,6 +662,7 @@ bool AlphaAsmParser::parseInstruction(ParseInstructionInfo &Info,
   // The lexer splits "divt/c" into three tokens (divt, /, c), so we must
   // reassemble the full mnemonic before looking it up.
   PendingSpecifier = 0;
+  PendingLituse = 0;
   PendingFPQual = 0;
   PendingFPQualIsV = false;
   PendingFPQualBase = StringRef();
@@ -732,19 +748,44 @@ bool AlphaAsmParser::parseInstruction(ParseInstructionInfo &Info,
                         .Case("dtprello", Alpha::fixup_alpha_dtprello)
                         .Case("samegp", Alpha::fixup_alpha_brsgp)
                         .Default(0);
-    if (!Spec)
+    // The lituse relocations name no field: only the addend matters, and it
+    // says which kind of use the instruction makes of the literal that came
+    // before.  So one belongs to the instruction, not to any operand, and it
+    // is attached to any instruction at all -- including a `jsr $26, ($27)'
+    // written without the hint operand, where there is no expression for it to
+    // sit on.  Carry the use type to matchAndEmitInstruction instead.
+    unsigned Lituse = StringSwitch<unsigned>(R)
+                          .Case("lituse_jsr", 3)
+                          .Case("lituse_tlsgd", 4)
+                          .Case("lituse_tlsldm", 5)
+                          .Default(0);
+    if (!Spec && !Lituse)
       return Error(getLexer().getLoc(), "unknown relocation name");
     SMLoc SpecLoc = getLexer().getLoc();
     getParser().Lex(); // name
 
-    // Parse the optional !seq sequence number used to pair !gpdisp relocations.
+    // Parse the optional !seq sequence number used to pair !gpdisp relocations
+    // and to tie a !lituse_* to the !literal it uses.
     unsigned GpDispSeq = 0;
+    bool HasSeq = false;
     if (getLexer().is(AsmToken::Exclaim)) {
       getParser().Lex(); // !
       if (getLexer().isNot(AsmToken::Integer))
         return Error(getLexer().getLoc(), "expected sequence number");
       GpDispSeq = getLexer().getTok().getIntVal();
+      HasSeq = true;
       getParser().Lex(); // number
+    }
+
+    if (Lituse) {
+      // GNU as requires the number: it is how the use is tied to its literal,
+      // and a use with no literal to relax against says nothing.
+      if (!HasSeq)
+        return Error(SpecLoc, "no sequence number after !" + R);
+      PendingLituse = Lituse;
+      if (getLexer().isNot(AsmToken::EndOfStatement))
+        return Error(getLexer().getLoc(), "unexpected token");
+      return false;
     }
 
     if (Spec == Alpha::fixup_alpha_gpdisp && GpDispSeq != 0) {
@@ -914,7 +955,7 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     Ldah.addOperand(MCOperand::createReg(Base));
     Ldah.addOperand(MCOperand::createExpr(GpDisp));
     Ldah.setLoc(IDLoc);
-    Out.emitInstruction(Ldah, getSTI());
+    emitInst(Ldah, Out);
     MCInst Lda;
     Lda.setOpcode(Alpha::LEA);
     Lda.addOperand(MCOperand::createReg(Dst));
@@ -924,7 +965,7 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     else
       Lda.addOperand(MCOperand::createExpr(Off));
     Lda.setLoc(IDLoc);
-    Out.emitInstruction(Lda, getSTI());
+    emitInst(Lda, Out);
     return false;
   }
 
@@ -940,7 +981,7 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     Inst.addOperand(MCOperand::createReg(
         static_cast<AlphaOperand &>(*Operands[2]).getMemBase()));
     Inst.setLoc(IDLoc);
-    Out.emitInstruction(Inst, getSTI());
+    emitInst(Inst, Out);
     return false;
   }
 
@@ -964,7 +1005,7 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     Call.addOperand(MCOperand::createReg(Ra));
     Call.addOperand(MCOperand::createReg(Alpha::R27));
     Call.setLoc(IDLoc);
-    Out.emitInstruction(Call, getSTI());
+    emitInst(Call, Out);
     return false;
   }
 
@@ -1016,22 +1057,7 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     Jmp.setOpcode(Alpha::JMP);
     Jmp.addOperand(MCOperand::createReg(Alpha::R27));
     Jmp.setLoc(IDLoc);
-    Out.emitInstruction(Jmp, getSTI());
-    return false;
-  }
-
-  // jsr $Ra, ($Rb), hint: a computed call whose third operand is a
-  // branch-prediction hint (an R_ALPHA_HINT we do not need to emit).
-  if (Mnemonic == "jsr" && Operands.size() == 4 && Operands[1]->isReg() &&
-      Operands[2]->isMem()) {
-    MCInst Inst;
-    Inst.setOpcode(Alpha::JSRr);
-    Inst.addOperand(MCOperand::createReg(
-        static_cast<AlphaOperand &>(*Operands[1]).getReg()));
-    Inst.addOperand(MCOperand::createReg(
-        static_cast<AlphaOperand &>(*Operands[2]).getMemBase()));
-    Inst.setLoc(IDLoc);
-    Out.emitInstruction(Inst, getSTI());
+    emitInst(Jmp, Out);
     return false;
   }
 
@@ -1072,7 +1098,7 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
       Deref.addOperand(MCOperand::createReg(R));
       Deref.addOperand(MCOperand::createImm(0));
       Deref.setLoc(IDLoc);
-      Out.emitInstruction(Deref, getSTI());
+      emitInst(Deref, Out);
       return false;
     }
   }
@@ -1152,7 +1178,7 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
           Off2.addOperand(MCOperand::createImm(Addend));
           Off2.addOperand(MCOperand::createReg(Rc));
           Off2.setLoc(IDLoc);
-          Out.emitInstruction(Off2, getSTI());
+          emitInst(Off2, Out);
         }
       }
       // $31 reads as zero, so adding it changes nothing; GNU as leaves the add
@@ -1164,7 +1190,7 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
         Add.addOperand(MCOperand::createReg(Rc));
         Add.addOperand(MCOperand::createReg(Rb));
         Add.setLoc(IDLoc);
-        Out.emitInstruction(Add, getSTI());
+        emitInst(Add, Out);
       }
       return false;
     }
@@ -1191,7 +1217,7 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
       Inst.addOperand(MCOperand::createReg(Alpha::R31));
       Inst.addOperand(MCOperand::createImm(V));
       Inst.setLoc(IDLoc);
-      Out.emitInstruction(Inst, getSTI());
+      emitInst(Inst, Out);
       return false;
     }
   }
@@ -1258,6 +1284,8 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   switch (Result) {
   case Match_Success:
     Inst.setLoc(IDLoc);
+    if (PendingLituse)
+      Inst.setFlags(Inst.getFlags() | Alpha::encodeLituse(PendingLituse));
     // Whatever was written is what this instruction carries -- including
     // nothing, which is a qualifier too.  Recording it stops -mieee from
     // turning a written `addt' into `addt/su'.  A mnemonic spelled with its
@@ -1266,7 +1294,7 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     if (MII.get(Inst.getOpcode()).TSFlags & Alpha::TrapClassMask)
       Inst.setFlags(Flags ? Flags
                           : Alpha::encodeFPQual(0, Alpha::FPRoundNormal));
-    Out.emitInstruction(Inst, getSTI());
+    emitInst(Inst, Out);
     return false;
   case Match_MnemonicFail:
     return Error(IDLoc, "unrecognized instruction mnemonic");

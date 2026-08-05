@@ -106,6 +106,32 @@ public:
                                        MCFixupKind(Alpha::fixup_alpha_hint)));
     return 0;
   }
+  // The target of a `jsr $Ra, ($Rb), target` as hand-written and GNU-generated
+  // assembly spells it.  The target fills the hint field through an
+  // R_ALPHA_HINT; a `!lituse_jsr` suffix additionally marks the call as the use
+  // of a preceding GOT literal, which is what lets a linker relax it.
+  unsigned getCallTargetEncoding(const MCInst &MI, unsigned OpNo,
+                                 SmallVectorImpl<MCFixup> &Fixups,
+                                 const MCSubtargetInfo &STI) const {
+    const MCOperand &MO = MI.getOperand(OpNo);
+    if (!MO.isExpr())
+      return 0;
+    // A !lituse_jsr written beside this call is a relocation on the
+    // instruction, not on this operand, and the assembler has already recorded
+    // it in the instruction's flags.  What is left here is the hint.
+    Fixups.push_back(
+        MCFixup::create(0, MO.getExpr(), MCFixupKind(Alpha::fixup_alpha_hint)));
+    return 0;
+  }
+  // Mark the instruction being encoded as the use of the GOT literal that
+  // precedes it.  Only the addend matters -- it holds the use type, jsr (3),
+  // tlsgd (4) or tlsldm (5) -- and bfd says so outright: "the symbol associated
+  // with GPDISP and LITUSE is immaterial".  Emit no symbol, as the gpdisp pair
+  // does, rather than naming .text, which the instruction need not be in.
+  void addLituse(unsigned UseType, SmallVectorImpl<MCFixup> &Fixups) const {
+    Fixups.push_back(MCFixup::create(0, MCConstantExpr::create(UseType, Ctx),
+                                     MCFixupKind(Alpha::fixup_alpha_lituse_jsr)));
+  }
   unsigned getTlsldmEncoding(const MCInst &MI, unsigned OpNo,
                              SmallVectorImpl<MCFixup> &Fixups,
                              const MCSubtargetInfo &STI) const {
@@ -340,25 +366,19 @@ void AlphaMCCodeEmitter::encodeInstruction(const MCInst &MI,
     // JSRd (external callee) also fills the hint field with an R_ALPHA_HINT
     // while encoding its operand.  Every form emits an R_ALPHA_LITUSE
     // relocation marking the jsr as a use of the GOT literal so the linker can
-    // relax it; the addend selects the use type: jsr (3), tlsgd (4), or tlsldm
-    // (5).  JSRdl carries no hint: the linker relaxes a dso-local call into a
-    // direct branch, so there is no jsr left for the hint to predict.  A hint
-    // does not itself inhibit that relaxation -- GNU as writes one on exactly
-    // this jsr and bfd relaxes it anyway.  The TLS forms carry none either:
-    // their symbol operand is the thread-local variable rather than
+    // relax it. JSRdl carries no hint: the linker relaxes a dso-local call
+    // into a direct branch, so there is no jsr left for the hint to predict.
+    // A hint does not itself inhibit that relaxation -- GNU as writes one on
+    // exactly this jsr and bfd relaxes it anyway.  The TLS forms carry none
+    // either: their symbol operand is the thread-local variable rather than
     // __tls_get_addr, so there is nothing to hang one on.  The ldgp reload
     // follows as for JSR.
     size_t FirstFixup = Fixups.size();
     uint32_t Bits = getBinaryCodeForInstr(MI, Fixups, STI);
-    unsigned UseType = MI.getOpcode() == Alpha::JSRtlsgd    ? 4
-                       : MI.getOpcode() == Alpha::JSRtlsldm ? 5
-                                                            : 3;
-    // Only the addend of the lituse relocation matters -- it holds the use
-    // type -- and bfd says so outright: "the symbol associated with GPDISP and
-    // LITUSE is immaterial".  Emit no symbol, as the gpdisp pair does, rather
-    // than naming .text, which the instruction need not be in.
-    Fixups.push_back(MCFixup::create(0, MCConstantExpr::create(UseType, Ctx),
-                                     MCFixupKind(Alpha::fixup_alpha_lituse_jsr)));
+    addLituse(MI.getOpcode() == Alpha::JSRtlsgd    ? 4
+              : MI.getOpcode() == Alpha::JSRtlsldm ? 5
+                                                   : 3,
+              Fixups);
     // GNU as puts the lituse ahead of the hint, and bfd only inspects the
     // relocation immediately following a literal's, so match that order or the
     // GNU linker will not relax a call that has both.
@@ -369,6 +389,11 @@ void AlphaMCCodeEmitter::encodeInstruction(const MCInst &MI,
   default:
     break;
   }
+  // An R_ALPHA_LITUSE the assembler was asked for goes in first: GNU as writes
+  // the lituse before the hint, and bfd only inspects the relocation right
+  // after a literal's, so the order is not cosmetic.
+  if (unsigned Use = Alpha::getLituse(MI.getFlags()))
+    addLituse(Use, Fixups);
   uint32_t Bits = getBinaryCodeForInstr(MI, Fixups, STI);
   // Set a floating-point instruction's trap-mode and rounding-mode qualifiers
   // in its function field.  An instruction that came from an assembly file or

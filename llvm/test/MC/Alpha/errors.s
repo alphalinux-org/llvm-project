@@ -62,6 +62,11 @@
 	bis $1, $2, $3 !literal
 # CHECK: [[#@LINE-1]]:18: error: invalid relocation for field
 
+## A !lituse_* names the literal it uses by sequence number, so there has to be
+## one; GNU as says so too.
+	jsr $26, ($27) !lituse_jsr
+# CHECK: [[#@LINE-1]]:18: error: no sequence number after !lituse_jsr
+
 ## A floating-point qualifier suffix: the '/' has to be followed by one, and
 ## only an instruction with a trap/rounding field can carry one at all.
 	addt/ $f1, $f2, $f3
