@@ -67,7 +67,6 @@ public:
   }
 
   bool hasBWX() const { return HasBWX; }
-  bool hasIEEE() const { return HasIEEE; }
   bool hasMVI() const { return HasMVI; }
   bool hasFIX() const { return HasFIX; }
   bool hasCIX() const { return HasCIX; }
@@ -79,6 +78,7 @@ public:
   bool hasSmallText() const { return HasSmallText; }
   bool hasBuildConstants() const { return HasBuildConstants; }
   bool hasNoFPRegs() const { return HasNoFPRegs; }
+  bool hasIEEE() const { return HasIEEE; }
   bool hasTrapPrecisionInsn() const { return HasTrapPrecisionInsn; }
   bool hasIEEEConformant() const { return HasIEEEConformant; }
   bool hasPreciseArithTraps() const { return HasPreciseArithTraps; }
