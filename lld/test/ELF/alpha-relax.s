@@ -15,8 +15,8 @@ _start:
 ## A call to a local function. The branch is direct, but the load stays: this
 ## callee has no advertised gp load, so it still derives its gp from $27.
 # CHECK:      120000000: ldq $27, -32768($29)
-## local - (0x120000004 + 4) = 0x28, >> 2 = 10.
-# CHECK-NEXT: 120000004: bsr $26, 10
+## local - (0x120000004 + 4) = 0x30, >> 2 = 12.
+# CHECK-NEXT: 120000004: bsr $26, 12
 	ldq $27, local($29)	!literal
 .Lcall:
 	jsr $26, ($27)
@@ -25,19 +25,20 @@ _start:
 ## gpload does advertise it, so the load becomes a nop and the branch skips the
 ## two instructions that establish the callee's gp.
 # CHECK-NEXT: 120000008: ldq_u $31, 0($30)
-## gpload + 8 - (0x12000000c + 4) = 0x2c, >> 2 = 11.
-# CHECK-NEXT: 12000000c: bsr $26, 11
+## gpload + 8 - (0x12000000c + 4) = 0x38, >> 2 = 14.
+# CHECK-NEXT: 12000000c: bsr $26, 14
 	ldq $27, gpload($29)	!literal
 .Lgpload:
 	jsr $26, ($27)
 	.reloc .Lgpload, R_ALPHA_LITUSE, 3
 
 ## The same callee, but the loaded address is also used as a base register, so
-## the load has to stay and the call has to enter at the top.
+## the load has to stay. The branch still skips the callee's gp load, which does
+## not depend on the load going away.
 # CHECK-NEXT: 120000010: ldq $27, -32760($29)
 # CHECK-NEXT: 120000014: ldl $1, 0($27)
-## gpload - (0x120000018 + 4) = 0x18, >> 2 = 6.
-# CHECK-NEXT: 120000018: bsr $26, 6
+## gpload + 8 - (0x120000018 + 4) = 0x2c, >> 2 = 11.
+# CHECK-NEXT: 120000018: bsr $26, 11
 	ldq $27, gpload($29)	!literal
 .Lbase:
 	ldl $1, 0($27)
@@ -54,11 +55,21 @@ _start:
 	jsr $26, ($27)
 	.reloc .Lfar, R_ALPHA_LITUSE, 3
 
+## A callee marked as never needing its procedure value loses the load too, but
+## is entered at the top: it has no gp load to skip.
+# CHECK-NEXT: 120000024: ldq_u $31, 0($30)
+## nopv - (0x120000028 + 4) = 0x10, >> 2 = 4.
+# CHECK-NEXT: 120000028: bsr $26, 4
+	ldq $27, nopv($29)	!literal
+.Lnopv:
+	jsr $26, ($27)
+	.reloc .Lnopv, R_ALPHA_LITUSE, 3
+
 ## A tail call is the same sequence with a jmp in place of the jsr, and becomes
 ## the br that likewise discards the return address.
-# CHECK-NEXT: 120000024: ldq_u $31, 0($30)
-## gpload + 8 - (0x120000028 + 4) = 0x10, >> 2 = 4.
-# CHECK-NEXT: 120000028: br $31, 4
+# CHECK-NEXT: 12000002c: ldq_u $31, 0($30)
+## gpload + 8 - (0x120000030 + 4) = 0x14, >> 2 = 5.
+# CHECK-NEXT: 120000030: br $31, 5
 	ldq $27, gpload($29)	!literal
 .Ltail:
 	jmp $31, ($27), 0
@@ -68,6 +79,11 @@ _start:
 
 	.globl local
 local:
+	ret
+
+	.globl nopv
+	.usepv nopv, no
+nopv:
 	ret
 
 	.globl gpload
@@ -86,5 +102,7 @@ gpload:
 # NORELAX-NEXT: 120000018: jsr $26, ($27)
 # NORELAX-NEXT: 12000001c: ldq $27, -32752($29)
 # NORELAX-NEXT: 120000020: jsr $26, ($27)
-# NORELAX-NEXT: 120000024: ldq $27, -32760($29)
-# NORELAX-NEXT: 120000028: jmp $31, ($27), 0
+# NORELAX-NEXT: 120000024: ldq $27, -32744($29)
+# NORELAX-NEXT: 120000028: jsr $26, ($27)
+# NORELAX-NEXT: 12000002c: ldq $27, -32760($29)
+# NORELAX-NEXT: 120000030: jmp $31, ($27), 0
