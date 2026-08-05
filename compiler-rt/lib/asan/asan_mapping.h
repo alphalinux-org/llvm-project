@@ -135,6 +135,16 @@
 // || `[0x400000000000, 0x47ffffffffff]` || LowShadow  ||
 // || `[0x000000000000, 0x3fffffffffff]` || LowMem     ||
 //
+// Default Linux/Alpha (42-bit VMA) mapping:
+// || `[0x38000000000, 0x3ffffffffff]` || HighMem    ||
+// || `[0x37000000000, 0x37fffffffff]` || HighShadow ||
+// || `[0x36000000000, 0x36fffffffff]` || ShadowGap  ||
+// || `[0x30000000000, 0x35fffffffff]` || LowShadow  ||
+// || `[0x00000000000, 0x2ffffffffff]` || LowMem     ||
+//
+// The whole space is below TASK_SIZE (0x40000000000), and LowMem covers the
+// default mmap base at TASK_SIZE/2.
+//
 // Shadow mapping on FreeBSD/x86-64 with SHADOW_OFFSET == 0x400000000000:
 // || `[0x500000000000, 0x7fffffffffff]` || HighMem    ||
 // || `[0x4a0000000000, 0x4fffffffffff]` || HighShadow ||
@@ -211,7 +221,7 @@
 #  elif SANITIZER_RISCV64
 #    define ASAN_SHADOW_OFFSET_DYNAMIC
 #  elif SANITIZER_ALPHA
-#    define ASAN_SHADOW_OFFSET_CONST 0x70000000000
+#    define ASAN_SHADOW_OFFSET_CONST 0x30000000000
 #  elif defined(__aarch64__)
 #    define ASAN_SHADOW_OFFSET_CONST 0x0000001000000000
 #  elif defined(__powerpc64__)
