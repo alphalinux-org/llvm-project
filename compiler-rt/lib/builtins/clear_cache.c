@@ -201,6 +201,10 @@ void __clear_cache(void *start, void *end) {
   arg.len = (uintptr_t)end - (uintptr_t)start;
 
   sysarch(RISCV_SYNC_ICACHE, &arg);
+#elif defined(__alpha__)
+  // Alpha cannot flush a range; the imb PAL call makes every instruction
+  // written since the last imb visible to the instruction stream.
+  __asm__ volatile("imb");
 #elif defined(__ve__)
   __asm__ volatile("fencec 2");
 #elif defined(__hexagon__)
