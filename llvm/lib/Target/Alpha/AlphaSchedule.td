@@ -68,6 +68,11 @@ def Rd_StData : SchedRead;
 // unit"); modeled as a negative read advance on the EV5.
 def Rd_IMulOp : SchedRead;
 
+// A count/MVI source operand.  On the EV6 the count+MVI unit exists only in
+// cluster 0 and the integer multiplier only in cluster 1, so a multiply result
+// consumed here has to cross clusters and arrives a cycle late.
+def Rd_IMVIOp : SchedRead;
+
 //===----------------------------------------------------------------------===//
 // Instruction to write-class mapping, instantiated once per model.
 //===----------------------------------------------------------------------===//
@@ -92,10 +97,13 @@ multiclass AlphaInstRW {
   def : InstRW<[Wr_IMul, Rd_IMulOp, Rd_IMulOp], (instrs MULQ)>;
   def : InstRW<[Wr_IMul, Rd_IMulOp], (instrs MULQi)>;
   def : InstRW<[Wr_IMulH, Rd_IMulOp, Rd_IMulOp], (instrs UMULH)>;
-  def : InstRW<[Wr_IMVI], (instrs
-      CTLZ, CTPOP, CTTZ, PERR,
-      MINSB8, MINSW4, MINUB8, MINUW4, MAXSB8, MAXSW4, MAXUB8, MAXUW4,
-      PKLB, PKWB, UNPKBL, UNPKBW)>;
+  // Split by arity so the source operands can carry Rd_IMVIOp, which the EV6
+  // uses to model the cluster crossing from the multiplier.
+  def : InstRW<[Wr_IMVI, Rd_IMVIOp], (instrs
+      CTLZ, CTPOP, CTTZ, PKLB, PKWB, UNPKBL, UNPKBW)>;
+  def : InstRW<[Wr_IMVI, Rd_IMVIOp, Rd_IMVIOp], (instrs
+      PERR,
+      MINSB8, MINSW4, MINUB8, MINUW4, MAXSB8, MAXSW4, MAXUB8, MAXUW4)>;
   def : InstRW<[Wr_ILoad], (instrs
       LDQ, LDL, LDBU, LDWU, LDQ_U, LDL_L, LDQ_L,
       LDQd, LDQg, LDQl, LDQt, LDQtp, LDLd, LDLg, LDLt)>;
@@ -201,6 +209,7 @@ let SchedModel = Alpha21064Model in {
   def : WriteRes<Wr_Fpcr,   [EV4_Fbox]> { let Latency = 6; }
   def : WriteRes<Wr_Misc,   [EV4_Abox]> { let Latency = 1; }
   def : ReadAdvance<Rd_FStData, 0>;  // No store bypass distinction on the EV4.
+  def : ReadAdvance<Rd_IMVIOp, 0>;   // No MVI on the EV4.
   // A compare forwarded to a branch test operand is one cycle instead of two.
   def : ReadAdvance<Rd_ITest, 1, [Wr_ICmp]>;
   // Store-data bypass: an integer add/logic/shift/compare/cmov result used as
@@ -274,6 +283,8 @@ let SchedModel = Alpha21164Model in {
   def : WriteRes<Wr_Fpcr,   [EV5_FM]> { let Latency = 4; }
   def : WriteRes<Wr_Misc,   [EV5_E0]> { let Latency = 2; }
   def : ReadAdvance<Rd_FStData, 0>;  // No store bypass distinction on the EV5.
+  // The EV5 has a single cluster, so no cross-cluster delay applies.
+  def : ReadAdvance<Rd_IMVIOp, 0>;
   // A logic or compare result forwarded to a branch/cmov test operand has an
   // effective latency of zero (21164/21164PC special bypass).
   def : ReadAdvance<Rd_ITest, 1, [Wr_ILog, Wr_ICmp]>;
@@ -351,9 +362,29 @@ let SchedModel = Alpha21264Model in {
   // An FP-operate result reaches a store or float-to-integer move two cycles
   // later than a normal consumer (fadd/fmul latency 6, fcmov 10 to fst/ftoi).
   def : ReadAdvance<Rd_FStData, -2, [Wr_FAdd, Wr_FMul, Wr_FCmov]>;
+  // An itof result handed straight to an ftoi costs 8 cycles rather than the 4
+  // its latency implies -- measured on an EV68AL, where the round trip is 11.1
+  // cycles and the ftoi->itof half is 3.  Routing the value through any FP
+  // operate avoids it, so the penalty is specific to the direct hand-off.  It
+  // is not modeled: Rd_FStData already carries the -2 advance for FP-operate
+  // producers above, and TableGen permits only one ReadAdvance per SchedRead,
+  // so expressing both would need a separate operand class.
   def : ReadAdvance<Rd_ITest, 0>;   // No branch-test bypass on the EV6.
   def : ReadAdvance<Rd_StData, 0>;  // Out-of-order; no static store-data bypass.
-  def : ReadAdvance<Rd_IMulOp, 0>;  // Out-of-order multiplier; no operand delay.
+
+  // Cross-cluster delay.  The clusters {U0,L0} and {U1,L1} hold separate
+  // register files resynchronized once a cycle, so a value produced in one and
+  // consumed in the other arrives a cycle late.  For instructions that may
+  // issue to either cluster the hardware hides this completely -- it places a
+  // dependent consumer in its producer's cluster, and a dependent add chain
+  // measures 1.008 cycles per link on an EV68AL rather than 2 -- so modeling
+  // it there would make the description worse.  It is only forced between the
+  // count/MVI unit, which exists solely in U0, and the multiplier, solely in
+  // U1.  Measured there at exactly one cycle: a ctpop chain costs 3 per link
+  // and a mulq chain 7, while a chain alternating between them costs 24.2
+  // cycles per four links against 20 unpenalized and 24 penalized.
+  def : ReadAdvance<Rd_IMulOp, -1, [Wr_IMVI]>;
+  def : ReadAdvance<Rd_IMVIOp, -1, [Wr_IMul, Wr_IMulH]>;
 
   defm : AlphaInstRW;
 }
