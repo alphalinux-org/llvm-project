@@ -28,6 +28,31 @@ define i64 @fptosi_f64(double %x) {
   ret i64 %r
 }
 
+; A float in a register is already T_floating, so converting one to an integer
+; goes straight through cvttq: widening it with a cvtst first buys nothing, and
+; the plain cvtst faults on an infinity or a NaN without -mieee.
+; CHECK-LABEL: fptosi_f32:
+; CHECK-NOT:   cvtst
+; CHECK:       cvttq/c $f16, $f0
+; CHECK-NOT:   cvtst
+; CHECK:       ret
+define i64 @fptosi_f32(float %x) {
+  %r = fptosi float %x to i64
+  ret i64 %r
+}
+
+; An extending load is one lds: it already expands the S_floating datum into
+; the T_floating form the register holds.
+; CHECK-LABEL: fpext_load:
+; CHECK:       lds $f0, 0($16)
+; CHECK-NOT:   cvtst
+; CHECK:       ret
+define double @fpext_load(ptr %p) {
+  %v = load float, ptr %p
+  %d = fpext float %v to double
+  ret double %d
+}
+
 ; A plain bitcast is just the stack bounce, with no conversion.
 ; CHECK-LABEL: bitcast:
 ; CHECK:       stq $16, {{[0-9]+}}($30)
