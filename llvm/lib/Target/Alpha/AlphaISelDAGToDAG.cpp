@@ -135,6 +135,27 @@ void AlphaDAGToDAGISel::Select(SDNode *Node) {
     }
   }
 
+  // A misaligned store carries four scratch registers, which a pattern cannot
+  // describe, so build the instruction here.
+  if (Node->getOpcode() == AlphaISD::USTORE) {
+    SDLoc DL(Node);
+    auto *Mem = cast<MemSDNode>(Node);
+    SDValue Ops[] = {
+        Node->getOperand(1), Node->getOperand(2),
+        CurDAG->getTargetConstant(
+            cast<ConstantSDNode>(Node->getOperand(3))->getZExtValue(), DL,
+            MVT::i64),
+        Node->getOperand(0)};
+    MachineSDNode *Store = CurDAG->getMachineNode(
+        Alpha::RMW_USTORE, DL,
+        {MVT::i64, MVT::i64, MVT::i64, MVT::i64, MVT::Other}, Ops);
+    if (MachineMemOperand *MMO = Mem->getMemOperand())
+      CurDAG->setNodeMemRefs(Store, {MMO});
+    ReplaceUses(SDValue(Node, 0), SDValue(Store, 4));
+    CurDAG->RemoveDeadNode(Node);
+    return;
+  }
+
   // Materialize a frame-index address with lda; the displacement (0) follows
   // the base so eliminateFrameIndex can rewrite it.
   if (Node->getOpcode() == ISD::FrameIndex) {

@@ -107,6 +107,11 @@ enum NodeType : unsigned {
   DTPREL_HI,
   DTPREL_LO,
 
+  // A call to an OTS (Operating System runtime) floating-point routine.  Like
+  // CALL (jsr $26,($27) + ldgp $29,0($26)), but with a standard caller-saved
+  // register mask so the scheduler knows the full clobber set.
+  OTS_CALL,
+
   // Everything from here down carries a memory operand and is built with
   // getMemIntrinsicNode, which only accepts an opcode the target claims as a
   // memory one (see AlphaSelectionDAGInfo).  Keep them contiguous and keep
@@ -124,12 +129,10 @@ enum NodeType : unsigned {
   // read-modify-write is safe against concurrent access to adjacent bytes.
   SAFE_USTORE,
 
-  // A call to an OTS (Operating System runtime) floating-point routine.  Like
-  // CALL (jsr $26,($27) + ldgp $29,0($26)), but with a standard caller-saved
-  // register mask so the scheduler knows the full clobber set.
-  OTS_CALL,
+  // A misaligned store, kept whole until after scheduling.
+  USTORE,
 
-  LAST_MEMORY_OPCODE = SAFE_USTORE,
+  LAST_MEMORY_OPCODE = USTORE,
 };
 } // namespace AlphaISD
 
