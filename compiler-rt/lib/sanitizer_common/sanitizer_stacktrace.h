@@ -24,6 +24,11 @@ static const u32 kStackTraceMax = 255;
 
 #if SANITIZER_LINUX && defined(__mips__)
 # define SANITIZER_CAN_FAST_UNWIND 0
+// A frame keeps no chain pointer on Alpha, so walking one takes the unwind
+// tables the slow unwinder reads: the fast unwinder returns the top frame and
+// nothing else, which makes every allocation stack in a report useless.
+#elif SANITIZER_ALPHA
+#  define SANITIZER_CAN_FAST_UNWIND 0
 #elif SANITIZER_WINDOWS
 # define SANITIZER_CAN_FAST_UNWIND 0
 #else
