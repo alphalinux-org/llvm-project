@@ -123,6 +123,9 @@ public:
   // Reserve an entry that is not keyed by a symbol alone and return its offset.
   // Alpha uses this because R_ALPHA_LITERAL may reference symbol+addend.
   uint64_t reserveEntry();
+  // Drop the entries past the given count, whose offsets the target has already
+  // reassigned. Alpha's --relax deletes the loads that read them.
+  void dropEntriesAfter(size_t entries) { numEntries = entries; }
   void addAuthEntry(const Symbol &sym);
   bool addTlsDescEntry(const Symbol &sym);
   void addTlsDescAuthEntry();
