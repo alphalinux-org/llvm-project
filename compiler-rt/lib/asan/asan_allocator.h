@@ -218,8 +218,10 @@ const uptr kAllocatorSize = 0x20000000000ULL;  // 2T.
 typedef DefaultSizeClassMap SizeClassMap;
 #    elif SANITIZER_ALPHA
 // Alpha has a 42-bit user VAS (TASK_SIZE = 0x40000000000).  With fixed shadow
-// offset 0x70000000000, all app memory is in LowMem [0, 7T).  Use 512G so the
-// allocator fits comfortably within LowMem alongside other mappings.
+// offset 0x30000000000 the shadow sits inside that space, so app memory is
+// LowMem [0, 3T) below it and HighMem [3.5T, 4T) above it; see the layout at
+// the top of asan_mapping.h.  Use 512G so the allocator fits comfortably
+// within LowMem alongside other mappings.
 const uptr kAllocatorSize = 0x8000000000ULL;  // 512G.
 typedef DefaultSizeClassMap SizeClassMap;
 #    elif SANITIZER_WINDOWS
