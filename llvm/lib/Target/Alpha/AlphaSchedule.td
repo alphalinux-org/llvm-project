@@ -196,6 +196,7 @@ multiclass AlphaInstRW {
   def : InstRW<[Wr_FAdd], (instrs CVTQT_D, CVTST_S, CVTTQ_SVID)>;
   // An FP branch tests an FP register, which changes nothing here.
   def : InstRW<[Wr_Br], (instrs FBEQ, FBNE, FBLT, FBLE, FBGT, FBGE)>;
+  def : InstRW<[Wr_IStore, Rd_StData], (instrs RMW_USTORE)>;
 }
 
 //===----------------------------------------------------------------------===//

@@ -122,6 +122,11 @@ def AlphaStqU : SDNode<"AlphaISD::STQ_U", SDT_AlphaStqU,
 // -msafe-partial misaligned store: value, pointer, byte width.
 def SDT_AlphaSafeUStore
     : SDTypeProfile<0, 3, [SDTCisVT<0, i64>, SDTCisPtrTy<1>, SDTCisVT<2, i64>]>;
+// Misaligned store: value, pointer, byte width.
+def AlphaUStore : SDNode<"AlphaISD::USTORE", SDT_AlphaSafeUStore,
+                         [SDNPHasChain, SDNPMayStore, SDNPMayLoad,
+                          SDNPMemOperand]>;
+
 def AlphaSafeUStore : SDNode<"AlphaISD::SAFE_USTORE", SDT_AlphaSafeUStore,
                              [SDNPHasChain, SDNPMayStore, SDNPMayLoad,
                               SDNPMemOperand]>;
@@ -1553,6 +1558,20 @@ def RMW_STOREI8 : AlphaPseudo<(outs GPRC:$t1, GPRC:$t2),
 def RMW_STOREI16 : AlphaPseudo<(outs GPRC:$t1, GPRC:$t2),
                                (ins GPRC:$val, GPRC:$addr), "", []>;
 }
+
+// A misaligned store updates the one or two quadwords the field falls in, and
+// has to stay indivisible for the same reason the byte store does: two of them
+// can land in one quadword, and interleaving the reads with the writes loses
+// whichever field was written first.  The four scratch registers are outputs so
+// the allocator provides them.
+// Eleven instructions after expansion; see RMW_STOREI8 above for why the size
+// has to say so before the expansion happens.
+let mayLoad = 1, mayStore = 1, hasSideEffects = 0, Size = 44,
+    Constraints = "@earlyclobber $t1,@earlyclobber $t2,@earlyclobber $t3,"
+                  "@earlyclobber $t4" in
+def RMW_USTORE : AlphaPseudo<(outs GPRC:$t1, GPRC:$t2, GPRC:$t3, GPRC:$t4),
+                             (ins GPRC:$val, GPRC:$addr, i64imm:$bytes), "",
+                             []>;
 
 // Lock-based byte/word store: the read-modify-write is done with an
 // ldq_l/stq_c loop by a custom inserter.  Used for -msafe-bwa and, always, for

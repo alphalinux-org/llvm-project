@@ -20,12 +20,23 @@ define i64 @load_q(ptr %p) {
   ret i64 %v
 }
 
+; The store is two read-modify-writes, and the order is the correctness
+; property, so these are ordered checks.
+;
+; Both quadwords are read before either is written, and the low half is written
+; last.  When the datum does not cross a boundary the two halves are the same
+; quadword: the high store then writes back what it read, and the low store has
+; to come after it or that write-back discards the value.
 ; CHECK-LABEL: store_q:
-; CHECK-DAG: mskql
-; CHECK-DAG: mskqh
-; CHECK-DAG: insql
-; CHECK-DAG: insqh
-; CHECK-DAG: stq_u
+; CHECK:      lda $[[HA:[0-9]+]], 7($16)
+; CHECK-NEXT: ldq_u $[[LO:[0-9]+]], 0($16)
+; CHECK-NEXT: ldq_u $[[HI:[0-9]+]], 0($[[HA]])
+; CHECK:      mskqh $[[HI]], $16, $[[HI]]
+; CHECK:      insqh $17, $16,
+; CHECK:      stq_u {{\$[0-9]+}}, 0($[[HA]])
+; CHECK:      mskql $[[LO]], $16, $[[LO]]
+; CHECK:      insql $17, $16,
+; CHECK:      stq_u {{\$[0-9]+}}, 0($16)
 ; CHECK: ret
 define void @store_q(ptr %p, i64 %v) {
   store i64 %v, ptr %p, align 1

@@ -648,6 +648,8 @@ const char *AlphaTargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "AlphaISD::STQ_U";
   case AlphaISD::SAFE_USTORE:
     return "AlphaISD::SAFE_USTORE";
+  case AlphaISD::USTORE:
+    return "AlphaISD::USTORE";
   case AlphaISD::OTS_CALL:
     return "AlphaISD::OTS_CALL";
   }
@@ -737,34 +739,24 @@ SDValue AlphaTargetLowering::LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
   SDValue Chain = ST->getChain();
   SDValue Ptr = ST->getBasePtr();
   SDValue Val = ST->getValue();
+  // Both forms below carry the store's memory operand, so they have to be built
+  // as memory nodes: instruction selection reads it back off the node to give
+  // it to the instruction it builds.
+  SDVTList VTs = DAG.getVTList(MVT::Other);
+  SDValue Ops[] = {Chain, Val, Ptr, DAG.getConstant(Bytes, dl, MVT::i64)};
+
   // With -msafe-partial, update each spanned quadword with a lock-based loop
   // (emitted by the custom inserter) so the read-modify-write is atomic.
   if (Subtarget.hasSafePartial())
-    return DAG.getNode(AlphaISD::SAFE_USTORE, dl, MVT::Other,
-                       {Chain, Val, Ptr, DAG.getConstant(Bytes, dl, MVT::i64)});
-  auto Flags = ST->isVolatile() ? MachineMemOperand::MOVolatile
-                                : MachineMemOperand::MONone;
-  SDValue PtrHi = DAG.getNode(ISD::ADD, dl, MVT::i64, Ptr,
-                              DAG.getConstant(Bytes - 1, dl, MVT::i64));
-  // Read the two aligned quadwords the field spans, serialized before the
-  // writes so the read-modify-write is ordered.
-  SDValue Lo = emitLdqU(DAG, dl, Chain, Ptr, Flags);
-  SDValue Hi = emitLdqU(DAG, dl, Lo.getValue(1), PtrHi, Flags);
-  UnalignedOps Ops = getUnalignedOps(Bytes);
-  // Clear the field in each quadword and splice in the positioned value.
-  SDValue NewLo =
-      DAG.getNode(ISD::OR, dl, MVT::i64, emitByteOp(DAG, dl, Ops.MskL, Lo, Ptr),
-                  emitByteOp(DAG, dl, Ops.InsL, Val, Ptr));
-  SDValue NewHi =
-      DAG.getNode(ISD::OR, dl, MVT::i64, emitByteOp(DAG, dl, Ops.MskH, Hi, Ptr),
-                  emitByteOp(DAG, dl, Ops.InsH, Val, Ptr));
-  SDVTList StVTs = DAG.getVTList(MVT::Other);
-  SDValue StHi = DAG.getMemIntrinsicNode(
-      AlphaISD::STQ_U, dl, StVTs, {Hi.getValue(1), NewHi, PtrHi}, MVT::i64,
-      MachinePointerInfo(), Align(8), Flags | MachineMemOperand::MOStore);
-  return DAG.getMemIntrinsicNode(AlphaISD::STQ_U, dl, StVTs, {StHi, NewLo, Ptr},
-                                 MVT::i64, MachinePointerInfo(), Align(8),
-                                 Flags | MachineMemOperand::MOStore);
+    return DAG.getMemIntrinsicNode(AlphaISD::SAFE_USTORE, dl, VTs, Ops, MemVT,
+                                   ST->getMemOperand());
+  // A misaligned store reads the one or two quadwords the field falls in,
+  // splices the field into them and writes them back.  That has to stay
+  // indivisible -- one instruction, and then one bundle: two such stores can
+  // fall in one quadword, and if one's reads are hoisted above the other's
+  // write-backs the field written first is lost.
+  return DAG.getMemIntrinsicNode(AlphaISD::USTORE, dl, VTs, Ops, MemVT,
+                                 ST->getMemOperand());
 }
 
 // f32 = bitcast i32.  The i32 source occupies the low 32 bits of an integer

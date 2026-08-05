@@ -3,6 +3,9 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu -mattr=+safe-bwa \
 ; RUN:   -stop-after=finalize-isel -verify-machineinstrs < %s \
 ; RUN:   | FileCheck %s --check-prefix=BWA
+; RUN: llc -mtriple=alpha-unknown-linux-gnu -mattr=+safe-partial \
+; RUN:   -stop-after=finalize-isel -verify-machineinstrs < %s \
+; RUN:   | FileCheck %s --check-prefix=PARTIAL
 
 ; The ldq_l/stq_c loops are built by custom inserters rather than by a pattern,
 ; so the memory operand the pseudo carried has to be put onto the load and the
@@ -51,5 +54,17 @@ define i8 @subword_cas(ptr %p, i8 %c, i8 %n) {
 ; BWA: STQ_C {{.*}} :: (volatile store (s8) into %ir.p)
 define void @safe_store(ptr %p, i8 %v) {
   store volatile i8 %v, ptr %p
+  ret void
+}
+
+; -msafe-partial does the same for a misaligned store, once per spanned
+; quadword.
+; PARTIAL-LABEL: name: partial_store
+; PARTIAL: LDQ_L {{.*}} :: (volatile load (s32) from %ir.p, align 1)
+; PARTIAL: STQ_C {{.*}} :: (volatile store (s32) into %ir.p, align 1)
+; PARTIAL: LDQ_L {{.*}} :: (volatile load (s32) from %ir.p, align 1)
+; PARTIAL: STQ_C {{.*}} :: (volatile store (s32) into %ir.p, align 1)
+define void @partial_store(ptr %p, i32 %v) {
+  store volatile i32 %v, ptr %p, align 1
   ret void
 }
