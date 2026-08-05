@@ -6,6 +6,7 @@ add_lldb_library(lldbPluginProcessLinux
   IntelPTThreadTraceCollection.cpp
   NativeProcessLinux.cpp
   NativeRegisterContextLinux.cpp
+  NativeRegisterContextLinux_alpha.cpp
   NativeRegisterContextLinux_arm.cpp
   NativeRegisterContextLinux_arm64.cpp
   NativeRegisterContextLinux_arm64dbreg.cpp
