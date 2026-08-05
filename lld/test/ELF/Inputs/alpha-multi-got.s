@@ -2,6 +2,7 @@
 ## linked after this file has to start a partition of its own.
 .text
 .globl f1
+.usepv f1, std
 f1:
 	ldgp $29, 0($27)
 .irpc a, 01

@@ -31,6 +31,10 @@ from the [LLVM releases web site](https://llvm.org/releases/).
 
 * Added support for the Alpha (`EM_ALPHA`) target: GP-relative addressing and
   multi-GOT partitioning, and the four TLS models.
+* `--relax` on Alpha rewrites a `jsr` through the GOT into a direct branch, and
+  drops the GOT load along with it where the callee does not need its own
+  address. As on the other targets that support it, `--relax` is on by default;
+  pass `--no-relax` to keep every call as the compiler emitted it.
 
 ### Breaking changes
 

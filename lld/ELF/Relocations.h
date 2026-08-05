@@ -93,6 +93,11 @@ enum RelExpr {
   // address of a GOT entry whose offset within .got is carried in the addend.
   RE_ALPHA_GPREL,
   RE_ALPHA_GOT,
+  // Produced by --relax, which rewrites a GOT load and the jsr that consumes it
+  // into a direct branch: the address of the branch target relative to the jsr,
+  // and the now-dead GOT load, which becomes a nop.
+  RE_ALPHA_RELAX_JSR,
+  RE_ALPHA_RELAX_NOP,
   RE_ARM_PCA,
   RE_ARM_SBREL,
   RE_MIPS_GOTREL,
