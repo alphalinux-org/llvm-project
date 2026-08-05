@@ -620,6 +620,23 @@ endif()
 # overflowed a cast, say -- so it cannot afford to fault on one of those.
 if("${COMPILER_RT_DEFAULT_TARGET_ARCH}" MATCHES "alpha")
   list(APPEND SANITIZER_COMMON_CFLAGS -mieee)
+
+  # Alpha has to walk a stack with unwind tables, and libgcc's unwinder hangs
+  # doing it from inside a sanitizer runtime, so the LLVM one is required
+  # rather than merely preferred.  The builtins do not unwind, so only insist
+  # on it for a build that actually produces the sanitizer runtimes.
+  #
+  # COMPILER_RT_USE_LLVM_UNWINDER links the libunwind built in the same tree,
+  # which a distribution that packages libunwind separately does not have.
+  # Such a build can point COMPILER_RT_UNWINDER_LINK_LIBS at the installed
+  # unwinder instead, so accept either.
+  if(COMPILER_RT_BUILD_SANITIZERS AND NOT COMPILER_RT_USE_LLVM_UNWINDER
+     AND NOT COMPILER_RT_UNWINDER_LINK_LIBS)
+    message(FATAL_ERROR
+      "The Alpha sanitizer runtimes need the LLVM unwinder: configure with "
+      "-DCOMPILER_RT_USE_LLVM_UNWINDER=ON, or point "
+      "-DCOMPILER_RT_UNWINDER_LINK_LIBS at an installed libunwind.")
+  endif()
 endif()
 
 if (COMPILER_RT_USE_BUILTINS_LIBRARY)
