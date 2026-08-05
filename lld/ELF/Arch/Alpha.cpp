@@ -56,8 +56,10 @@ enum { STO_ALPHA_NOPV = 0x80, STO_ALPHA_STD_GPLOAD = 0x88 };
 enum { LITUSE_ALPHA_JSR = 3 };
 
 // The instruction opcodes --relax has to recognize or produce, and the unop
-// (`ldq_u $31, 0($30)`) that replaces a load it deletes.
-enum { OP_JSR = 0x1a, OP_LDQ = 0x29, OP_BSR = 0x34 };
+// (`ldq_u $31, 0($30)`) that replaces a load it deletes. jsr and jmp share an
+// opcode and are told apart by their function field.
+enum { OP_JSR = 0x1a, OP_LDQ = 0x29, OP_BR = 0x30, OP_BSR = 0x34 };
+enum { FUNC_JMP = 0, FUNC_JSR = 1 };
 constexpr uint32_t INSN_UNOP = 0x2ffe0000;
 
 // The kinds of value a GOT entry can hold. Two kinds for the same symbol are
@@ -613,7 +615,8 @@ void Alpha::finalizeRelocScan() {
 //
 // into a direct `bsr $26, callee`, which needs no GOT load at run time and is
 // predicted rather than speculated. It applies whenever the callee is close
-// enough for the 21-bit displacement to reach it.
+// enough for the 21-bit displacement to reach it. A tail call, which is the
+// same sequence with a jmp in place of the jsr, becomes a br.
 //
 // Dropping the load as well is only sound if the callee does not need its own
 // address: a function whose st_other advertises the standard two-instruction gp
@@ -677,10 +680,12 @@ void Alpha::finalizeRelax(int passes) const {
     for (uint64_t off : c.jsrOffsets) {
       if (off + 4 > content.size())
         continue;
-      // A jmp or a ret leaves the return address somewhere a bsr would not, and
-      // a call through some other register is not this literal's use at all.
+      // A ret or a jsr_coroutine takes its target from the return stack rather
+      // than from the literal, and a call through some other register is not
+      // this literal's use at all.
       uint32_t insn = read32le(content.data() + off);
-      if ((insn >> 26) != OP_JSR || ((insn >> 14) & 3) != 1 ||
+      unsigned func = (insn >> 14) & 3;
+      if ((insn >> 26) != OP_JSR || (func != FUNC_JSR && func != FUNC_JMP) ||
           ((insn >> 16) & 31) != pv)
         continue;
       // Displacements are measured from the instruction after the branch.
@@ -754,10 +759,13 @@ void Alpha::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
     write32le(loc, INSN_UNOP);
     return;
   case RE_ALPHA_RELAX_JSR: {
-    // bsr keeps the return-address register the jsr named in Ra.
+    // bsr keeps the return-address register the jsr named in Ra, and pushes the
+    // predictor's call stack as the jsr did. A jmp, which discards the return
+    // address, becomes the br that does not.
+    uint32_t insn = read32le(loc);
+    uint32_t op = ((insn >> 14) & 3) == FUNC_JSR ? OP_BSR : OP_BR;
     int64_t disp = int64_t(val) - 4;
-    write32le(loc, (uint32_t(OP_BSR) << 26) | (read32le(loc) & 0x03e00000) |
-                       ((disp >> 2) & 0x1fffff));
+    write32le(loc, (op << 26) | (insn & 0x03e00000) | ((disp >> 2) & 0x1fffff));
     return;
   }
   default:
