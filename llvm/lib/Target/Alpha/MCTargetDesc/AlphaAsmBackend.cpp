@@ -8,6 +8,8 @@
 
 #include "AlphaFixupKinds.h"
 #include "AlphaMCTargetDesc.h"
+#include "llvm/ADT/StringSwitch.h"
+#include "llvm/BinaryFormat/ELF.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCELFObjectWriter.h"
@@ -69,6 +71,20 @@ class AlphaAsmBackend : public MCAsmBackend {
 public:
   AlphaAsmBackend(uint8_t OSABI)
       : MCAsmBackend(llvm::endianness::little), OSABI(OSABI) {}
+
+  // Allow `.reloc offset, R_ALPHA_FOO, expr` to request a relocation type that
+  // no instruction operand can produce, such as the R_ALPHA_LITUSE annotations
+  // a linker uses to relax a call.
+  std::optional<MCFixupKind> getFixupKind(StringRef Name) const override {
+    unsigned Type = llvm::StringSwitch<unsigned>(Name)
+#define ELF_RELOC(NAME, ID) .Case(#NAME, ID)
+#include "llvm/BinaryFormat/ELFRelocs/Alpha.def"
+#undef ELF_RELOC
+                        .Default(-1u);
+    if (Type == -1u)
+      return std::nullopt;
+    return static_cast<MCFixupKind>(FirstLiteralRelocationKind + Type);
+  }
 
   MCFixupKindInfo getFixupKindInfo(MCFixupKind Kind) const override {
     // {name, offset, bits, flags}
