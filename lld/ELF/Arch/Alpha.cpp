@@ -125,7 +125,7 @@ public:
                        unsigned shard);
   void relocate(uint8_t *loc, const Relocation &rel,
                 uint64_t val) const override;
-  void finalizeRelax(int passes) const override;
+  bool relaxOnce(int pass) const override;
 
   uint64_t getGp(const InputFile *f) const override;
 
@@ -148,13 +148,22 @@ private:
   };
   SmallVector<RelaxCall, 0> relaxCalls;
 
+  // For each GOT entry a literal load reads: how many loads read it, and
+  // whether it is a plain constant. An entry every one of whose loads has been
+  // deleted can be given back, but only a constant one: dropping a dynamic
+  // relocation as well would resize .rela.dyn underneath a layout that has
+  // already been fixed.
+  llvm::DenseMap<uint64_t, unsigned> litUses;
+  llvm::DenseSet<uint64_t> litDynamic;
+  bool reclaimGot(const llvm::DenseMap<uint64_t, unsigned> &dropped) const;
+
   // gp is defined to be 0x8000 bytes past the start of its GOT partition, so
   // the partition spans [gp - 32768, gp + 32767].
   static constexpr uint64_t gpBias = 0x8000;
   static constexpr unsigned maxEntriesPerPart = 0x10000 / 8;
 
   llvm::DenseMap<GotKey, uint64_t> gotEntries;
-  llvm::DenseMap<const InputFile *, uint64_t> partOfFile;
+  mutable llvm::DenseMap<const InputFile *, uint64_t> partOfFile;
 
   const InputFile *curFile = nullptr;
   // Whether curFile has already been reported as needing more GOT than one gp
@@ -163,7 +172,7 @@ private:
   uint32_t curPart = 0;
   uint64_t curPartBase = 0;
   unsigned curPartEntries = 0;
-  uint64_t gotSize = 0;
+  mutable uint64_t gotSize = 0;
 };
 } // namespace
 
@@ -402,6 +411,9 @@ uint64_t Alpha::getGotEntry(Symbol &sym, int64_t addend, GotKind kind) {
 
   switch (kind) {
   case GK_Addr:
+    // Only an entry holding nothing but a constant can be reclaimed later.
+    if (isAlphaIfunc(ctx, sym) || sym.isPreemptible || ctx.arg.isPic)
+      litDynamic.insert(off);
     if (isAlphaIfunc(ctx, sym)) {
       // The runtime calls the resolver named by the addend and stores its
       // result here, so every reference through the GOT sees one address.
@@ -688,9 +700,11 @@ void Alpha::scanSectionImpl(InputSectionBase &sec, Relocs<RelTy> rels,
       break;
     // These consume a GOT entry. Allocate it now and carry its offset within
     // .got in the addend; RE_ALPHA_GOT turns that into a gp displacement.
-    case R_ALPHA_LITERAL:
-      sec.addReloc({RE_ALPHA_GOT, type, offset,
-                    int64_t(getGotEntry(sym, addend, GK_Addr)), &sym});
+    case R_ALPHA_LITERAL: {
+      uint64_t gotOff = getGotEntry(sym, addend, GK_Addr);
+      ++litUses[gotOff];
+      sec.addReloc({RE_ALPHA_GOT, type, offset, int64_t(gotOff), &sym});
+    }
       // Remember the load in case a call turns out to consume it. A preemptible
       // symbol has no link-time address to branch to, and an ifunc's address is
       // whatever its resolver returns, so neither can ever be relaxed.
@@ -778,16 +792,22 @@ void Alpha::finalizeRelocScan() {
 // same sequence with a jmp in place of the jsr, becomes a br.
 //
 // Dropping the load as well is only sound if the callee does not need its own
-// address: a function whose st_other advertises the standard two-instruction gp
-// load can be entered eight bytes in, but only if it would compute the same gp
-// the caller already has, which with multi-GOT is not a given. Otherwise the
+// address. st_other says whether it does: a function marked NOPV never reads
+// it, and one marked with the standard two-instruction gp load reads it only to
+// compute a gp, so the call can enter it eight bytes in -- provided that is the
+// gp the caller already has, which with multi-GOT is not a given. Otherwise the
 // load stays and only the branch is rewritten, which remains correct because
 // the callee still derives its gp from $27.
 //
 // GOT entries are allocated during scanning, long before any address is known,
-// so an entry a relaxed call no longer reads is left behind unused. bfd, which
-// relaxes as part of layout, reclaims them.
-void Alpha::finalizeRelax(int passes) const {
+// so an entry no surviving load reads has to be given back afterwards; see
+// reclaimGot. Doing that moves everything laid out after .got, which is why
+// this runs as a relaxation pass rather than at the end of one.
+bool Alpha::relaxOnce(int pass) const {
+  // Nothing here changes a section's size, so one pass settles it.
+  if (pass != 0)
+    return false;
+
   InputSection *cur = nullptr;
   // The relocations of `cur` by offset, so that the one on a jsr or on the load
   // can be found without rescanning the section for every call.
@@ -804,6 +824,9 @@ void Alpha::finalizeRelax(int passes) const {
                       });
     added.clear();
   };
+
+  // How many of each GOT entry's loads have gone away.
+  DenseMap<uint64_t, unsigned> dropped;
 
   for (const RelaxCall &c : relaxCalls) {
     if (c.sec != cur) {
@@ -824,14 +847,21 @@ void Alpha::finalizeRelax(int passes) const {
     uint32_t lit = read32le(content.data() + c.litOffset);
     if ((lit >> 26) != OP_LDQ)
       continue;
-    unsigned pv = (lit >> 21) & 31;
+    unsigned pvReg = (lit >> 21) & 31;
 
+    // What the callee does with its procedure value, as st_other advertises it.
+    // A callee marked NOPV never looks at it, so the load can go and the branch
+    // lands on the callee itself. One marked STD_GPLOAD looks at it only to
+    // compute a gp, which the call can skip by entering eight bytes in -- but
+    // only if that is the gp the caller already has, which across GOT
+    // partitions it is not. bfd additionally recognizes an unmarked callee
+    // whose first two words carry a GPDISP; we take the marking at face value.
     const Defined &d = cast<Defined>(*c.sym);
     auto *dsec = dyn_cast_or_null<InputSectionBase>(d.section);
-    bool skipGpLoad =
-        c.onlyJsrUses && dsec &&
-        (d.stOther & STO_ALPHA_STD_GPLOAD) == STO_ALPHA_STD_GPLOAD &&
-        getGp(c.sec->file) == getGp(dsec->file);
+    unsigned pvUse = d.stOther & STO_ALPHA_STD_GPLOAD;
+    bool skipGpLoad = pvUse == STO_ALPHA_STD_GPLOAD && dsec &&
+                      getGp(c.sec->file) == getGp(dsec->file);
+    bool dropLoad = c.onlyJsrUses && (pvUse == STO_ALPHA_NOPV || skipGpLoad);
     int64_t addend = c.addend + (skipGpLoad ? 8 : 0);
     uint64_t dest = d.getVA(ctx, addend);
 
@@ -845,7 +875,7 @@ void Alpha::finalizeRelax(int passes) const {
       uint32_t insn = read32le(content.data() + off);
       unsigned func = (insn >> 14) & 3;
       if ((insn >> 26) != OP_JSR || (func != FUNC_JSR && func != FUNC_JMP) ||
-          ((insn >> 16) & 31) != pv)
+          ((insn >> 16) & 31) != pvReg)
         continue;
       // Displacements are measured from the instruction after the branch.
       int64_t disp = int64_t(dest) - int64_t(c.sec->getVA(off) + 4);
@@ -864,13 +894,84 @@ void Alpha::finalizeRelax(int passes) const {
     }
 
     // The load is dead only once every one of its uses is gone.
-    if (skipGpLoad && relaxed == c.jsrOffsets.size()) {
+    if (dropLoad && relaxed == c.jsrOffsets.size()) {
       Relocation &r = c.sec->relocations[relocIndex.find(c.litOffset)->second];
+      ++dropped[uint64_t(r.addend)];
       r.expr = RE_ALPHA_RELAX_INSN;
       r.addend = INSN_UNOP;
     }
   }
   flush();
+  return reclaimGot(dropped);
+}
+
+// Give back the GOT entries whose every load has just been deleted, and slide
+// the rest down over them. The offset of an entry appears in the addend of each
+// RE_ALPHA_GOT relocation that reads it, in the relocation that initializes it,
+// and in any dynamic relocation against it; a partition's base, which fixes a
+// gp, is an offset too. Returns whether anything moved, which makes the caller
+// lay the output out again.
+bool Alpha::reclaimGot(const DenseMap<uint64_t, unsigned> &dropped) const {
+  if (dropped.empty())
+    return false;
+
+  // An entry survives unless it is a constant that nothing reads any more. TLS
+  // entries occupy two slots and are never dropped, so stepping by one slot
+  // never lands in the middle of a live entry.
+  unsigned slots = gotSize / 8;
+  SmallVector<uint64_t, 0> remap(slots + 1);
+  uint64_t kept = 0;
+  bool changed = false;
+  for (unsigned i = 0; i != slots + 1; ++i) {
+    // The new base of a partition starting here is where the next entry lands,
+    // so record that before deciding this slot's fate.
+    remap[i] = kept * 8;
+    if (i == slots)
+      break;
+    uint64_t off = i * 8;
+    auto it = dropped.find(off);
+    if (it != dropped.end() && it->second == litUses.lookup(off) &&
+        !litDynamic.contains(off))
+      changed = true;
+    else
+      ++kept;
+  }
+  if (!changed)
+    return false;
+
+  auto move = [&](uint64_t off) { return remap[off / 8]; };
+  for (InputSectionBase *sec : ctx.inputSections)
+    for (Relocation &r : sec->relocations)
+      if (r.expr == RE_ALPHA_GOT)
+        r.addend = int64_t(move(uint64_t(r.addend)));
+
+  // The relocations that fill the table in are indexed by offset within it, so
+  // the ones belonging to a dropped entry go away with it.
+  GotSection &got = *ctx.in.got;
+  llvm::erase_if(got.relocations, [&](const Relocation &r) {
+    return remap[r.offset / 8] == remap[r.offset / 8 + 1];
+  });
+  for (Relocation &r : got.relocations)
+    r.offset = move(r.offset);
+
+  auto moveDyn = [&](SmallVectorImpl<DynamicReloc> &relocs) {
+    for (DynamicReloc &r : relocs)
+      if (r.inputSec == &got)
+        r.offsetInSec = move(r.offsetInSec);
+  };
+  if (ctx.in.relaDyn) {
+    moveDyn(ctx.in.relaDyn->relocs);
+    moveDyn(ctx.in.relaDyn->relativeRelocs);
+  }
+  if (ctx.in.relaPlt)
+    moveDyn(ctx.in.relaPlt->relocs);
+
+  for (auto &kv : partOfFile)
+    kv.second = move(kv.second);
+
+  gotSize = kept * 8;
+  got.dropEntriesAfter(kept);
+  return true;
 }
 
 // Patch the 16-bit immediate field of a single instruction.
@@ -928,6 +1029,9 @@ void Alpha::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
     uint32_t insn = read32le(loc);
     uint32_t op = ((insn >> 14) & 3) == FUNC_JSR ? OP_BSR : OP_BR;
     int64_t disp = int64_t(val) - 4;
+    // The call was in range when it was relaxed, but giving GOT entries back
+    // moves whatever is laid out after .got, so say so rather than truncate.
+    checkInt(ctx, loc, disp, 23, rel);
     write32le(loc, (op << 26) | (insn & 0x03e00000) | ((disp >> 2) & 0x1fffff));
     return;
   }

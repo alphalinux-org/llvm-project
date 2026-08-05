@@ -24,8 +24,7 @@ _start:
 
 ## Hidden, so it cannot be preempted even in the shared library. Both callees
 ## advertise the standard gp load, so wherever the call is relaxed the load
-## goes away with it -- though the GOT entry it read stays allocated, which is
-## why the ifunc's entry below is the third one rather than the first.
+## goes away with it.
 # DSO-NEXT: ldq_u $31, 0($30)
 # DSO-NEXT: bsr $26, 8
 # EXE-NEXT: ldq_u $31, 0($30)
@@ -36,10 +35,13 @@ _start:
 	.reloc .Lhidden, R_ALPHA_LITUSE, 3
 
 ## An ifunc keeps its GOT load in both, since the address it will hold is only
-## known once the resolver has run.
+## known once the resolver has run. In the executable it is the first entry of
+## the table: the two the relaxed calls no longer read were given back. In the
+## shared library nothing can be, because every entry there carries a dynamic
+## relocation.
 # DSO-NEXT: ldq $27, -32752($29)
 # DSO-NEXT: jsr $26, ($27)
-# EXE-NEXT: ldq $27, -32752($29)
+# EXE-NEXT: ldq $27, -32768($29)
 # EXE-NEXT: jsr $26, ($27)
 	ldq $27, ifn($29)	!literal
 .Lifn:
