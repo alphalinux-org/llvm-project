@@ -73,6 +73,12 @@ Makes programs 10x faster by doing Special New Thing.
 * On AArch64 Windows targets, return address signing now uses the B-key by
   default because Windows unwind information only supports B-key signing.
 
+### Changes to the Alpha Backend
+
+* An experimental Alpha backend was added, targeting `alpha-unknown-linux-gnu`.
+  It is not built by default; use
+  `-DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=Alpha` to enable it.
+
 ### Changes to the AMDGPU Backend
 
 * Replaced `xnack` and `sramecc` target features with `amdgpu.xnack`
