@@ -839,8 +839,25 @@ bool AlphaInstructionSelector::select(MachineInstr &I) {
   }
   case TargetOpcode::G_ANYEXT:
   case TargetOpcode::G_TRUNC: {
-    // Every value already occupies a whole register, so a widening or
-    // narrowing that does not change the bits is a copy.
+    // A narrowing to a boolean has to discard the bits above the low one:
+    // the legalizer widens boolean arithmetic to a quadword, so the value
+    // being narrowed carries whatever those wider operations left behind.
+    // Everything that consumes a boolean -- a branch, a conditional move, a
+    // sign extension -- reads the whole register, and would read that debris
+    // as part of the condition.
+    if (I.getOpcode() == TargetOpcode::G_TRUNC &&
+        MRI.getType(I.getOperand(0).getReg()) == LLT::scalar(1)) {
+      MachineInstrBuilder MIB =
+          BuildMI(*I.getParent(), I, I.getDebugLoc(), TII.get(Alpha::ANDi),
+                  I.getOperand(0).getReg())
+              .addUse(I.getOperand(1).getReg())
+              .addImm(1);
+      I.eraseFromParent();
+      constrainSelectedInstRegOperands(*MIB, TII, TRI, RBI);
+      return true;
+    }
+    // Otherwise every value already occupies a whole register, so a widening
+    // or narrowing that does not change the bits is a copy.
     I.setDesc(TII.get(TargetOpcode::COPY));
     return selectCopy(I, MRI, RBI);
   }
