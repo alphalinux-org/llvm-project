@@ -49,6 +49,7 @@ private:
   bool selectImpl(MachineInstr &I, CodeGenCoverage &CoverageInfo) const;
   bool selectLoadStore(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectICmp(MachineInstr &I, MachineRegisterInfo &MRI) const;
+  bool selectFCmp(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectFConstant(MachineInstr &I, MachineRegisterInfo &MRI) const;
 
   const AlphaInstrInfo &TII;
@@ -420,6 +421,108 @@ bool AlphaInstructionSelector::selectICmp(MachineInstr &I,
   return true;
 }
 
+// A floating compare leaves 2.0 or 0.0 in a floating register, so the answer is
+// the bits of that moved into an integer register and shifted right by 62.
+// There are only the equal, less-than and less-or-equal instructions: the
+// greater forms swap the operands, and inequality is equality inverted.
+bool AlphaInstructionSelector::selectFCmp(MachineInstr &I,
+                                          MachineRegisterInfo &MRI) const {
+  auto Pred = static_cast<CmpInst::Predicate>(I.getOperand(1).getPredicate());
+  Register Dst = I.getOperand(0).getReg();
+  Register LHS = I.getOperand(2).getReg();
+  Register RHS = I.getOperand(3).getReg();
+
+  unsigned Opc;
+  bool Swap = false;
+  bool Invert = false;
+  switch (Pred) {
+  // The unordered forms of equality and inequality answer the same as the
+  // ordered ones here: a compare against a NaN is false, and inverting that
+  // gives the true an unordered inequality wants.
+  case CmpInst::FCMP_OEQ:
+    Opc = Alpha::CMPTEQ;
+    break;
+  case CmpInst::FCMP_UNE:
+    Opc = Alpha::CMPTEQ;
+    Invert = true;
+    break;
+  case CmpInst::FCMP_OLT:
+    Opc = Alpha::CMPTLT;
+    break;
+  case CmpInst::FCMP_OLE:
+    Opc = Alpha::CMPTLE;
+    break;
+  case CmpInst::FCMP_OGT:
+    Opc = Alpha::CMPTLT;
+    Swap = true;
+    break;
+  case CmpInst::FCMP_OGE:
+    Opc = Alpha::CMPTLE;
+    Swap = true;
+    break;
+  // An unordered relation is the negation of the opposite ordered one, and
+  // that holds for a NaN too: every ordered compare against one is false, and
+  // inverting gives the true these want.
+  case CmpInst::FCMP_UGE:
+    Opc = Alpha::CMPTLT;
+    Invert = true;
+    break;
+  case CmpInst::FCMP_UGT:
+    Opc = Alpha::CMPTLE;
+    Invert = true;
+    break;
+  case CmpInst::FCMP_ULT:
+    Opc = Alpha::CMPTLE;
+    Swap = true;
+    Invert = true;
+    break;
+  case CmpInst::FCMP_ULE:
+    Opc = Alpha::CMPTLT;
+    Swap = true;
+    Invert = true;
+    break;
+  default:
+    // Anything asking which of the two was a NaN needs more than one compare.
+    return false;
+  }
+
+  if (Swap)
+    std::swap(LHS, RHS);
+
+  MachineBasicBlock &MBB = *I.getParent();
+  Register FPRes = MRI.createVirtualRegister(&Alpha::FPRCRegClass);
+  MachineInstrBuilder Cmp =
+      BuildMI(MBB, I, I.getDebugLoc(), TII.get(Opc), FPRes)
+          .addUse(LHS)
+          .addUse(RHS);
+  constrainSelectedInstRegOperands(*Cmp, TII, TRI, RBI);
+
+  Register Bits = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  MachineInstrBuilder Move =
+      BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::MOVf2i), Bits)
+          .addUse(FPRes);
+  constrainSelectedInstRegOperands(*Move, TII, TRI, RBI);
+
+  Register ShiftDst =
+      Invert ? MRI.createVirtualRegister(&Alpha::GPRCRegClass) : Dst;
+  MachineInstrBuilder Shift =
+      BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::SRLi), ShiftDst)
+          .addUse(Bits)
+          .addImm(62);
+  constrainSelectedInstRegOperands(*Shift, TII, TRI, RBI);
+
+  if (Invert) {
+    MachineInstrBuilder Xor =
+        BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::XORi), Dst)
+            .addUse(ShiftDst)
+            .addImm(1);
+    constrainSelectedInstRegOperands(*Xor, TII, TRI, RBI);
+  }
+
+  I.eraseFromParent();
+  return true;
+}
+
 // A floating-point constant lives in the constant pool, whose entries are
 // local and so addressed from the global pointer: ldah !gprelhigh, then the
 // load itself carries the !gprellow half.
@@ -489,6 +592,8 @@ bool AlphaInstructionSelector::select(MachineInstr &I) {
     return selectLoadStore(I, MRI);
   case TargetOpcode::G_ICMP:
     return selectICmp(I, MRI);
+  case TargetOpcode::G_FCMP:
+    return selectFCmp(I, MRI);
   case TargetOpcode::G_FCONSTANT:
     return selectFConstant(I, MRI);
   case TargetOpcode::G_GLOBAL_VALUE: {
