@@ -2112,6 +2112,47 @@ SignalContext::WriteFlag SignalContext::GetWriteFlag() const {
 #    endif
   }
   return SignalContext::Unknown;
+#  elif defined(__alpha__)
+  // Alpha reports nothing about the access that faulted, so read the
+  // instruction it faulted on.  The opcode is its top six bits, and the loads
+  // and stores occupy known ranges of it; lda and ldah are left out on purpose,
+  // since they only do arithmetic on an address.
+  //
+  // The pc is only probably readable: a jump through a bad pointer faults on
+  // the fetch, and reading it here would fault a second time inside the signal
+  // handler.  Check the page first.
+  uptr pc = ucontext->uc_mcontext.sc_pc;
+  if (!IsAccessibleMemoryRange(pc, sizeof(u32)))
+    return SignalContext::Unknown;
+  u32 instruction = *(u32 *)pc;
+  switch (instruction >> 26) {
+    case 0x0d:  // stw
+    case 0x0e:  // stb
+    case 0x0f:  // stq_u
+    case 0x24:  // stf
+    case 0x25:  // stg
+    case 0x26:  // sts
+    case 0x27:  // stt
+    case 0x2c:  // stl
+    case 0x2d:  // stq
+    case 0x2e:  // stl_c
+    case 0x2f:  // stq_c
+      return SignalContext::Write;
+
+    case 0x0a:  // ldbu
+    case 0x0b:  // ldq_u
+    case 0x0c:  // ldwu
+    case 0x20:  // ldf
+    case 0x21:  // ldg
+    case 0x22:  // lds
+    case 0x23:  // ldt
+    case 0x28:  // ldl
+    case 0x29:  // ldq
+    case 0x2a:  // ldl_l
+    case 0x2b:  // ldq_l
+      return SignalContext::Read;
+  }
+  return SignalContext::Unknown;
 #  elif defined(__arm__)
   static const uptr FSR_WRITE = 1U << 11;
   uptr fsr = ucontext->uc_mcontext.error_code;
