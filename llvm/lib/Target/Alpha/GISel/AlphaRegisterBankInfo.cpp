@@ -226,6 +226,14 @@ AlphaRegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
   case G_FDIV:
     OperandsMapping = &Alpha::ValueMappings[Alpha::FPR3OpsIdx];
     break;
+  case G_FCMP:
+    // The answer is an integer, the values compared are not, and the predicate
+    // carries no register.
+    OperandsMapping =
+        getOperandsMapping({&Alpha::ValueMappings[Alpha::GPR3OpsIdx], nullptr,
+                            &Alpha::ValueMappings[Alpha::FPR3OpsIdx],
+                            &Alpha::ValueMappings[Alpha::FPR3OpsIdx]});
+    break;
   case G_CONSTANT:
   case G_FRAME_INDEX:
   case G_GLOBAL_VALUE:
@@ -243,6 +251,32 @@ AlphaRegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
     OperandsMapping =
         getOperandsMapping({&Alpha::ValueMappings[Alpha::GPR3OpsIdx],
                             &Alpha::ValueMappings[Alpha::GPR3OpsIdx]});
+    break;
+  case G_SELECT: {
+    // The condition is an integer whichever bank the rest is in; the two values
+    // and the result share a bank, decided from both ends as a phi's is, so
+    // that choosing between two floating values is an fcmovne rather than a
+    // round trip through memory.
+    bool IsFP = usedByFP(MI.getOperand(0).getReg(), MRI) ||
+                definedByFP(MI.getOperand(2).getReg(), MRI) ||
+                definedByFP(MI.getOperand(3).getReg(), MRI);
+    const ValueMapping *Val =
+        &Alpha::ValueMappings[IsFP ? Alpha::FPR3OpsIdx : Alpha::GPR3OpsIdx];
+    OperandsMapping = getOperandsMapping(
+        {Val, &Alpha::ValueMappings[Alpha::GPR3OpsIdx], Val, Val});
+    break;
+  }
+  case G_SITOFP:
+    // The value crosses the banks; the instruction that does the moving is
+    // built by the selector.
+    OperandsMapping =
+        getOperandsMapping({&Alpha::ValueMappings[Alpha::FPR3OpsIdx],
+                            &Alpha::ValueMappings[Alpha::GPR3OpsIdx]});
+    break;
+  case G_FPTOSI:
+    OperandsMapping =
+        getOperandsMapping({&Alpha::ValueMappings[Alpha::GPR3OpsIdx],
+                            &Alpha::ValueMappings[Alpha::FPR3OpsIdx]});
     break;
   case G_FPEXT:
   case G_FPTRUNC:

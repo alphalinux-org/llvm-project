@@ -49,6 +49,13 @@ private:
   bool selectImpl(MachineInstr &I, CodeGenCoverage &CoverageInfo) const;
   bool selectLoadStore(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectICmp(MachineInstr &I, MachineRegisterInfo &MRI) const;
+  bool selectFCmp(MachineInstr &I, MachineRegisterInfo &MRI) const;
+  Register emitFCmpBit(MachineInstr &I, MachineRegisterInfo &MRI,
+                       unsigned Opc, Register LHS, Register RHS,
+                       Register Dst = Register()) const;
+  bool selectIntFPConv(MachineInstr &I, MachineRegisterInfo &MRI) const;
+  bool selectConstant(MachineInstr &I, MachineRegisterInfo &MRI) const;
+  bool selectSelect(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectFConstant(MachineInstr &I, MachineRegisterInfo &MRI) const;
 
   const AlphaInstrInfo &TII;
@@ -215,6 +222,14 @@ bool AlphaInstructionSelector::selectLoadStore(MachineInstr &I,
 
   const MachineMemOperand &MMO = **I.memoperands_begin();
   uint64_t Size = MMO.getSizeInBits().getValue();
+
+  // An access narrower than its own width is a misaligned one, and Alpha has no
+  // instruction for it: the datum can straddle two quadwords, so it takes the
+  // read-modify-write of both that the SelectionDAG path lowers it to.  Leave
+  // it to that path rather than emit an access that would write only the part
+  // of the value that fell in one quadword.
+  if (MMO.getAlign().value() * 8 < Size)
+    return false;
 
   const AlphaSubtarget &STI =
       I.getParent()->getParent()->getSubtarget<AlphaSubtarget>();
@@ -420,6 +435,356 @@ bool AlphaInstructionSelector::selectICmp(MachineInstr &I,
   return true;
 }
 
+// A floating compare leaves 2.0 or 0.0 in a floating register, so the answer is
+// the bits of that moved into an integer register and shifted right by 62.
+Register AlphaInstructionSelector::emitFCmpBit(MachineInstr &I,
+                                               MachineRegisterInfo &MRI,
+                                               unsigned Opc, Register LHS,
+                                               Register RHS,
+                                               Register Dst) const {
+  MachineBasicBlock &MBB = *I.getParent();
+  Register FPRes = MRI.createVirtualRegister(&Alpha::FPRCRegClass);
+  MachineInstrBuilder Cmp =
+      BuildMI(MBB, I, I.getDebugLoc(), TII.get(Opc), FPRes)
+          .addUse(LHS)
+          .addUse(RHS);
+  constrainSelectedInstRegOperands(*Cmp, TII, TRI, RBI);
+
+  Register Bits = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  MachineInstrBuilder Move =
+      BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::MOVf2i), Bits)
+          .addUse(FPRes);
+  constrainSelectedInstRegOperands(*Move, TII, TRI, RBI);
+
+  Register Shifted = Dst ? Dst : MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  MachineInstrBuilder Shift =
+      BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::SRLi), Shifted)
+          .addUse(Bits)
+          .addImm(62);
+  constrainSelectedInstRegOperands(*Shift, TII, TRI, RBI);
+  return Shifted;
+}
+
+// There are only the equal, less-than and less-or-equal instructions: the
+// greater forms swap the operands, and a condition that admits an unordered
+// pair is its ordered opposite inverted.  ord and uno, and the two conditions
+// that separate equality from orderedness, need two compares combined.
+//
+// None of this holds a NaN at arm's length: cmpteq, cmptlt and cmptle signal
+// an invalid operation for one unless they carry the /su qualifier, which
+// -mieee supplies and the trap-mode machinery attaches.  What the sequences
+// below rely on is only that an ordered compare answers false for a NaN, which
+// is also what the SelectionDAG path expands ord and uno into.
+bool AlphaInstructionSelector::selectFCmp(MachineInstr &I,
+                                          MachineRegisterInfo &MRI) const {
+  auto Pred = static_cast<CmpInst::Predicate>(I.getOperand(1).getPredicate());
+  Register Dst = I.getOperand(0).getReg();
+  Register LHS = I.getOperand(2).getReg();
+  Register RHS = I.getOperand(3).getReg();
+  MachineBasicBlock &MBB = *I.getParent();
+
+  // ord(a,b) is a == a && b == b; uno is its inverse.  one(a,b) is a < b ||
+  // b < a, which is false for a NaN, and ueq is its inverse.
+  unsigned CombineOpc = 0;
+  bool CombineInvert = false;
+  switch (Pred) {
+  case CmpInst::FCMP_ORD:
+    CombineOpc = Alpha::AND;
+    break;
+  case CmpInst::FCMP_UNO:
+    CombineOpc = Alpha::AND;
+    CombineInvert = true;
+    break;
+  case CmpInst::FCMP_ONE:
+    CombineOpc = Alpha::BIS;
+    break;
+  case CmpInst::FCMP_UEQ:
+    CombineOpc = Alpha::BIS;
+    CombineInvert = true;
+    break;
+  default:
+    break;
+  }
+
+  if (CombineOpc) {
+    bool IsOrdered = CombineOpc == Alpha::AND;
+    Register A = emitFCmpBit(I, MRI, IsOrdered ? Alpha::CMPTEQ : Alpha::CMPTLT,
+                             LHS, IsOrdered ? LHS : RHS);
+    Register B = emitFCmpBit(I, MRI, IsOrdered ? Alpha::CMPTEQ : Alpha::CMPTLT,
+                             RHS, IsOrdered ? RHS : LHS);
+    Register CombineDst =
+        CombineInvert ? MRI.createVirtualRegister(&Alpha::GPRCRegClass) : Dst;
+    MachineInstrBuilder Combine =
+        BuildMI(MBB, I, I.getDebugLoc(), TII.get(CombineOpc), CombineDst)
+            .addUse(A)
+            .addUse(B);
+    constrainSelectedInstRegOperands(*Combine, TII, TRI, RBI);
+    if (CombineInvert) {
+      MachineInstrBuilder Xor =
+          BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::XORi), Dst)
+              .addUse(CombineDst)
+              .addImm(1);
+      constrainSelectedInstRegOperands(*Xor, TII, TRI, RBI);
+    }
+    I.eraseFromParent();
+    return true;
+  }
+
+  unsigned Opc;
+  bool Swap = false;
+  bool Invert = false;
+  switch (Pred) {
+  case CmpInst::FCMP_OEQ:
+    Opc = Alpha::CMPTEQ;
+    break;
+  case CmpInst::FCMP_UNE:
+    Opc = Alpha::CMPTEQ;
+    Invert = true;
+    break;
+  case CmpInst::FCMP_OLT:
+    Opc = Alpha::CMPTLT;
+    break;
+  case CmpInst::FCMP_OLE:
+    Opc = Alpha::CMPTLE;
+    break;
+  case CmpInst::FCMP_OGT:
+    Opc = Alpha::CMPTLT;
+    Swap = true;
+    break;
+  case CmpInst::FCMP_OGE:
+    Opc = Alpha::CMPTLE;
+    Swap = true;
+    break;
+  case CmpInst::FCMP_UGE:
+    Opc = Alpha::CMPTLT;
+    Invert = true;
+    break;
+  case CmpInst::FCMP_UGT:
+    Opc = Alpha::CMPTLE;
+    Invert = true;
+    break;
+  case CmpInst::FCMP_ULT:
+    Opc = Alpha::CMPTLE;
+    Swap = true;
+    Invert = true;
+    break;
+  case CmpInst::FCMP_ULE:
+    Opc = Alpha::CMPTLT;
+    Swap = true;
+    Invert = true;
+    break;
+  default:
+    // FCMP_TRUE and FCMP_FALSE do not reach instruction selection.
+    return false;
+  }
+
+  if (Swap)
+    std::swap(LHS, RHS);
+
+  Register Bit = emitFCmpBit(I, MRI, Opc, LHS, RHS, Invert ? Register() : Dst);
+  if (Invert) {
+    MachineInstrBuilder Xor =
+        BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::XORi), Dst)
+            .addUse(Bit)
+            .addImm(1);
+    constrainSelectedInstRegOperands(*Xor, TII, TRI, RBI);
+  }
+
+  I.eraseFromParent();
+  return true;
+}
+
+// cmovne leaves its destination alone when the condition is zero, so a select
+// is the false value in the destination and a conditional move of the true one
+// over it.
+bool AlphaInstructionSelector::selectSelect(MachineInstr &I,
+                                            MachineRegisterInfo &MRI) const {
+  Register Dst = I.getOperand(0).getReg();
+  Register Cond = I.getOperand(1).getReg();
+  Register True = I.getOperand(2).getReg();
+  Register False = I.getOperand(3).getReg();
+
+  // Choosing between two floating values is fcmovne, which tests a floating
+  // register against zero; the 0/1 condition is moved across as it is, its bits
+  // being zero or not zero either way.
+  if (RBI.getRegBank(Dst, MRI, TRI)->getID() == Alpha::FPRRegBankID) {
+    Register Moved = MRI.createVirtualRegister(&Alpha::FPRCRegClass);
+    MachineInstrBuilder Move = BuildMI(*I.getParent(), I, I.getDebugLoc(),
+                                       TII.get(Alpha::MOVi2f), Moved)
+                                   .addUse(Cond);
+    constrainSelectedInstRegOperands(*Move, TII, TRI, RBI);
+
+    MachineInstrBuilder FMov = BuildMI(*I.getParent(), I, I.getDebugLoc(),
+                                       TII.get(Alpha::FCMOVNE), Dst)
+                                   .addUse(False)
+                                   .addUse(Moved)
+                                   .addUse(True);
+    constrainSelectedInstRegOperands(*FMov, TII, TRI, RBI);
+
+    I.eraseFromParent();
+    return true;
+  }
+
+  MachineInstrBuilder Mov =
+      BuildMI(*I.getParent(), I, I.getDebugLoc(), TII.get(Alpha::CMOVNE), Dst)
+          .addUse(False)
+          .addUse(Cond)
+          .addUse(True);
+  constrainSelectedInstRegOperands(*Mov, TII, TRI, RBI);
+
+  I.eraseFromParent();
+  return true;
+}
+
+// lda carries a signed 16-bit displacement and ldah the same shifted left 16,
+// so a constant that fits in 32 bits is built from a pair of them; anything
+// wider goes in the constant pool.  A pattern covers the 16-bit case already.
+bool AlphaInstructionSelector::selectConstant(MachineInstr &I,
+                                              MachineRegisterInfo &MRI) const {
+  Register Dst = I.getOperand(0).getReg();
+  int64_t V = I.getOperand(1).getCImm()->getSExtValue();
+  MachineBasicBlock &MBB = *I.getParent();
+  MachineFunction &MF = *MBB.getParent();
+  const AlphaSubtarget &STI = MF.getSubtarget<AlphaSubtarget>();
+
+  // Build a 32-bit constant on top of Base, leaving the result in Out.
+  auto emit32 = [&](int32_t V32, Register Base, Register Out) {
+    int64_t Lo = static_cast<int16_t>(V32);
+    int64_t Hi = (int64_t(V32) - Lo) >> 16;
+    Register Cur = Base;
+
+    if (Hi != 0) {
+      // A high half of 0x8000 does not fit ldah's signed field; it takes two.
+      SmallVector<int64_t, 2> Halves;
+      if (isInt<16>(Hi))
+        Halves.push_back(Hi);
+      else
+        Halves.append({Hi / 2, Hi / 2});
+      for (auto [N, Half] : enumerate(Halves)) {
+        bool Last = N + 1 == Halves.size();
+        Register Next = (Lo == 0 && Last)
+                            ? Out
+                            : MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+        MachineInstrBuilder Ldah =
+            BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::LDAH), Next)
+                .addImm(Half)
+                .addUse(Cur);
+        constrainSelectedInstRegOperands(*Ldah, TII, TRI, RBI);
+        Cur = Next;
+      }
+    }
+
+    if (Lo != 0 || Hi == 0) {
+      MachineInstrBuilder Lda =
+          BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::LDA), Out)
+              .addImm(Lo)
+              .addUse(Cur);
+      constrainSelectedInstRegOperands(*Lda, TII, TRI, RBI);
+    }
+  };
+
+  if (isInt<32>(V)) {
+    emit32(static_cast<int32_t>(V), Alpha::R31, Dst);
+    I.eraseFromParent();
+    return true;
+  }
+
+  // Wider than 32 bits.  -mbuild-constants asks for it to be built inline
+  // rather than fetched from the constant pool, because reaching the pool needs
+  // a global pointer: the dynamic loader runs before its own is established.
+  // The SelectionDAG path asks the same question in AlphaISelDAGToDAG.
+  if (STI.hasBuildConstants()) {
+    int32_t Lo32 = static_cast<int32_t>(V);
+    int64_t Hi32 = (V - Lo32) >> 32;
+
+    // V = (Hi32 << 32) + Lo32; the sign of Lo32 is already folded into Hi32.
+    Register HighVal = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+    emit32(static_cast<int32_t>(Hi32), Alpha::R31, HighVal);
+
+    Register Shifted =
+        Lo32 == 0 ? Dst : MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+    MachineInstrBuilder Sll =
+        BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::SLLi), Shifted)
+            .addUse(HighVal)
+            .addImm(32);
+    constrainSelectedInstRegOperands(*Sll, TII, TRI, RBI);
+
+    if (Lo32 != 0)
+      emit32(Lo32, Shifted, Dst);
+
+    I.eraseFromParent();
+    return true;
+  }
+
+  // Otherwise load it from the constant pool, which is addressed from the
+  // global pointer.
+  MF.getInfo<AlphaMachineFunctionInfo>()->setUsesGP();
+  const Constant *C =
+      ConstantInt::get(Type::getInt64Ty(MF.getFunction().getContext()), V);
+  unsigned CPI = MF.getConstantPool()->getConstantPoolIndex(C, Align(8));
+
+  Register HighReg = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  MachineInstrBuilder High =
+      BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::LDAHg), HighReg)
+          .addConstantPoolIndex(CPI)
+          .addUse(Alpha::R29);
+  constrainSelectedInstRegOperands(*High, TII, TRI, RBI);
+
+  MachineInstrBuilder Load =
+      BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::LDQg), Dst)
+          .addConstantPoolIndex(CPI)
+          .addUse(HighReg);
+  constrainSelectedInstRegOperands(*Load, TII, TRI, RBI);
+
+  I.eraseFromParent();
+  return true;
+}
+
+// Converting between an integer and a floating value happens in a floating
+// register, so the value has to be moved into or out of one first -- through
+// memory, since no instruction moves between the banks.
+bool AlphaInstructionSelector::selectIntFPConv(MachineInstr &I,
+                                               MachineRegisterInfo &MRI) const {
+  bool ToFP = I.getOpcode() == TargetOpcode::G_SITOFP;
+  Register Dst = I.getOperand(0).getReg();
+  Register Src = I.getOperand(1).getReg();
+  MachineBasicBlock &MBB = *I.getParent();
+
+  if (ToFP) {
+    // The integer is moved into a floating register and converted there; which
+    // convert depends on the type wanted back.
+    LLT DstTy = MRI.getType(Dst);
+    unsigned Cvt = DstTy == LLT::scalar(32) ? Alpha::CVTQS : Alpha::CVTQT;
+
+    Register Moved = MRI.createVirtualRegister(&Alpha::FPRCRegClass);
+    MachineInstrBuilder Move =
+        BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::MOVi2f), Moved)
+            .addUse(Src);
+    constrainSelectedInstRegOperands(*Move, TII, TRI, RBI);
+
+    MachineInstrBuilder Conv =
+        BuildMI(MBB, I, I.getDebugLoc(), TII.get(Cvt), Dst).addUse(Moved);
+    constrainSelectedInstRegOperands(*Conv, TII, TRI, RBI);
+  } else {
+    // A float in a register is already in T_floating form, so one convert
+    // serves both widths; the result is an integer sitting in a floating
+    // register, which then has to be moved out.
+    Register Converted = MRI.createVirtualRegister(&Alpha::FPRCRegClass);
+    MachineInstrBuilder Conv =
+        BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::CVTTQ), Converted)
+            .addUse(Src);
+    constrainSelectedInstRegOperands(*Conv, TII, TRI, RBI);
+
+    MachineInstrBuilder Move =
+        BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::MOVf2i), Dst)
+            .addUse(Converted);
+    constrainSelectedInstRegOperands(*Move, TII, TRI, RBI);
+  }
+
+  I.eraseFromParent();
+  return true;
+}
+
 // A floating-point constant lives in the constant pool, whose entries are
 // local and so addressed from the global pointer: ldah !gprelhigh, then the
 // load itself carries the !gprellow half.
@@ -511,6 +876,15 @@ bool AlphaInstructionSelector::select(MachineInstr &I) {
     return selectLoadStore(I, MRI);
   case TargetOpcode::G_ICMP:
     return selectICmp(I, MRI);
+  case TargetOpcode::G_FCMP:
+    return selectFCmp(I, MRI);
+  case TargetOpcode::G_SITOFP:
+  case TargetOpcode::G_FPTOSI:
+    return selectIntFPConv(I, MRI);
+  case TargetOpcode::G_CONSTANT:
+    return selectConstant(I, MRI);
+  case TargetOpcode::G_SELECT:
+    return selectSelect(I, MRI);
   case TargetOpcode::G_FCONSTANT:
     return selectFConstant(I, MRI);
   case TargetOpcode::G_GLOBAL_VALUE: {
@@ -568,8 +942,25 @@ bool AlphaInstructionSelector::select(MachineInstr &I) {
   }
   case TargetOpcode::G_ANYEXT:
   case TargetOpcode::G_TRUNC: {
-    // Every value already occupies a whole register, so a widening or
-    // narrowing that does not change the bits is a copy.
+    // A narrowing to a boolean has to discard the bits above the low one:
+    // the legalizer widens boolean arithmetic to a quadword, so the value
+    // being narrowed carries whatever those wider operations left behind.
+    // Everything that consumes a boolean -- a branch, a conditional move, a
+    // sign extension -- reads the whole register, and would read that debris
+    // as part of the condition.
+    if (I.getOpcode() == TargetOpcode::G_TRUNC &&
+        MRI.getType(I.getOperand(0).getReg()) == LLT::scalar(1)) {
+      MachineInstrBuilder MIB =
+          BuildMI(*I.getParent(), I, I.getDebugLoc(), TII.get(Alpha::ANDi),
+                  I.getOperand(0).getReg())
+              .addUse(I.getOperand(1).getReg())
+              .addImm(1);
+      I.eraseFromParent();
+      constrainSelectedInstRegOperands(*MIB, TII, TRI, RBI);
+      return true;
+    }
+    // Otherwise every value already occupies a whole register, so a widening
+    // or narrowing that does not change the bits is a copy.
     I.setDesc(TII.get(TargetOpcode::COPY));
     return selectCopy(I, MRI, RBI);
   }
