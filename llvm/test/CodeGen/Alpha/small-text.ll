@@ -38,6 +38,7 @@ define i32 @f(i32 %x) {
 declare dso_local i32 @h(i32)
 
 ; LARGE-LABEL: tail:
+; LARGE: ldq $27, h($29)
 ; LARGE: jmp $31, ($27), 0
 
 ; SMALL-LABEL: tail:

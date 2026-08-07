@@ -76,7 +76,17 @@ def AlphaCallBsr : SDNode<"AlphaISD::CALL_BSR", SDT_AlphaCallDirect,
                           [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
                            SDNPVariadic]>;
 
-// The -msmall-text form of a tail call: a br straight to the callee.
+// The direct forms of a tail call: with the callee symbol, so the jmp can carry
+// the hint and lituse_jsr relocations; without, for a dso-local callee, which
+// takes only the lituse; and the -msmall-text form, a br straight to the
+// callee.
+def AlphaTCReturnDirect : SDNode<"AlphaISD::TC_RETURN_DIRECT",
+                                 SDT_AlphaCallDirect,
+                                 [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
+def AlphaTCReturnDirectLocal : SDNode<"AlphaISD::TC_RETURN_DIRECT_LOCAL",
+                                      SDTNone,
+                                      [SDNPHasChain, SDNPOptInGlue,
+                                       SDNPVariadic]>;
 def AlphaTCReturnBr : SDNode<"AlphaISD::TC_RETURN_BR", SDT_AlphaCallDirect,
                              [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 
@@ -1147,6 +1157,15 @@ def JSRt : MbrForm<0b01, (outs), (ins GPRC:$Ra, parenGPR:$Rb, jsrtarget:$sym),
   let hint = sym;
 }
 
+// jmp $Ra, ($Rb), target: the tail-call spelling of the same thing.
+let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1,
+    isAsmParserOnly = 1 in
+def JMPt : MbrForm<0b00, (outs), (ins GPRC:$Ra, parenGPR:$Rb, jsrtarget:$sym),
+                   "jmp $Ra, $Rb, $sym", []> {
+  bits<14> sym;
+  let hint = sym;
+}
+
 // Division millicode call: enter __divq etc. through $23; the routine preserves
 // all but a handful of registers, so no ldgp reload is needed afterwards.
 let isCall = 1, Uses = [R24, R25, R27],
@@ -1888,12 +1907,34 @@ def : Pat<(brind GPRC:$r), (JMP GPRC:$r)>;
 // Tail call: jump to the procedure value in $27 without saving a return
 // address, so the callee returns straight to our caller.  The epilogue, which
 // tears down the frame and restores $26, is inserted before this terminator.
-let isCall = 1, isTerminator = 1, isReturn = 1, isBarrier = 1, Uses = [R27] in
+let isCall = 1, isTerminator = 1, isReturn = 1, isBarrier = 1, Uses = [R27],
+    isCodeGenOnly = 1 in {
 def TCRETURN : MbrForm<0b00, (outs), (ins), "jmp $$31, ($$27), 0",
                        [(AlphaTCReturn)]> {
   let Ra = 31;
   let Rb = 27;
 }
+
+// A direct tail call, tagged like a direct jsr: the callee symbol fills the
+// hint field with an R_ALPHA_HINT, and the code emitter adds the lituse_jsr
+// that lets the linker relax the load-and-jump into a br.
+def TCRETURNd : MbrForm<0b00, (outs), (ins calltarget:$sym),
+                        "jmp $$31, ($$27), 0", []> {
+  bits<14> sym;
+  let Ra = 31;
+  let Rb = 27;
+  let hint = sym;
+}
+// A dso-local direct tail call: only the lituse_jsr, as for a dso-local call.
+def TCRETURNdl : MbrForm<0b00, (outs), (ins), "jmp $$31, ($$27), 0",
+                         [(AlphaTCReturnDirectLocal)]> {
+  let Ra = 31;
+  let Rb = 27;
+}
+}
+def : Pat<(AlphaTCReturnDirect tglobaladdr:$sym), (TCRETURNd tglobaladdr:$sym)>;
+def : Pat<(AlphaTCReturnDirect texternalsym:$sym),
+          (TCRETURNd texternalsym:$sym)>;
 
 // A direct tail call under -msmall-text: the callee is in range, so no procedure
 // value is loaded and the jump is a plain PC-relative br, which like jmp

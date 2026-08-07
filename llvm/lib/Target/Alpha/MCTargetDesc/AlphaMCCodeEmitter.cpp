@@ -332,6 +332,17 @@ void AlphaMCCodeEmitter::encodeInstruction(const MCInst &MI,
     support::endian::write(CB, Bits, llvm::endianness::little);
     return emitLdgp(Alpha::R26, CB, Fixups, STI);
   }
+  case Alpha::TCRETURNd:
+  case Alpha::TCRETURNdl: {
+    // A direct tail call.  Like a direct jsr, but with no ldgp reload: the
+    // callee returns to our caller, not to us.
+    size_t FirstFixup = Fixups.size();
+    uint32_t Bits = getBinaryCodeForInstr(MI, Fixups, STI);
+    addLituse(3, Fixups);
+    std::rotate(Fixups.begin() + FirstFixup, Fixups.end() - 1, Fixups.end());
+    support::endian::write(CB, Bits, llvm::endianness::little);
+    return;
+  }
   case Alpha::JSRd:
   case Alpha::JSRdl:
   case Alpha::JSRtlsgd:

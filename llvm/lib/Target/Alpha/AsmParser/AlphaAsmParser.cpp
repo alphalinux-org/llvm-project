@@ -880,17 +880,6 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     return false;
   }
 
-  // jmp $31, ($Rb), 0: an indirect jump through $Rb (the hint is advisory).
-  if (Mnemonic == "jmp" && Operands.size() == 4 && Operands[2]->isMem()) {
-    MCInst Inst;
-    Inst.setOpcode(Alpha::JMP);
-    Inst.addOperand(MCOperand::createReg(
-        static_cast<AlphaOperand &>(*Operands[2]).getMemBase()));
-    Inst.setLoc(IDLoc);
-    Out.emitInstruction(Inst, getSTI());
-    return false;
-  }
-
   // jmp $Ra, symbol: a jump to a symbol reached through the GOT, expanded like
   // jsr but discarding the return address.
   if (Mnemonic == "jmp" && Operands.size() == 3 && Operands[1]->isReg() &&
