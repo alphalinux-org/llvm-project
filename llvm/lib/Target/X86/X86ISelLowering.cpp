@@ -3653,7 +3653,8 @@ bool X86TargetLowering::isCheapToSpeculateCtlz(Type *Ty) const {
          Subtarget.hasBitScanPassThrough();
 }
 
-bool X86TargetLowering::ShouldShrinkFPConstant(EVT VT) const {
+bool X86TargetLowering::ShouldShrinkFPConstant(EVT VT,
+                                               const APFloat &Val) const {
   // Don't shrink FP constpool if SSE2 is available since cvtss2sd is more
   // expensive than a straight movsd. On the other hand, it's important to
   // shrink long double fp constant since fldt is very slow.

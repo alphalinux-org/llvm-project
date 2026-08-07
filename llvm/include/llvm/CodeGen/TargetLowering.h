@@ -1925,10 +1925,13 @@ public:
     return DL.getABITypeAlign(ArgTy);
   }
 
-  /// If true, then instruction selection should seek to shrink the FP constant
+  /// If true, then instruction selection should shrink the FP constant \p Val
   /// of the specified type to a smaller type in order to save space and / or
-  /// reduce runtime.
-  virtual bool ShouldShrinkFPConstant(EVT) const { return true; }
+  /// reduce runtime. A target whose extending load cannot reproduce every
+  /// value of the smaller type has to judge this per value.
+  virtual bool ShouldShrinkFPConstant(EVT, const APFloat &Val) const {
+    return true;
+  }
 
   /// Return true if it is profitable to reduce a load to a smaller type.
   /// \p ByteOffset is only set if we know the pointer offset at compile time
