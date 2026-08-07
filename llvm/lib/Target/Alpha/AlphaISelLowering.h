@@ -213,6 +213,15 @@ public:
            Imm.isExactlyValue(+2.0);
   }
 
+  // lds, which is how a float is loaded, maps the S_floating exponent onto the
+  // T_floating one, and that mapping has no entry for a denormal: an exponent
+  // of zero stays zero and the value read back is not the one written. A double
+  // may therefore only be shrunk into a float that is normal (or a zero, which
+  // does survive the mapping).
+  bool ShouldShrinkFPConstant(EVT VT, const APFloat &Val) const override {
+    return !Val.isDenormal();
+  }
+
   SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
                                bool IsVarArg,
                                const SmallVectorImpl<ISD::InputArg> &Ins,
