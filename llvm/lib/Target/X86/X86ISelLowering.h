@@ -549,7 +549,7 @@ namespace llvm {
     /// If true, then instruction selection should
     /// seek to shrink the FP constant of the specified type to a smaller type
     /// in order to save space and / or reduce runtime.
-    bool ShouldShrinkFPConstant(EVT VT) const override;
+    bool ShouldShrinkFPConstant(EVT VT, const APFloat &Val) const override;
 
     /// Return true if we believe it is correct and profitable to reduce the
     /// load node to a smaller type.
