@@ -349,6 +349,14 @@ SelectionDAGLegalize::ExpandConstantFP(ConstantFPSDNode *CFP, bool UseCP) {
   if (!APF.isSignaling()) {
     while (SVT != MVT::f32 && SVT != MVT::f16 && SVT != MVT::bf16) {
       SVT = (MVT::SimpleValueType)(SVT.getSimpleVT().SimpleTy - 1);
+
+      // The value the constant pool would hold, which is what the target has
+      // to be able to load back.
+      APFloat SVal = APF;
+      bool LosesInfo;
+      SVal.convert(SVT.getFltSemantics(), APFloat::rmNearestTiesToEven,
+                   &LosesInfo);
+
       if (ConstantFPSDNode::isValueValidForType(SVT, APF) &&
           // Only do this if the target has a native EXTLOAD instruction from
           // smaller type.
@@ -359,7 +367,7 @@ SelectionDAGLegalize::ExpandConstantFP(ConstantFPSDNode *CFP, bool UseCP) {
               MachinePointerInfo::getConstantPool(DAG.getMachineFunction())
                   .getAddrSpace(),
               ISD::EXTLOAD, false) &&
-          TLI.ShouldShrinkFPConstant(OrigVT)) {
+          TLI.ShouldShrinkFPConstant(OrigVT, SVal)) {
         Type *SType = SVT.getTypeForEVT(*DAG.getContext());
         LLVMC = cast<ConstantFP>(ConstantFoldCastOperand(
             Instruction::FPTrunc, LLVMC, SType, DAG.getDataLayout()));

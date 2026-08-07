@@ -827,7 +827,8 @@ bool AMDGPUTargetLowering::isFPImmLegal(const APFloat &Imm, EVT VT,
 }
 
 // We don't want to shrink f64 / f32 constants.
-bool AMDGPUTargetLowering::ShouldShrinkFPConstant(EVT VT) const {
+bool AMDGPUTargetLowering::ShouldShrinkFPConstant(EVT VT,
+                                                  const APFloat &Val) const {
   EVT ScalarVT = VT.getScalarType();
   return (ScalarVT != MVT::f32 && ScalarVT != MVT::f64);
 }
