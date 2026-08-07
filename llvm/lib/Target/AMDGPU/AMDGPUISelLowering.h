@@ -229,7 +229,7 @@ public:
 
   bool isFPImmLegal(const APFloat &Imm, EVT VT,
                     bool ForCodeSize) const override;
-  bool ShouldShrinkFPConstant(EVT VT) const override;
+  bool ShouldShrinkFPConstant(EVT VT, const APFloat &Val) const override;
   bool shouldReduceLoadWidth(SDNode *Load, ISD::LoadExtType ExtType, EVT ExtVT,
                              std::optional<unsigned> ByteOffset) const override;
 
