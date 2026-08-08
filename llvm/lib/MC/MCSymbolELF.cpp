@@ -22,22 +22,29 @@ enum {
   // Shift value for STV_* flags. 4 possible values, 2 bits.
   ELF_STV_Shift = 5,
 
-  // Shift value for STO_* flags. 3 bits. All the values are between 0x20 and
-  // 0xe0, so we shift right by 5 before storing.
+  // Shift value for STO_* flags. 5 bits. The processor-specific st_other bits
+  // occupy bits 3-7; bits 0-2 are not stored here, so setOther() requires them
+  // clear and bit 2 is unrepresentable. Alpha's STO_ALPHA_STD_GPLOAD is 0x88,
+  // whose bit 3 is the one a narrower field used to drop, so we shift right by
+  // 3 before storing.
   ELF_STO_Shift = 7,
 
   // One bit.
-  ELF_IsSignature_Shift = 10,
+  ELF_IsSignature_Shift = 12,
 
   // One bit.
-  ELF_Weakref_Shift = 11,
+  ELF_Weakref_Shift = 13,
 
   // One bit.
-  ELF_BindingSet_Shift = 12,
+  ELF_BindingSet_Shift = 14,
 
   // One bit.
-  ELF_IsMemoryTagged_Shift = 13,
+  ELF_IsMemoryTagged_Shift = 15,
 };
+// Adding another ELF symbol flag, or widening the st_other field, means growing
+// MCSymbol::NumFlagsBits first: the shifts above have to fit inside Flags.
+static_assert(ELF_IsMemoryTagged_Shift < MCSymbol::NumFlagsBits,
+              "ELF symbol flags do not fit in MCSymbol::Flags");
 }
 
 void MCSymbolELF::setBinding(unsigned Binding) const {
@@ -156,16 +163,16 @@ unsigned MCSymbolELF::getVisibility() const {
 }
 
 void MCSymbolELF::setOther(unsigned Other) {
-  assert((Other & 0x1f) == 0);
-  Other >>= 5;
-  assert(Other <= 0x7);
-  uint32_t OtherFlags = getFlags() & ~(0x7 << ELF_STO_Shift);
+  assert((Other & 0x7) == 0);
+  Other >>= 3;
+  assert(Other <= 0x1f);
+  uint32_t OtherFlags = getFlags() & ~(0x1f << ELF_STO_Shift);
   setFlags(OtherFlags | (Other << ELF_STO_Shift));
 }
 
 unsigned MCSymbolELF::getOther() const {
-  unsigned Other = (Flags >> ELF_STO_Shift) & 7;
-  return Other << 5;
+  unsigned Other = (Flags >> ELF_STO_Shift) & 0x1f;
+  return Other << 3;
 }
 
 void MCSymbolELF::setIsWeakref() const {
