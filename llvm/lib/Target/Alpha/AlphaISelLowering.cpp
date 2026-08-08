@@ -239,6 +239,19 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
                   ISD::FCOPYSIGN})
     setTargetDAGCombine(Op);
 
+  // Keep the combiner from folding a conversion into the memory access next to
+  // it: an f32/f64 extending load or an f128 truncating store carries the
+  // conversion inside a node the interception above never sees, and softening
+  // it emits a call to __extendsftf2 and friends, which no library on Alpha
+  // provides.  Expanding leaves a separate fpext/fpround for the OTS call.
+  for (MVT VT : {MVT::f16, MVT::f32, MVT::f64}) {
+    setLoadExtAction(ISD::EXTLOAD, MVT::f128, VT, Expand);
+    setTruncStoreAction(MVT::f128, VT, Expand);
+  }
+  // The f128 -> f32 OTS sequence ends in an f64 -> f32 round, which must not be
+  // folded into the store either: Alpha has no truncating float store.
+  setTruncStoreAction(MVT::f64, MVT::f32, Expand);
+
   computeRegisterProperties(STI.getRegisterInfo());
 }
 
