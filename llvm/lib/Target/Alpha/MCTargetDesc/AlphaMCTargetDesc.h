@@ -20,21 +20,30 @@
 namespace llvm {
 
 namespace Alpha {
-// The floating-point software-completion qualifier letters (without the leading
-// '/') for an instruction's trap class under -mieee / -mieee-with-inexact.  The
-// class values match TrapClass in AlphaInstrFormats.td.
-inline StringRef getFPTrapSuffix(unsigned TrapClass, bool IEEE, bool Inexact) {
-  if (!IEEE)
-    return StringRef();
+// The floating-point rounding modes (-mfp-rounding-mode); Normal is the
+// default.
+enum FPRoundMode {
+  FPRoundNormal,
+  FPRoundChopped,
+  FPRoundMinus,
+  FPRoundDynamic
+};
+
+// The floating-point trap-qualifier letters (without the leading '/') for an
+// instruction's trap class under -mieee / -mieee-with-inexact / -mfp-trap-mode.
+// The class values match TrapClass in AlphaInstrFormats.td.  IEEE selects the
+// software-completion (/s) modes; TrapU is the bare -mfp-trap-mode=u.
+inline StringRef getFPTrapSuffix(unsigned TrapClass, bool IEEE, bool Inexact,
+                                 bool TrapU) {
   switch (TrapClass) {
-  case 1:
-    return Inexact ? "sui" : "su"; // Arithmetic.
-  case 2:
-    return "su"; // Compare (inexact not applicable).
-  case 3:
-    return Inexact ? "svi" : "sv"; // Float-to-integer.
-  case 4:
-    return Inexact ? "sui" : ""; // Integer-to-float (inexact only).
+  case 1: // Arithmetic: underflow.
+    return IEEE ? (Inexact ? "sui" : "su") : (TrapU ? "u" : StringRef());
+  case 2: // Compare: software completion only.
+    return IEEE ? "su" : StringRef();
+  case 3: // Float-to-integer: integer overflow.
+    return IEEE ? (Inexact ? "svi" : "sv") : (TrapU ? "v" : StringRef());
+  case 4: // Integer-to-float: inexact only.
+    return (IEEE && Inexact) ? "sui" : StringRef();
   case 5:
     return IEEE ? "s"
                 : StringRef(); // S-to-T convert (software completion only).
@@ -43,15 +52,51 @@ inline StringRef getFPTrapSuffix(unsigned TrapClass, bool IEEE, bool Inexact) {
   }
 }
 
-// The amount added to the instruction's function field for the qualifier above:
-// 0x500 for su/sv, 0x700 for sui/svi.
-inline unsigned getFPTrapFuncBits(unsigned TrapClass, bool IEEE, bool Inexact) {
-  StringRef S = getFPTrapSuffix(TrapClass, IEEE, Inexact);
-  if (S.empty())
+// The amount added to the instruction's function field for the trap qualifier:
+// 0x500 for su/sv, 0x700 for sui/svi, 0x100 for a bare u/v.
+inline unsigned getFPTrapFuncBits(StringRef Suffix) {
+  if (Suffix.empty())
     return 0;
-  if (S == "s")
+  if (Suffix == "s")
     return 0x400;
-  return (S == "sui" || S == "svi") ? 0x700 : 0x500;
+  if (Suffix == "sui" || Suffix == "svi")
+    return 0x700;
+  if (Suffix == "su" || Suffix == "sv")
+    return 0x500;
+  return 0x100; // u / v
+}
+
+// A rounding mode applies to the arithmetic (1) and integer-to-float (4)
+// operate instructions; float-to-integer keeps its fixed chopped mode and
+// compares do not round.
+inline bool fpRounds(unsigned TrapClass) {
+  return TrapClass == 1 || TrapClass == 4;
+}
+inline StringRef getFPRoundSuffix(unsigned Mode) {
+  switch (Mode) {
+  case FPRoundChopped:
+    return "c";
+  case FPRoundMinus:
+    return "m";
+  case FPRoundDynamic:
+    return "d";
+  default:
+    return StringRef();
+  }
+}
+// The function-field rounding bits (7:6): normal 0x80, chopped 0, minus 0x40,
+// dynamic 0xc0.  These replace, rather than add to, the instruction's default.
+inline unsigned getFPRoundFuncBits(unsigned Mode) {
+  switch (Mode) {
+  case FPRoundChopped:
+    return 0x000;
+  case FPRoundMinus:
+    return 0x040;
+  case FPRoundDynamic:
+    return 0x0c0;
+  default:
+    return 0x080;
+  }
 }
 } // namespace Alpha
 
@@ -64,6 +109,9 @@ class MCObjectTargetWriter;
 class MCRegisterInfo;
 class MCSubtargetInfo;
 class MCTargetOptions;
+
+// The FPRoundMode selected by the subtarget's -mfp-rounding-mode features.
+unsigned getFPRoundMode(const MCSubtargetInfo &STI);
 
 MCCodeEmitter *createAlphaMCCodeEmitter(const MCInstrInfo &MCII,
                                         MCContext &Ctx);

@@ -284,13 +284,20 @@ void AlphaMCCodeEmitter::encodeInstruction(const MCInst &MI,
     break;
   }
   uint32_t Bits = getBinaryCodeForInstr(MI, Fixups, STI);
-  // Under -mieee, add the software-completion trap qualifier to floating-point
-  // instructions by setting the trap bits in their function field.
-  if (unsigned TrapClass = MCII.get(MI.getOpcode()).TSFlags & 0x7)
-    Bits |=
-        Alpha::getFPTrapFuncBits(TrapClass, STI.hasFeature(Alpha::FeatureIEEE),
-                                 STI.hasFeature(Alpha::FeatureIEEEInexact))
-        << 5;
+  // Set a floating-point instruction's trap-mode (-mieee / -mfp-trap-mode) and
+  // rounding-mode (-mfp-rounding-mode) qualifiers in its function field.
+  if (unsigned TrapClass = MCII.get(MI.getOpcode()).TSFlags & 0x7) {
+    StringRef Suffix =
+        Alpha::getFPTrapSuffix(TrapClass, STI.hasFeature(Alpha::FeatureIEEE),
+                               STI.hasFeature(Alpha::FeatureIEEEInexact),
+                               STI.hasFeature(Alpha::FeatureFPTrapU));
+    Bits |= Alpha::getFPTrapFuncBits(Suffix) << 5;
+    if (Alpha::fpRounds(TrapClass)) {
+      unsigned RM = getFPRoundMode(STI);
+      if (RM != Alpha::FPRoundNormal)
+        Bits = (Bits & ~(0xc0u << 5)) | (Alpha::getFPRoundFuncBits(RM) << 5);
+    }
+  }
   support::endian::write(CB, Bits, llvm::endianness::little);
 }
 

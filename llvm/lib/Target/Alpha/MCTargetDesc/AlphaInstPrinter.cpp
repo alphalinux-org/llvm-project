@@ -28,13 +28,17 @@ using namespace llvm;
 void AlphaInstPrinter::printInst(const MCInst *MI, uint64_t Address,
                                  StringRef Annot, const MCSubtargetInfo &STI,
                                  raw_ostream &O) {
-  // Under -mieee, splice the software-completion qualifier into a
-  // floating-point instruction's mnemonic (addt -> addt/su, cvttq/c ->
-  // cvttq/svc).
+  // Splice a floating-point instruction's trap-mode and rounding-mode
+  // qualifiers into its mnemonic (addt -> addt/su, addt/sud with dynamic
+  // rounding, cvttq/c -> cvttq/svc).
   unsigned TrapClass = MII.get(MI->getOpcode()).TSFlags & 0x7;
-  StringRef Suffix =
+  std::string Suffix =
       Alpha::getFPTrapSuffix(TrapClass, STI.hasFeature(Alpha::FeatureIEEE),
-                             STI.hasFeature(Alpha::FeatureIEEEInexact));
+                             STI.hasFeature(Alpha::FeatureIEEEInexact),
+                             STI.hasFeature(Alpha::FeatureFPTrapU))
+          .str();
+  if (Alpha::fpRounds(TrapClass))
+    Suffix += Alpha::getFPRoundSuffix(getFPRoundMode(STI)).str();
   if (!Suffix.empty()) {
     std::string Buf;
     raw_string_ostream SS(Buf);
@@ -45,10 +49,9 @@ void AlphaInstPrinter::printInst(const MCInst *MI, uint64_t Address,
     size_t End = Buf.find_first_of(" \t", Start);
     size_t Slash = Buf.find('/', Start);
     if (Slash != std::string::npos && (End == std::string::npos || Slash < End))
-      Buf.insert(Slash + 1, Suffix.str()); // Merge before a rounding qualifier.
+      Buf.insert(Slash + 1, Suffix); // Merge before a rounding qualifier.
     else
-      Buf.insert(End == std::string::npos ? Buf.size() : End,
-                 "/" + Suffix.str());
+      Buf.insert(End == std::string::npos ? Buf.size() : End, "/" + Suffix);
     O << Buf;
     printAnnotation(O, Annot);
     return;

@@ -75,6 +75,23 @@ def FeatureIEEEInexact
                        "IEEE floating point that also tracks the inexact flag "
                        "(-mieee-with-inexact)", [FeatureIEEE]>;
 
+// -mfp-trap-mode=u: trap on underflow but without software completion (the /u
+// qualifier, as opposed to /su under -mieee).
+def FeatureFPTrapU : SubtargetFeature<"fptrap-u", "HasFPTrapU", "true",
+                                      "Trap on floating-point underflow (/u)">;
+
+// -mfp-rounding-mode: the IEEE rounding applied to floating-point operate
+// instructions.  Normal (round to nearest) is the default and needs no feature.
+def FeatureFPRoundDynamic
+    : SubtargetFeature<"fpround-dynamic", "HasFPRoundDynamic", "true",
+                       "Round floating point per the FPCR at run time (/d)">;
+def FeatureFPRoundMinus
+    : SubtargetFeature<"fpround-minus", "HasFPRoundMinus", "true",
+                       "Round floating point toward minus infinity (/m)">;
+def FeatureFPRoundChopped
+    : SubtargetFeature<"fpround-chopped", "HasFPRoundChopped", "true",
+                       "Round floating point toward zero (/c)">;
+
 // Software-directed prefetch (a load to R31/F31) is architecturally defined
 // only on the 21264 and later; on earlier processors such a load is an ordinary
 // load that can fault.  The evict-next hint (ldq/ldt to R31/F31) is defined only
