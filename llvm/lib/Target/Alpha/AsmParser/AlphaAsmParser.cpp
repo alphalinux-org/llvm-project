@@ -357,20 +357,26 @@ ParseStatus AlphaAsmParser::parseOperand(OperandVector &Operands) {
   SMLoc S = getParser().getTok().getLoc();
   SMLoc E = getParser().getTok().getEndLoc();
 
-  // Register: $<name>.
+  // A leading '$' names a register ($<number>/$<name>).  If the name is not a
+  // register it is a '$'-prefixed local label used in an operand expression --
+  // a branch target (`bne $1, $target`) or a displacement (`$exc-99b($16)`);
+  // fall through to the expression parser, which accepts '$' in identifiers.
   if (getParser().getTok().is(AsmToken::Dollar)) {
     MCRegister Reg;
     if (tryParseRegister(Reg, S, E).isSuccess()) {
       Operands.push_back(AlphaOperand::createReg(Reg, S, E));
       return ParseStatus::Success;
     }
-    return ParseStatus::Failure;
   }
 
   // An expression: either a bare immediate or the displacement of a memory
-  // operand disp($base).  A memory operand may also start with '(' (disp 0).
+  // operand disp($base).  A leading '(' introduces the base register with an
+  // implicit zero displacement (`($base)`) only when a register follows it;
+  // otherwise it opens a parenthesized displacement expression such as
+  // `(1<<3)($base)`.
   const MCExpr *Off;
-  if (getParser().getTok().is(AsmToken::LParen)) {
+  if (getParser().getTok().is(AsmToken::LParen) &&
+      getLexer().peekTok().is(AsmToken::Dollar)) {
     Off = MCConstantExpr::create(0, getContext());
   } else {
     if (getParser().parseExpression(Off))
