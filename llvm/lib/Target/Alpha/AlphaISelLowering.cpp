@@ -1292,6 +1292,9 @@ SDValue AlphaTargetLowering::LowerF128Compare(SDNode *N,
 
   const char *Name;
   bool Negate = false;
+  // SignBit: extract the sign bit of the OTS return value (which is -1 for
+  // unordered / NaN, 0 or 1 for ordered) to obtain a 0/1 boolean result.
+  bool SignBit = false;
   switch (CC) {
   // Ordered comparisons map directly to _Ots routines.
   case ISD::SETOEQ:
@@ -1339,6 +1342,39 @@ SDValue AlphaTargetLowering::LowerF128Compare(SDNode *N,
     Name = "_OtsNeqX";
     Negate = true;
     break;
+  // SETUO/SETO: _OtsEqlX returns -1 (sign bit set) when either operand is NaN,
+  // and 0 or 1 (sign bit clear) for ordered operands.  Shifting right by 63
+  // extracts the sign bit as a 0/1 boolean for SETUO; XOR with 1 inverts it
+  // for SETO.
+  case ISD::SETUO:
+    Name = "_OtsEqlX";
+    SignBit = true;
+    break;
+  case ISD::SETO:
+    Name = "_OtsEqlX";
+    SignBit = true;
+    Negate = true;
+    break;
+  // NaN-free codes from getFCmpCodeWithoutNaN (both operands are known
+  // non-NaN). These are equivalent to the ordered float codes above.
+  case ISD::SETEQ:
+    Name = "_OtsEqlX";
+    break;
+  case ISD::SETNE:
+    Name = "_OtsNeqX";
+    break;
+  case ISD::SETLT:
+    Name = "_OtsLssX";
+    break;
+  case ISD::SETLE:
+    Name = "_OtsLeqX";
+    break;
+  case ISD::SETGT:
+    Name = "_OtsGtrX";
+    break;
+  case ISD::SETGE:
+    Name = "_OtsGeqX";
+    break;
   default:
     return SDValue();
   }
@@ -1379,6 +1415,9 @@ SDValue AlphaTargetLowering::LowerF128Compare(SDNode *N,
   SDValue Result = DAG.getCopyFromReg(Chain, DL, Alpha::R0, MVT::i64, Glue);
   Chain = Result.getValue(1);
 
+  if (SignBit)
+    Result = DAG.getNode(ISD::SRL, DL, MVT::i64, Result,
+                         DAG.getConstant(63, DL, MVT::i64));
   if (Negate)
     Result = DAG.getNode(ISD::XOR, DL, MVT::i64, Result,
                          DAG.getConstant(1, DL, MVT::i64));

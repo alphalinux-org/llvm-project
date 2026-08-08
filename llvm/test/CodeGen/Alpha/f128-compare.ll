@@ -85,6 +85,29 @@ define i1 @une_f128_strict(ptr byref(fp128) %a, ptr byref(fp128) %b) strictfp {
 
 declare i1 @llvm.experimental.constrained.fcmp.f128(fp128, fp128, metadata, metadata) strictfp
 
+; SETUO(a,b): _OtsEqlX returns -1 when either operand is NaN.  Shift right
+; by 63 to extract the sign bit as a 0/1 boolean.
+; CHECK-LABEL: uo_f128:
+; CHECK: ldq $27, _OtsEqlX($29)
+; CHECK: srl {{.*}}, 63,
+define i1 @uo_f128(ptr byref(fp128) %a, ptr byref(fp128) %b) {
+  %av = load fp128, ptr %a
+  %bv = load fp128, ptr %b
+  %r = fcmp uno fp128 %av, %bv
+  ret i1 %r
+}
+
+; SETO(a,b) = !SETUO(a,b): same sign-bit trick, then invert.
+; CHECK-LABEL: o_f128:
+; CHECK: ldq $27, _OtsEqlX($29)
+; CHECK: srl {{.*}}, 63,
+define i1 @o_f128(ptr byref(fp128) %a, ptr byref(fp128) %b) {
+  %av = load fp128, ptr %a
+  %bv = load fp128, ptr %b
+  %r = fcmp ord fp128 %av, %bv
+  ret i1 %r
+}
+
 ; An icmp on an extended (non-simple) integer type reaches the same f128
 ; combine hook.  It must bail out on the EVT rather than assert in
 ; getSimpleValueType().
