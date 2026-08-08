@@ -27,7 +27,9 @@ class Proc<string Name, list<SubtargetFeature> Features>
     : Processor<Name, NoItineraries, Features>;
 
 // Each generation uses its own scheduling model; the generic CPU defaults to
-// the EV6 model.
+// the EV6 model.  It carries no features, including no precise arithmetic
+// traps: with no -mcpu the target has to run on the oldest generation, and an
+// ev4 or ev5 needs the trap barriers -mtrap-precision=i asks for.
 def : ProcessorModel<"generic", Alpha21264Model, []>;
 def : ProcessorModel<"ev4",     Alpha21064Model, []>;
 def : ProcessorModel<"ev45",    Alpha21064Model, []>;
@@ -35,10 +37,11 @@ def : ProcessorModel<"ev5",     Alpha21164Model, []>;
 def : ProcessorModel<"ev56",    Alpha21164Model, [FeatureBWX]>;
 def : ProcessorModel<"pca56",   Alpha21164Model, [FeatureBWX, FeatureMVI]>;
 def : ProcessorModel<"ev6",     Alpha21264Model,
-                     [FeatureBWX, FeatureMVI, FeatureFIX, FeaturePrefetch]>;
+                     [FeatureBWX, FeatureMVI, FeatureFIX, FeaturePrefetch,
+                      FeaturePreciseArithTraps]>;
 def : ProcessorModel<"ev67",    Alpha21264Model,
                      [FeatureBWX, FeatureMVI, FeatureFIX, FeatureCIX,
-                      FeaturePrefetch]>;
+                      FeaturePrefetch, FeaturePreciseArithTraps]>;
 
 //===----------------------------------------------------------------------===//
 // Target declaration.

@@ -25,6 +25,7 @@ add_llvm_target(AlphaCodeGen
   AlphaSubtarget.cpp
   AlphaTargetMachine.cpp
   AlphaTargetObjectFile.cpp
+  AlphaTrapBarriers.cpp
   AlphaVerifyInvariants.cpp
 
   LINK_COMPONENTS

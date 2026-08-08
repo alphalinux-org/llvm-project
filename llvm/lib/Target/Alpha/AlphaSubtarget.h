@@ -82,6 +82,8 @@ public:
   bool hasSmallText() const { return HasSmallText; }
   bool hasBuildConstants() const { return HasBuildConstants; }
   bool hasNoFPRegs() const { return HasNoFPRegs; }
+  bool hasTrapPrecisionInsn() const { return HasTrapPrecisionInsn; }
+  bool hasPreciseArithTraps() const { return HasPreciseArithTraps; }
 
   // Whether physical register PhysReg was reserved with -ffixed-$<n>.
   bool isRegisterReserved(MCPhysReg PhysReg) const {
