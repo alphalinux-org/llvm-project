@@ -80,6 +80,18 @@ void AlphaAsmPrinter::emitStartOfAsmFile(Module &M) {
 }
 
 MCOperand AlphaAsmPrinter::lowerOperand(const MachineOperand &MO) const {
+  // A reference to Sym, plus the operand's offset if it has one.  The offset is
+  // part of the address -- a field of a global, an element of a constant pool
+  // entry that was indexed into -- and dropping it would name the start of the
+  // object instead.
+  auto symbolOperand = [&](MCSymbol *Sym) {
+    const MCExpr *Expr = MCSymbolRefExpr::create(Sym, OutContext);
+    if (MO.getOffset())
+      Expr = MCBinaryExpr::createAdd(
+          Expr, MCConstantExpr::create(MO.getOffset(), OutContext), OutContext);
+    return MCOperand::createExpr(Expr);
+  };
+
   switch (MO.getType()) {
   case MachineOperand::MO_Register:
     if (MO.isImplicit())
@@ -92,28 +104,15 @@ MCOperand AlphaAsmPrinter::lowerOperand(const MachineOperand &MO) const {
   case MachineOperand::MO_MachineBasicBlock:
     return MCOperand::createExpr(
         MCSymbolRefExpr::create(MO.getMBB()->getSymbol(), OutContext));
-  case MachineOperand::MO_GlobalAddress: {
-    const MCExpr *Expr =
-        MCSymbolRefExpr::create(getSymbol(MO.getGlobal()), OutContext);
-    if (MO.getOffset())
-      Expr = MCBinaryExpr::createAdd(
-          Expr, MCConstantExpr::create(MO.getOffset(), OutContext), OutContext);
-    return MCOperand::createExpr(Expr);
-  }
-  case MachineOperand::MO_ConstantPoolIndex: {
-    // The offset is part of the address: a constant pool entry can be indexed
-    // into (a vector splat's element, an aggregate's field), and dropping it
-    // names the start of the entry instead.
-    const MCExpr *Expr =
-        MCSymbolRefExpr::create(GetCPISymbol(MO.getIndex()), OutContext);
-    if (MO.getOffset())
-      Expr = MCBinaryExpr::createAdd(
-          Expr, MCConstantExpr::create(MO.getOffset(), OutContext), OutContext);
-    return MCOperand::createExpr(Expr);
-  }
+  case MachineOperand::MO_GlobalAddress:
+    return symbolOperand(getSymbol(MO.getGlobal()));
+  case MachineOperand::MO_ConstantPoolIndex:
+    return symbolOperand(GetCPISymbol(MO.getIndex()));
   case MachineOperand::MO_JumpTableIndex:
     return MCOperand::createExpr(
         MCSymbolRefExpr::create(GetJTISymbol(MO.getIndex()), OutContext));
+  case MachineOperand::MO_BlockAddress:
+    return symbolOperand(GetBlockAddressSymbol(MO.getBlockAddress()));
   case MachineOperand::MO_ExternalSymbol:
     return MCOperand::createExpr(MCSymbolRefExpr::create(
         GetExternalSymbolSymbol(MO.getSymbolName()), OutContext));
@@ -189,6 +188,9 @@ bool AlphaAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
     return false;
   case MachineOperand::MO_ExternalSymbol:
     GetExternalSymbolSymbol(MO.getSymbolName())->print(O, MAI);
+    return false;
+  case MachineOperand::MO_BlockAddress:
+    GetBlockAddressSymbol(MO.getBlockAddress())->print(O, MAI);
     return false;
   default:
     return AsmPrinter::PrintAsmOperand(MI, OpNo, ExtraCode, O);
