@@ -62,6 +62,7 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   // Jump tables are emitted as GP-relative offset tables and dispatched with a
   // load and an indirect jump.
   setOperationAction(ISD::JumpTable, MVT::i64, Custom);
+  setOperationAction(ISD::BlockAddress, MVT::i64, Custom);
   setOperationAction(ISD::BR_JT, MVT::Other, Custom);
 
   // Aligned integer loads and stores are atomic; barriers are inserted around
@@ -682,6 +683,8 @@ SDValue AlphaTargetLowering::LowerOperation(SDValue Op,
     return LowerConstantPool(Op, DAG);
   case ISD::JumpTable:
     return LowerJumpTable(Op, DAG);
+  case ISD::BlockAddress:
+    return LowerBlockAddress(Op, DAG);
   case ISD::DYNAMIC_STACKALLOC:
     return LowerDYNAMIC_STACKALLOC(Op, DAG);
   case ISD::BR_CC:
@@ -930,6 +933,21 @@ SDValue AlphaTargetLowering::LowerJumpTable(SDValue Op,
   SDValue GP = DAG.getRegister(Alpha::R29, MVT::i64);
   SDValue Hi = DAG.getNode(AlphaISD::GPREL_HI, DL, MVT::i64, TJT, GP);
   return DAG.getNode(AlphaISD::GPREL_LO, DL, MVT::i64, TJT, Hi);
+}
+
+SDValue AlphaTargetLowering::LowerBlockAddress(SDValue Op,
+                                               SelectionDAG &DAG) const {
+  // A block address (taken with &&label) is local, so it is addressed
+  // GP-relative just like a jump table or constant pool entry.
+  DAG.getMachineFunction().getInfo<AlphaMachineFunctionInfo>()->setUsesGP();
+
+  auto *BA = cast<BlockAddressSDNode>(Op);
+  SDLoc DL(Op);
+  SDValue TBA = DAG.getTargetBlockAddress(BA->getBlockAddress(), MVT::i64,
+                                          BA->getOffset());
+  SDValue GP = DAG.getRegister(Alpha::R29, MVT::i64);
+  SDValue Hi = DAG.getNode(AlphaISD::GPREL_HI, DL, MVT::i64, TBA, GP);
+  return DAG.getNode(AlphaISD::GPREL_LO, DL, MVT::i64, TBA, Hi);
 }
 
 SDValue AlphaTargetLowering::LowerDYNAMIC_STACKALLOC(SDValue Op,

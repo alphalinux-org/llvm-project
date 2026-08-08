@@ -749,6 +749,10 @@ def : Pat<(AlphaGprelHi tglobaladdr:$sym, GPRC:$base),
           (LDAHg tglobaladdr:$sym, GPRC:$base)>;
 def : Pat<(AlphaGprelLo tglobaladdr:$sym, GPRC:$base),
           (LDAg tglobaladdr:$sym, GPRC:$base)>;
+def : Pat<(AlphaGprelHi tblockaddress:$sym, GPRC:$base),
+          (LDAHg tblockaddress:$sym, GPRC:$base)>;
+def : Pat<(AlphaGprelLo tblockaddress:$sym, GPRC:$base),
+          (LDAg tblockaddress:$sym, GPRC:$base)>;
 
 // A load of a GP-relative address folds the !gprellow low part into the load
 // displacement, so only the ldah !gprelhigh is needed to form the address.
