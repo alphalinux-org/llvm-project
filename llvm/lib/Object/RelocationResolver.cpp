@@ -252,6 +252,36 @@ static uint64_t resolveSparc64(uint64_t Type, uint64_t Offset, uint64_t S,
   }
 }
 
+static bool supportsAlpha(uint64_t Type) {
+  switch (Type) {
+  case ELF::R_ALPHA_REFLONG:
+  case ELF::R_ALPHA_REFQUAD:
+  case ELF::R_ALPHA_SREL32:
+  case ELF::R_ALPHA_SREL64:
+    return true;
+  default:
+    return false;
+  }
+}
+
+static uint64_t resolveAlpha(uint64_t Type, uint64_t Offset, uint64_t S,
+                             uint64_t /*LocData*/, int64_t Addend) {
+  switch (Type) {
+  case ELF::R_ALPHA_REFLONG:
+    return (S + Addend) & 0xFFFFFFFF;
+  case ELF::R_ALPHA_REFQUAD:
+    return S + Addend;
+  // The PC-relative forms appear in the DWARF sections that llvm-dwarfdump
+  // resolves.
+  case ELF::R_ALPHA_SREL32:
+    return (S + Addend - Offset) & 0xFFFFFFFF;
+  case ELF::R_ALPHA_SREL64:
+    return S + Addend - Offset;
+  default:
+    llvm_unreachable("Invalid relocation type");
+  }
+}
+
 /// Returns true if \c Obj is an AMDGPU code object based solely on the value
 /// of e_machine.
 ///
@@ -836,6 +866,8 @@ getRelocationResolver(const ObjectFile &Obj) {
         return {supportsSystemZ, resolveSystemZ};
       case Triple::sparcv9:
         return {supportsSparc64, resolveSparc64};
+      case Triple::alpha:
+        return {supportsAlpha, resolveAlpha};
       case Triple::amdgpu:
         return {supportsAmdgpu, resolveAmdgpu};
       case Triple::riscv64:
