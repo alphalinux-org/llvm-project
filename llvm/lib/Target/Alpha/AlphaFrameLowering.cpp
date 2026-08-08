@@ -313,5 +313,12 @@ MachineBasicBlock::iterator AlphaFrameLowering::eliminateCallFramePseudoInstr(
 }
 
 bool AlphaFrameLowering::hasFPImpl(const MachineFunction &MF) const {
-  return MF.getFrameInfo().hasVarSizedObjects();
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  // A frame pointer is needed when the stack pointer moves during the function,
+  // and when the frame address is taken, since that address then has to name
+  // something that does not move.  It is also needed whenever the user asks for
+  // one: -fno-omit-frame-pointer reaches here as DisableFramePointerElim, and
+  // without this test the option does nothing at all on Alpha.
+  return MF.getTarget().Options.DisableFramePointerElim(MF) ||
+         MFI.hasVarSizedObjects() || MFI.isFrameAddressTaken();
 }
