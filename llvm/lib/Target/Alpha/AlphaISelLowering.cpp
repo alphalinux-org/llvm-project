@@ -63,6 +63,8 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   // load and an indirect jump.
   setOperationAction(ISD::JumpTable, MVT::i64, Custom);
   setOperationAction(ISD::BlockAddress, MVT::i64, Custom);
+  setOperationAction(ISD::RETURNADDR, MVT::i64, Custom);
+  setOperationAction(ISD::FRAMEADDR, MVT::i64, Custom);
   setOperationAction(ISD::BR_JT, MVT::Other, Custom);
 
   // Aligned integer loads and stores are atomic; barriers are inserted around
@@ -685,6 +687,10 @@ SDValue AlphaTargetLowering::LowerOperation(SDValue Op,
     return LowerJumpTable(Op, DAG);
   case ISD::BlockAddress:
     return LowerBlockAddress(Op, DAG);
+  case ISD::RETURNADDR:
+    return LowerRETURNADDR(Op, DAG);
+  case ISD::FRAMEADDR:
+    return LowerFRAMEADDR(Op, DAG);
   case ISD::DYNAMIC_STACKALLOC:
     return LowerDYNAMIC_STACKALLOC(Op, DAG);
   case ISD::BR_CC:
@@ -933,6 +939,41 @@ SDValue AlphaTargetLowering::LowerJumpTable(SDValue Op,
   SDValue GP = DAG.getRegister(Alpha::R29, MVT::i64);
   SDValue Hi = DAG.getNode(AlphaISD::GPREL_HI, DL, MVT::i64, TJT, GP);
   return DAG.getNode(AlphaISD::GPREL_LO, DL, MVT::i64, TJT, Hi);
+}
+
+SDValue AlphaTargetLowering::LowerRETURNADDR(SDValue Op,
+                                             SelectionDAG &DAG) const {
+  MachineFunction &MF = DAG.getMachineFunction();
+  MF.getFrameInfo().setReturnAddressIsTaken(true);
+
+  SDLoc DL(Op);
+  // Only the current frame's return address is available; deeper frames are not
+  // reachable without unwinding, so return zero for them.
+  if (Op.getConstantOperandVal(0) != 0)
+    return DAG.getConstant(0, DL, MVT::i64);
+
+  // The return address arrives in $26; capture its entry value.
+  Register RA = MF.addLiveIn(Alpha::R26, &Alpha::GPRCRegClass);
+  return DAG.getCopyFromReg(DAG.getEntryNode(), DL, RA, MVT::i64);
+}
+
+SDValue AlphaTargetLowering::LowerFRAMEADDR(SDValue Op,
+                                            SelectionDAG &DAG) const {
+  MachineFunction &MF = DAG.getMachineFunction();
+  SDLoc DL(Op);
+
+  // A frame carries no link to the one that called it, so only this function's
+  // own frame can be named; deeper frames would need an unwinder.  Answering
+  // for one of those needs no frame of our own, so say nothing was taken.
+  if (Op.getConstantOperandVal(0) != 0)
+    return DAG.getConstant(0, DL, MVT::i64);
+
+  MF.getFrameInfo().setFrameAddressIsTaken(true);
+
+  // Taking the frame address forces a frame pointer (see hasFPImpl), so this
+  // reads $15 as the prologue set it up, not the value it arrived with.
+  Register FP = Subtarget.getRegisterInfo()->getFrameRegister(MF);
+  return DAG.getCopyFromReg(DAG.getEntryNode(), DL, FP, MVT::i64);
 }
 
 SDValue AlphaTargetLowering::LowerBlockAddress(SDValue Op,
