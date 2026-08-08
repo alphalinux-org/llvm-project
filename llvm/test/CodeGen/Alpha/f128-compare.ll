@@ -84,3 +84,17 @@ define i1 @une_f128_strict(ptr byref(fp128) %a, ptr byref(fp128) %b) strictfp {
 }
 
 declare i1 @llvm.experimental.constrained.fcmp.f128(fp128, fp128, metadata, metadata) strictfp
+
+; An icmp on an extended (non-simple) integer type reaches the same f128
+; combine hook.  It must bail out on the EVT rather than assert in
+; getSimpleValueType().
+; CHECK-LABEL: icmp_i65:
+define i1 @icmp_i65(i64 %n) {
+  %w = zext i64 %n to i65
+  %o = call { i65, i1 } @llvm.sadd.with.overflow.i65(i65 %w, i65 32)
+  %v = extractvalue { i65, i1 } %o, 0
+  %t = trunc i65 %v to i64
+  %s = sext i64 %t to i65
+  %r = icmp ne i65 %v, %s
+  ret i1 %r
+}

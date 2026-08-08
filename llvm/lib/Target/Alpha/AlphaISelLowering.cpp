@@ -938,8 +938,7 @@ SDValue AlphaTargetLowering::LowerF128Binary(SDNode *N,
     return SDValue();
 
   bool IsStrict = N->isStrictFPOpcode();
-  MVT ResVT = N->getSimpleValueType(0);
-  if (ResVT != MVT::f128)
+  if (N->getValueType(0) != MVT::f128)
     return SDValue();
 
   SelectionDAG &DAG = DCI.DAG;
@@ -1042,12 +1041,25 @@ SDValue AlphaTargetLowering::LowerF128Convert(SDNode *N,
 
   unsigned Opc = N->getOpcode();
 
-  // --- f64 -> f128: _OtsConvertFloatTX(double in $f16) -> $16/$17 ---
+  // --- f32/f64 -> f128: _OtsConvertFloatTX(double in $f16) -> $16/$17 ---
   if (Opc == ISD::FP_EXTEND || Opc == ISD::STRICT_FP_EXTEND) {
     SDValue Src = IsStrict ? N->getOperand(1) : N->getOperand(0);
-    if (N->getSimpleValueType(0) != MVT::f128 ||
-        Src.getSimpleValueType() != MVT::f64)
+    EVT SrcVT = Src.getValueType();
+    if (N->getValueType(0) != MVT::f128 ||
+        (SrcVT != MVT::f64 && SrcVT != MVT::f32 && SrcVT != MVT::f16))
       return SDValue();
+
+    // f16 -> f32 -> f64 -> f128, and f32 -> f64 is exact (no rounding), so use
+    // non-strict extends even inside a constrained operation; then fall through
+    // to the f64 -> f128 OTS call.  Widening here rather than leaving an
+    // f16 -> f128 extend matters: legalizing that one would build an
+    // f32 -> f128 extend of its own, too late for this interception to see.
+    if (SrcVT == MVT::f16) {
+      Src = DAG.getNode(ISD::FP_EXTEND, DL, MVT::f32, Src);
+      SrcVT = MVT::f32;
+    }
+    if (SrcVT == MVT::f32)
+      Src = DAG.getNode(ISD::FP_EXTEND, DL, MVT::f64, Src);
 
     SDValue Pv = DAG.getNode(
         AlphaISD::LITERAL, DL, MVT::i64,
@@ -1079,11 +1091,14 @@ SDValue AlphaTargetLowering::LowerF128Convert(SDNode *N,
     return Result;
   }
 
-  // --- f128 -> f64: _OtsConvertFloatXT(al,ah,$16/$17, round $18) -> $f0 ---
+  // --- f128 -> f64/f32: _OtsConvertFloatXT(al,ah,$16/$17, round $18) -> $f0
+  // --- For f32, a second hardware f64->f32 truncation follows (matching GCC's
+  // code-gen, which also goes through double for the fp128->float path).
   if (Opc == ISD::FP_ROUND || Opc == ISD::STRICT_FP_ROUND) {
     SDValue Src = IsStrict ? N->getOperand(1) : N->getOperand(0);
-    if (N->getSimpleValueType(0) != MVT::f64 ||
-        Src.getSimpleValueType() != MVT::f128)
+    EVT DstVT = N->getValueType(0);
+    if ((DstVT != MVT::f64 && DstVT != MVT::f32) ||
+        Src.getValueType() != MVT::f128)
       return SDValue();
 
     auto [Lo, Hi] = splitF128(DAG, DL, MF, DAG.getEntryNode(), Src);
@@ -1123,6 +1138,17 @@ SDValue AlphaTargetLowering::LowerF128Convert(SDNode *N,
     SDValue Result = DAG.getCopyFromReg(Chain, DL, Alpha::F0, MVT::f64, Glue);
     Chain = Result.getValue(1);
 
+    // f128 -> f32: narrow the intermediate double to float with cvtts.
+    //
+    // This rounds twice, and the two roundings can disagree with a single one:
+    // a value that lands on an f64 midpoint rounds again from there.  It is
+    // done anyway because the OTS runtime has no X-to-S routine to go directly
+    // -- _OtsConvertFloatXT is the only conversion out of X_floating -- so
+    // there is nothing else to call, and gcc emits the same pair.
+    if (DstVT == MVT::f32)
+      Result = DAG.getNode(ISD::FP_ROUND, DL, MVT::f32, Result,
+                           DAG.getIntPtrConstant(0, DL, /*isTarget=*/true));
+
     if (IsStrict) {
       DCI.CombineTo(N, Result, Chain);
       return SDValue(N, 0);
@@ -1133,13 +1159,18 @@ SDValue AlphaTargetLowering::LowerF128Convert(SDNode *N,
   // --- i64/i32 -> f128: _OtsCvtQX / _OtsCvtQUX(a -> $16) -> $16/$17 ---
   if (Opc == ISD::SINT_TO_FP || Opc == ISD::UINT_TO_FP ||
       Opc == ISD::STRICT_SINT_TO_FP || Opc == ISD::STRICT_UINT_TO_FP) {
-    if (N->getSimpleValueType(0) != MVT::f128)
+    if (N->getValueType(0) != MVT::f128)
       return SDValue();
 
     bool IsUnsigned = (Opc == ISD::UINT_TO_FP || Opc == ISD::STRICT_UINT_TO_FP);
     SDValue Src = IsStrict ? N->getOperand(1) : N->getOperand(0);
+    // _OtsCvtQ[U]X takes a single i64 argument, so anything wider (i128, or an
+    // extended type such as i65) has to go the generic route instead.
+    EVT SrcVT = Src.getValueType();
+    if (!SrcVT.isSimple() || SrcVT.getSizeInBits() > 64)
+      return SDValue();
     // Widen sub-i64 integers to i64 (the OTS routine takes an i64 argument).
-    if (Src.getSimpleValueType() != MVT::i64)
+    if (SrcVT != MVT::i64)
       Src = DAG.getNode(IsUnsigned ? ISD::ZERO_EXTEND : ISD::SIGN_EXTEND, DL,
                         MVT::i64, Src);
 
@@ -1177,7 +1208,13 @@ SDValue AlphaTargetLowering::LowerF128Convert(SDNode *N,
   if (Opc == ISD::FP_TO_SINT || Opc == ISD::FP_TO_UINT ||
       Opc == ISD::STRICT_FP_TO_SINT || Opc == ISD::STRICT_FP_TO_UINT) {
     SDValue Src = IsStrict ? N->getOperand(1) : N->getOperand(0);
-    if (Src.getSimpleValueType() != MVT::f128)
+    if (Src.getValueType() != MVT::f128)
+      return SDValue();
+
+    // _OtsCvtXQ returns a single i64, so a wider or extended result type has to
+    // go the generic route instead.
+    EVT ResEVT = N->getValueType(0);
+    if (!ResEVT.isSimple() || ResEVT.getSizeInBits() > 64)
       return SDValue();
 
     auto [Lo, Hi] = splitF128(DAG, DL, MF, DAG.getEntryNode(), Src);
@@ -1216,9 +1253,8 @@ SDValue AlphaTargetLowering::LowerF128Convert(SDNode *N,
     SDValue Result = DAG.getCopyFromReg(Chain, DL, Alpha::R0, MVT::i64, Glue);
     Chain = Result.getValue(1);
 
-    MVT ResVT = N->getSimpleValueType(0);
-    if (ResVT != MVT::i64)
-      Result = DAG.getNode(ISD::TRUNCATE, DL, ResVT, Result);
+    if (ResEVT != MVT::i64)
+      Result = DAG.getNode(ISD::TRUNCATE, DL, ResEVT, Result);
 
     if (IsStrict) {
       DCI.CombineTo(N, Result, Chain);
@@ -1239,7 +1275,9 @@ SDValue AlphaTargetLowering::LowerF128Compare(SDNode *N,
                   N->getOpcode() == ISD::STRICT_FSETCCS;
   // STRICT_FSETCC: (chain, LHS, RHS, CC);  SETCC: (LHS, RHS, CC)
   SDValue LHS = IsStrict ? N->getOperand(1) : N->getOperand(0);
-  if (LHS.getSimpleValueType() != MVT::f128)
+  // Use EVT, not MVT: a plain SETCC can compare extended types (an i65 from
+  // llvm.sadd.with.overflow, say), and getSimpleValueType() asserts on those.
+  if (LHS.getValueType() != MVT::f128)
     return SDValue();
 
   SelectionDAG &DAG = DCI.DAG;
@@ -1349,7 +1387,7 @@ SDValue AlphaTargetLowering::LowerF128Compare(SDNode *N,
   // getSetCCResultType.  Return a value of the same type as the SETCC node to
   // avoid a type mismatch that would leave an unselectable zero_extend
   // i64->i64.
-  MVT SetCCVT = N->getSimpleValueType(0);
+  EVT SetCCVT = N->getValueType(0);
   if (SetCCVT != MVT::i64)
     Result = DAG.getNode(ISD::TRUNCATE, DL, SetCCVT, Result);
 
@@ -1364,7 +1402,7 @@ SDValue AlphaTargetLowering::LowerF128Bitwise(SDNode *N,
                                               DAGCombinerInfo &DCI) const {
   if (!DCI.isBeforeLegalize())
     return SDValue();
-  if (N->getSimpleValueType(0) != MVT::f128)
+  if (N->getValueType(0) != MVT::f128)
     return SDValue();
 
   SelectionDAG &DAG = DCI.DAG;
