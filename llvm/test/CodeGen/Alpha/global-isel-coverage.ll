@@ -7,8 +7,8 @@
 ; is the point of the test: without it an unlegalizable function quietly falls
 ; back to SelectionDAG and the gap stays invisible.
 ;
-; The second run line is ev67, where sqrt is an instruction rather than an
-; expansion, so both sides of that rule are covered.
+; The second run line is ev67, where ctpop/ctlz/cttz and sqrt are instructions
+; rather than expansions, so both sides of those rules are covered.
 ;
 ; A switch dense enough to become a jump table is deliberately absent: the
 ; dispatch is the gp-relative sequence LowerBR_JT builds and the selector has
@@ -49,6 +49,23 @@ define double @fsqrt(double %x) {
   ret double %r
 }
 
+; CHECK-LABEL: counts:
+define i64 @counts(i64 %x) {
+  %a = call i64 @llvm.ctpop.i64(i64 %x)
+  %b = call i64 @llvm.ctlz.i64(i64 %x, i1 false)
+  %c = call i64 @llvm.cttz.i64(i64 %x, i1 false)
+  %d = add i64 %a, %b
+  %e = add i64 %d, %c
+  ret i64 %e
+}
+
+; CHECK-LABEL: bswap_abs:
+define i64 @bswap_abs(i64 %x) {
+  %a = call i64 @llvm.bswap.i64(i64 %x)
+  %b = call i64 @llvm.abs.i64(i64 %a, i1 false)
+  ret i64 %b
+}
+
 ; CHECK-LABEL: overflow:
 define i64 @overflow(i64 %a, i64 %b) {
   %p = call {i64, i1} @llvm.uadd.with.overflow.i64(i64 %a, i64 %b)
@@ -68,4 +85,9 @@ define i64 @wide_i128(i64 %a, i64 %b) {
 
 declare double @llvm.fabs.f64(double)
 declare double @llvm.sqrt.f64(double)
+declare i64 @llvm.ctpop.i64(i64)
+declare i64 @llvm.ctlz.i64(i64, i1)
+declare i64 @llvm.cttz.i64(i64, i1)
+declare i64 @llvm.bswap.i64(i64)
+declare i64 @llvm.abs.i64(i64, i1)
 declare {i64, i1} @llvm.uadd.with.overflow.i64(i64, i64)

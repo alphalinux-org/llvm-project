@@ -1,4 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
+; RUN: llc -mtriple=alpha-unknown-linux-gnu -global-isel -global-isel-abort=1 < %s | FileCheck %s
 
 ; A symbol the linker resolves itself sits at a fixed distance from the global
 ; pointer, so its address is formed with an ldah/lda pair rather than loaded
