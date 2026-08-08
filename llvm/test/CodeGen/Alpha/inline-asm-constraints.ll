@@ -33,3 +33,48 @@ define void @putR(ptr %p, i64 %x) {
   call void asm sideeffect "stl ${0:r}, $1", "rJ,m"(i64 %x, ptr %p)
   ret void
 }
+
+; A non-zero literal reaching the "r" modifier through an immediate constraint
+; prints as itself.  gcc's %r special-cases only the zero, and an operate
+; instruction takes an 8-bit literal where a register would go, so this is a
+; well-formed operand rather than an "invalid operand in inline asm".
+; CHECK-LABEL: addI_r:
+; CHECK: addq $16, 7, $0
+define i64 @addI_r(i64 %x) {
+  %r = call i64 asm "addq $1, ${2:r}, $0", "=r,r,I"(i64 %x, i64 7)
+  ret i64 %r
+}
+
+; A zap byte-mask: every byte of the value is kept whole or cleared.
+; CHECK-LABEL: useM:
+; CHECK: and $16, 65535, $0
+define i64 @useM(i64 %x) {
+  %r = call i64 asm "and $1, $2, $0", "=r,r,M"(i64 %x, i64 65535)
+  ret i64 %r
+}
+
+; A value with a partial byte is not one, so the register alternative is used.
+; CHECK-LABEL: notM:
+; CHECK: lda [[R:\$[0-9]+]], 7($31)
+; CHECK: and $16, [[R]], $0
+define i64 @notM(i64 %x) {
+  %r = call i64 asm "and $1, $2, $0", "=r,r,rM"(i64 %x, i64 7)
+  ret i64 %r
+}
+
+; The remaining constant letters: an ldah constant, a complemented and a
+; negated 8-bit value, a scale and a shift count.  Each prints as itself.
+; CHECK-LABEL: useLNOPS:
+; CHECK: ldah $16, 65536($31)
+; CHECK: bic $16, -256, $16
+; CHECK: subq $16, -255, $16
+; CHECK: addq $16, 3, $16
+; CHECK: sll $16, 63, $16
+define void @useLNOPS(i64 %x) {
+  call void asm sideeffect "ldah $0, $1($$31)", "r,L"(i64 %x, i64 65536)
+  call void asm sideeffect "bic $0, $1, $0", "r,N"(i64 %x, i64 -256)
+  call void asm sideeffect "subq $0, $1, $0", "r,O"(i64 %x, i64 -255)
+  call void asm sideeffect "addq $0, $1, $0", "r,P"(i64 %x, i64 3)
+  call void asm sideeffect "sll $0, $1, $0", "r,S"(i64 %x, i64 63)
+  ret void
+}

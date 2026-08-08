@@ -395,7 +395,56 @@ AlphaTargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
       return std::make_pair(0U, &Alpha::F4RCRegClass);
     }
   }
+
+  // An explicit physical register named numerically, e.g. {$0} or {$f0}.  The
+  // kernel binds register variables to specific registers this way for its
+  // PAL-call and syscall sequences.
+  if (Constraint.size() > 2 && Constraint.front() == '{' &&
+      Constraint.back() == '}') {
+    StringRef Name = Constraint.substr(1, Constraint.size() - 2);
+    unsigned N;
+    if (Name.consume_front("$")) {
+      bool IsFP = Name.consume_front("f");
+      if (!Name.getAsInteger(10, N) && N < 32) {
+        if (IsFP)
+          return std::make_pair((unsigned)(Alpha::F0 + N),
+                                VT == MVT::f64 ? &Alpha::F8RCRegClass
+                                               : &Alpha::F4RCRegClass);
+        return std::make_pair((unsigned)(Alpha::R0 + N), &Alpha::GPRCRegClass);
+      }
+    }
+  }
   return TargetLowering::getRegForInlineAsmConstraint(TRI, Constraint, VT);
+}
+
+Register
+AlphaTargetLowering::getRegisterByName(const char *RegName, LLT /*Ty*/,
+                                       const MachineFunction &MF) const {
+  // Accept the numeric register spelling used for global register variables,
+  // e.g. the kernel's  register T *p __asm__("$8");  and floating "$f0".
+  StringRef Name(RegName);
+  unsigned N;
+  Register Reg;
+  if (Name.consume_front("$")) {
+    bool IsFP = Name.consume_front("f");
+    if (!Name.getAsInteger(10, N) && N < 32)
+      Reg = IsFP ? Alpha::F0 + N : Alpha::R0 + N;
+  }
+  if (!Reg)
+    report_fatal_error(Twine("Invalid register name \"") + RegName + "\".",
+                       /*GenCrashDiag=*/false);
+
+  // The register has to be out of the allocator's reach, or the value the
+  // variable names is whatever the allocator last put there.  A register is out
+  // of reach because the ABI reserves it ($29, $30, $31, the frame pointer) or
+  // because the user reserved it with -ffixed-$<n>; this is the same check
+  // RISCV and AArch64 make.
+  const AlphaRegisterInfo *TRI = Subtarget.getRegisterInfo();
+  if (!TRI->getReservedRegs(MF).test(Reg.id()))
+    report_fatal_error(Twine("Trying to obtain non-reserved register \"") +
+                           RegName + "\"; add -ffixed-" + RegName + ".",
+                       /*GenCrashDiag=*/false);
+  return Reg;
 }
 
 const char *AlphaTargetLowering::getTargetNodeName(unsigned Opcode) const {
