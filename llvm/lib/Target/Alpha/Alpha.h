@@ -22,6 +22,7 @@ namespace llvm {
 class AlphaTargetMachine;
 class FunctionPass;
 
+FunctionPass *createAlphaTrapBarriers();
 FunctionPass *createAlphaISelDag(AlphaTargetMachine &TM,
                                  CodeGenOptLevel OptLevel);
 

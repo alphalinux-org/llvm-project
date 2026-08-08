@@ -24,6 +24,7 @@ add_llvm_target(AlphaCodeGen
   AlphaSubtarget.cpp
   AlphaTargetMachine.cpp
   AlphaTargetObjectFile.cpp
+  AlphaTrapBarriers.cpp
 
   LINK_COMPONENTS
   AsmPrinter
