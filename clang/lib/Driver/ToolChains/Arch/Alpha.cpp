@@ -52,4 +52,25 @@ void alpha::getAlphaTargetFeatures(const Driver &D, const ArgList &Args,
   } else {
     Handle(options::OPT_mieee, options::OPT_mno_ieee, "ieee");
   }
+
+  // -mno-fp-regs keeps the floating-point registers out of use entirely; the
+  // kernel is built this way so it need not save FP state on kernel entry.
+  Handle(options::OPT_mno_fp_regs, options::OPT_mfp_regs, "no-fp-regs");
+
+  // -ffixed-$<n> reserves integer register $<n> from allocation.
+  static const std::pair<unsigned, StringRef> FixedRegs[] = {
+#define ALPHA_FIXED(N) {options::OPT_ffixed_alpha_##N, "reserve-r" #N}
+      ALPHA_FIXED(0),  ALPHA_FIXED(1),  ALPHA_FIXED(2),  ALPHA_FIXED(3),
+      ALPHA_FIXED(4),  ALPHA_FIXED(5),  ALPHA_FIXED(6),  ALPHA_FIXED(7),
+      ALPHA_FIXED(8),  ALPHA_FIXED(9),  ALPHA_FIXED(10), ALPHA_FIXED(11),
+      ALPHA_FIXED(12), ALPHA_FIXED(13), ALPHA_FIXED(14), ALPHA_FIXED(15),
+      ALPHA_FIXED(16), ALPHA_FIXED(17), ALPHA_FIXED(18), ALPHA_FIXED(19),
+      ALPHA_FIXED(20), ALPHA_FIXED(21), ALPHA_FIXED(22), ALPHA_FIXED(23),
+      ALPHA_FIXED(24), ALPHA_FIXED(25), ALPHA_FIXED(26), ALPHA_FIXED(27),
+      ALPHA_FIXED(28), ALPHA_FIXED(29), ALPHA_FIXED(30), ALPHA_FIXED(31),
+#undef ALPHA_FIXED
+  };
+  for (const auto &[Opt, Feat] : FixedRegs)
+    if (Args.hasArg(Opt))
+      Features.push_back(Args.MakeArgString("+" + Feat));
 }
