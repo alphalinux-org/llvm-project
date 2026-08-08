@@ -109,6 +109,8 @@ bool AlphaPassConfig::addILPOpts() {
 }
 
 void AlphaPassConfig::addPreEmitPass() {
+  // Under -mtrap-precision=i, follow each trapping FP instruction with a trapb.
+  addPass(createAlphaTrapBarriers());
   // Rewrite branches whose target is beyond the 21-bit displacement.
   addPass(&BranchRelaxationPassID);
 }
