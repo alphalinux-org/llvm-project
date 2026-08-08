@@ -114,6 +114,14 @@ MCOperand AlphaAsmPrinter::lowerOperand(const MachineOperand &MO) const {
   case MachineOperand::MO_JumpTableIndex:
     return MCOperand::createExpr(
         MCSymbolRefExpr::create(GetJTISymbol(MO.getIndex()), OutContext));
+  case MachineOperand::MO_BlockAddress: {
+    const MCExpr *Expr = MCSymbolRefExpr::create(
+        GetBlockAddressSymbol(MO.getBlockAddress()), OutContext);
+    if (MO.getOffset())
+      Expr = MCBinaryExpr::createAdd(
+          Expr, MCConstantExpr::create(MO.getOffset(), OutContext), OutContext);
+    return MCOperand::createExpr(Expr);
+  }
   case MachineOperand::MO_ExternalSymbol:
     return MCOperand::createExpr(MCSymbolRefExpr::create(
         GetExternalSymbolSymbol(MO.getSymbolName()), OutContext));
@@ -183,6 +191,9 @@ bool AlphaAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
     return false;
   case MachineOperand::MO_ExternalSymbol:
     GetExternalSymbolSymbol(MO.getSymbolName())->print(O, MAI);
+    return false;
+  case MachineOperand::MO_BlockAddress:
+    GetBlockAddressSymbol(MO.getBlockAddress())->print(O, MAI);
     return false;
   default:
     return AsmPrinter::PrintAsmOperand(MI, OpNo, ExtraCode, O);
