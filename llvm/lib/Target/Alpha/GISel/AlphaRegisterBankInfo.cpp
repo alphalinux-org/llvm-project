@@ -257,6 +257,13 @@ AlphaRegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
         getOperandsMapping({&Alpha::ValueMappings[Alpha::GPR3OpsIdx],
                             &Alpha::ValueMappings[Alpha::GPR3OpsIdx]});
     break;
+  case G_SELECT:
+    OperandsMapping =
+        getOperandsMapping({&Alpha::ValueMappings[Alpha::GPR3OpsIdx],
+                            &Alpha::ValueMappings[Alpha::GPR3OpsIdx],
+                            &Alpha::ValueMappings[Alpha::GPR3OpsIdx],
+                            &Alpha::ValueMappings[Alpha::GPR3OpsIdx]});
+    break;
   case G_FPEXT:
   case G_FPTRUNC:
     OperandsMapping = &Alpha::ValueMappings[Alpha::FPR3OpsIdx];

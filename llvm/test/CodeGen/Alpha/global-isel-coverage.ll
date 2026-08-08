@@ -66,6 +66,13 @@ define i64 @bswap_abs(i64 %x) {
   ret i64 %b
 }
 
+; CHECK-LABEL: minmax:
+define i64 @minmax(i64 %a, i64 %b) {
+  %x = call i64 @llvm.smax.i64(i64 %a, i64 %b)
+  %y = call i64 @llvm.umin.i64(i64 %x, i64 %b)
+  ret i64 %y
+}
+
 ; CHECK-LABEL: overflow:
 define i64 @overflow(i64 %a, i64 %b) {
   %p = call {i64, i1} @llvm.uadd.with.overflow.i64(i64 %a, i64 %b)
@@ -90,4 +97,6 @@ declare i64 @llvm.ctlz.i64(i64, i1)
 declare i64 @llvm.cttz.i64(i64, i1)
 declare i64 @llvm.bswap.i64(i64)
 declare i64 @llvm.abs.i64(i64, i1)
+declare i64 @llvm.smax.i64(i64, i64)
+declare i64 @llvm.umin.i64(i64, i64)
 declare {i64, i1} @llvm.uadd.with.overflow.i64(i64, i64)

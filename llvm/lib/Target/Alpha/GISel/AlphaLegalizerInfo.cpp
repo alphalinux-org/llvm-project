@@ -105,6 +105,12 @@ AlphaLegalizerInfo::AlphaLegalizerInfo(const AlphaSubtarget &ST) {
   getActionDefinitionsBuilder({G_FPEXT, G_FPTRUNC})
       .legalFor({{s64, s32}, {s32, s64}});
 
+  // A conditional move leaves its destination alone when the condition is zero,
+  // so the false value is what the destination already holds.
+  getActionDefinitionsBuilder(G_SELECT)
+      .legalFor({{s64, s1}, {p0, s1}})
+      .clampScalar(0, s64, s64);
+
   // The memory intrinsics become libcalls, as they do on the SelectionDAG
   // path.
   getActionDefinitionsBuilder({G_MEMCPY, G_MEMMOVE, G_MEMSET}).libcall();
