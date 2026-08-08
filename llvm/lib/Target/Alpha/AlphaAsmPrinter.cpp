@@ -144,16 +144,45 @@ void AlphaAsmPrinter::emitInstruction(const MachineInstr *MI) {
 
 bool AlphaAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
                                       const char *ExtraCode, raw_ostream &O) {
-  if (ExtraCode && ExtraCode[0])
-    return AsmPrinter::PrintAsmOperand(MI, OpNo, ExtraCode, O);
-
   const MachineOperand &MO = MI->getOperand(OpNo);
+
+  if (ExtraCode && ExtraCode[0]) {
+    // The 'r' modifier prints a register operand, substituting $31 (the zero
+    // register) for a literal 0 -- the classic rJ inline-asm idiom.  A non-zero
+    // literal prints as itself: gcc's print_operand case 'r' special-cases only
+    // the zero and falls through to the ordinary operand printer otherwise, and
+    // an operate instruction takes an 8-bit literal in the same position, so
+    // `${0:r}' on an "I" operand is well-formed and must not be rejected.
+    if (ExtraCode[0] == 'r' && ExtraCode[1] == 0) {
+      if (MO.isImm()) {
+        if (MO.getImm() == 0)
+          O << "$31";
+        else
+          O << MO.getImm();
+        return false;
+      }
+      if (MO.isReg()) {
+        O << AlphaInstPrinter::getRegisterName(MO.getReg());
+        return false;
+      }
+    }
+    return AsmPrinter::PrintAsmOperand(MI, OpNo, ExtraCode, O);
+  }
+
   switch (MO.getType()) {
   case MachineOperand::MO_Register:
     O << AlphaInstPrinter::getRegisterName(MO.getReg());
     return false;
   case MachineOperand::MO_Immediate:
     O << MO.getImm();
+    return false;
+  case MachineOperand::MO_GlobalAddress:
+    getSymbol(MO.getGlobal())->print(O, MAI);
+    if (MO.getOffset())
+      O << '+' << MO.getOffset();
+    return false;
+  case MachineOperand::MO_ExternalSymbol:
+    GetExternalSymbolSymbol(MO.getSymbolName())->print(O, MAI);
     return false;
   default:
     return AsmPrinter::PrintAsmOperand(MI, OpNo, ExtraCode, O);
