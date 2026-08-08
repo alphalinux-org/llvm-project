@@ -33,3 +33,11 @@ define void @putR(ptr %p, i64 %x) {
   call void asm sideeffect "stl ${0:r}, $1", "rJ,m"(i64 %x, ptr %p)
   ret void
 }
+
+; An explicit physical register named numerically binds the operand to it.
+; CHECK-LABEL: physreg:
+; CHECK: bis $31, $16, $0
+define i64 @physreg(i64 %x) {
+  %r = call i64 asm "bis $$31, $1, $0", "={$0},{$16}"(i64 %x)
+  ret i64 %r
+}
