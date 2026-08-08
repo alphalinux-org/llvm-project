@@ -24,6 +24,7 @@ static uint64_t adjustFixupValue(unsigned Kind, uint64_t Value) {
   default:
     return Value;
   case Alpha::fixup_alpha_braddr:
+  case Alpha::fixup_alpha_brsgp:
     // 21-bit displacement in instruction units, relative to the instruction
     // after the branch: disp = (target - (branch + 4)) / 4.
     return ((Value - 4) >> 2) & 0x1fffff;
@@ -67,6 +68,7 @@ public:
         {"fixup_alpha_dtprello", 0, 16, 0},
         {"fixup_alpha_hint", 0, 14, 0},
         {"fixup_alpha_lituse_jsr", 0, 0, 0},
+        {"fixup_alpha_brsgp", 0, 21, 0},
     };
     if (mc::isRelocation(Kind))
       return {};
@@ -95,7 +97,8 @@ public:
                        Kind == MCFixupKind(Alpha::fixup_alpha_dtprelhi) ||
                        Kind == MCFixupKind(Alpha::fixup_alpha_dtprello) ||
                        Kind == MCFixupKind(Alpha::fixup_alpha_hint) ||
-                       Kind == MCFixupKind(Alpha::fixup_alpha_lituse_jsr);
+                       Kind == MCFixupKind(Alpha::fixup_alpha_lituse_jsr) ||
+                       Kind == MCFixupKind(Alpha::fixup_alpha_brsgp);
     maybeAddReloc(F, Fixup, Target, Value, AlwaysReloc ? false : IsResolved);
     if (mc::isRelocation(Kind) || AlwaysReloc)
       return;

@@ -45,10 +45,46 @@ enum Fixups {
   // that lets the linker relax a local call.
   fixup_alpha_hint,
   fixup_alpha_lituse_jsr,
+  // A 21-bit PC-relative branch to a routine sharing the caller's global
+  // pointer (R_ALPHA_BRSGP), from a `!samegp` suffix.
+  fixup_alpha_brsgp,
 
   fixup_alpha_invalid,
   NumTargetFixupKinds = fixup_alpha_invalid - FirstTargetFixupKind
 };
+
+// The `!name` relocation-specifier suffix that selects the given fixup kind
+// (empty for kinds without a specifier spelling).
+inline StringRef getSpecifierName(unsigned Kind) {
+  switch (Kind) {
+  case fixup_alpha_literal:
+    return "literal";
+  case fixup_alpha_gprelhigh:
+    return "gprelhigh";
+  case fixup_alpha_gprellow:
+    return "gprellow";
+  case fixup_alpha_gpdisp:
+    return "gpdisp";
+  case fixup_alpha_tprelhi:
+    return "tprelhi";
+  case fixup_alpha_tprello:
+    return "tprello";
+  case fixup_alpha_gottprel:
+    return "gottprel";
+  case fixup_alpha_tlsgd:
+    return "tlsgd";
+  case fixup_alpha_tlsldm:
+    return "tlsldm";
+  case fixup_alpha_dtprelhi:
+    return "dtprelhi";
+  case fixup_alpha_dtprello:
+    return "dtprello";
+  case fixup_alpha_brsgp:
+    return "samegp";
+  default:
+    return "";
+  }
+}
 } // namespace Alpha
 } // namespace llvm
 

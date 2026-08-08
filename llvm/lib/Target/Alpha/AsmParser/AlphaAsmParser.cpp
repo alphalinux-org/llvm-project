@@ -22,6 +22,7 @@
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSubtargetInfo.h"
+#include "llvm/MC/MCSymbolELF.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/Casting.h"
 
@@ -175,6 +176,10 @@ public:
 class AlphaAsmParser : public MCTargetAsmParser {
   MCAsmParser &Parser;
 
+  // The symbol named by the most recent `.ent`, whose st_other bits `.prologue`
+  // sets.
+  MCSymbol *CurEntSym = nullptr;
+
 #define GET_ASSEMBLER_HEADER
 #include "AlphaGenAsmMatcher.inc"
 
@@ -296,13 +301,47 @@ ParseStatus AlphaAsmParser::parseDirective(AsmToken DirectiveID) {
     }
   }
 
-  // ECOFF/OSF procedure-descriptor directives (.ent/.end/.frame/.prologue/
-  // .mask/.fmask) carry hand-written-assembly bookkeeping that the ELF object
-  // does not need.  Accept and ignore them.  .end in particular must be caught
-  // here, ahead of the generic directive that would otherwise stop assembly.
+  // ECOFF/OSF procedure-descriptor directives.  Most are hand-written-assembly
+  // bookkeeping the ELF object does not need, but .ent names a procedure and
+  // .prologue records how it establishes the global pointer, which the linker
+  // needs when a caller reaches it with `!samegp`.  .end in particular must be
+  // caught here, ahead of the generic directive that would stop assembly.
   StringRef ID = DirectiveID.getIdentifier();
-  if (ID == ".ent" || ID == ".end" || ID == ".frame" || ID == ".prologue" ||
-      ID == ".mask" || ID == ".fmask" || ID == ".usepv") {
+  if (ID == ".ent") {
+    StringRef Name;
+    if (getParser().parseIdentifier(Name))
+      return Error(getParser().getTok().getLoc(),
+                   "expected symbol name after .ent");
+    CurEntSym = getContext().getOrCreateSymbol(Name);
+    getParser().eatToEndOfStatement();
+    return ParseStatus::Success;
+  }
+  if (ID == ".prologue") {
+    int64_t Arg;
+    if (getParser().parseAbsoluteExpression(Arg))
+      return ParseStatus::Failure;
+    getParser().eatToEndOfStatement();
+    // .prologue 0 marks a routine that needs no procedure value (it runs on the
+    // caller's gp: STO_ALPHA_NOPV); .prologue 1 marks the standard two-word gp
+    // load a same-gp caller may skip (STO_ALPHA_STD_GPLOAD).
+    if (CurEntSym) {
+      auto *Sym = static_cast<MCSymbolELF *>(CurEntSym);
+      const unsigned STO_ALPHA_NOPV = 0x80, STO_ALPHA_STD_GPLOAD = 0x88;
+      unsigned Other = Sym->getOther() & ~STO_ALPHA_STD_GPLOAD;
+      if (Arg == 0)
+        Other |= STO_ALPHA_NOPV;
+      else if (Arg == 1)
+        Other |= STO_ALPHA_STD_GPLOAD;
+      Sym->setOther(Other);
+    }
+    return ParseStatus::Success;
+  }
+  if (ID == ".end") {
+    CurEntSym = nullptr;
+    getParser().eatToEndOfStatement();
+    return ParseStatus::Success;
+  }
+  if (ID == ".frame" || ID == ".mask" || ID == ".fmask" || ID == ".usepv") {
     getParser().eatToEndOfStatement();
     return ParseStatus::Success;
   }
@@ -418,6 +457,7 @@ bool AlphaAsmParser::parseInstruction(ParseInstructionInfo &Info,
                         .Case("tlsldm", Alpha::fixup_alpha_tlsldm)
                         .Case("dtprelhi", Alpha::fixup_alpha_dtprelhi)
                         .Case("dtprello", Alpha::fixup_alpha_dtprello)
+                        .Case("samegp", Alpha::fixup_alpha_brsgp)
                         .Default(0);
     if (!Spec)
       return Error(getLexer().getLoc(), "unknown relocation name");
@@ -468,7 +508,8 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   }
 
   // jsr $Ra, ($Rb): emit the bare jsr word.
-  if (Mnemonic == "jsr" && Operands.size() == 3) {
+  if (Mnemonic == "jsr" && Operands.size() == 3 && Operands[1]->isReg() &&
+      Operands[2]->isMem()) {
     MCInst Inst;
     Inst.setOpcode(Alpha::JSRr);
     Inst.addOperand(MCOperand::createReg(
@@ -480,18 +521,45 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     return false;
   }
 
-  // ret $31, ($26), 1: the canonical return, written in full in hand assembly.
-  // Our ret prints and encodes exactly this form, so emit the bare word.
-  if (Mnemonic == "ret" && Operands.size() == 4) {
+  // jsr $Ra, symbol: an indirect call to a symbol reached through the GOT (GNU
+  // as's jsr-to-symbol macro).  Load the target's address from its GOT entry
+  // into $27 (the procedure value) and jsr through it.
+  if (Mnemonic == "jsr" && Operands.size() == 3 && Operands[1]->isReg() &&
+      Operands[2]->isImm() &&
+      !isa<MCConstantExpr>(
+          static_cast<AlphaOperand &>(*Operands[2]).getImm())) {
+    MCRegister Ra = static_cast<AlphaOperand &>(*Operands[1]).getReg();
+    const MCExpr *Sym = static_cast<AlphaOperand &>(*Operands[2]).getImm();
+    MCInst Ptr; // ldq $27, symbol($gp) !literal
+    Ptr.setOpcode(Alpha::LDQl);
+    Ptr.addOperand(MCOperand::createReg(Alpha::R27));
+    Ptr.addOperand(MCOperand::createExpr(Sym));
+    Ptr.setLoc(IDLoc);
+    Out.emitInstruction(Ptr, getSTI());
+    MCInst Call; // jsr $Ra, ($27)
+    Call.setOpcode(Alpha::JSRr);
+    Call.addOperand(MCOperand::createReg(Ra));
+    Call.addOperand(MCOperand::createReg(Alpha::R27));
+    Call.setLoc(IDLoc);
+    Out.emitInstruction(Call, getSTI());
+    return false;
+  }
+
+  // ret $Ra, ($Rb), hint: the return written in full in hand assembly.  The
+  // return target register $Rb is what matters (it is not always $26); Ra=$31
+  // and hint=1 as our ret encodes, so route it through the RETb form.
+  if (Mnemonic == "ret" && Operands.size() == 4 && Operands[2]->isMem()) {
     MCInst Inst;
-    Inst.setOpcode(Alpha::RET);
+    Inst.setOpcode(Alpha::RETb);
+    Inst.addOperand(MCOperand::createReg(
+        static_cast<AlphaOperand &>(*Operands[2]).getMemBase()));
     Inst.setLoc(IDLoc);
     Out.emitInstruction(Inst, getSTI());
     return false;
   }
 
   // jmp $31, ($Rb), 0: an indirect jump through $Rb (the hint is advisory).
-  if (Mnemonic == "jmp" && Operands.size() == 4) {
+  if (Mnemonic == "jmp" && Operands.size() == 4 && Operands[2]->isMem()) {
     MCInst Inst;
     Inst.setOpcode(Alpha::JMP);
     Inst.addOperand(MCOperand::createReg(
@@ -499,6 +567,94 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     Inst.setLoc(IDLoc);
     Out.emitInstruction(Inst, getSTI());
     return false;
+  }
+
+  // jmp $Ra, symbol: a jump to a symbol reached through the GOT, expanded like
+  // jsr but discarding the return address.
+  if (Mnemonic == "jmp" && Operands.size() == 3 && Operands[1]->isReg() &&
+      Operands[2]->isImm() &&
+      !isa<MCConstantExpr>(
+          static_cast<AlphaOperand &>(*Operands[2]).getImm())) {
+    const MCExpr *Sym = static_cast<AlphaOperand &>(*Operands[2]).getImm();
+    MCInst Ptr; // ldq $27, symbol($gp) !literal
+    Ptr.setOpcode(Alpha::LDQl);
+    Ptr.addOperand(MCOperand::createReg(Alpha::R27));
+    Ptr.addOperand(MCOperand::createExpr(Sym));
+    Ptr.setLoc(IDLoc);
+    Out.emitInstruction(Ptr, getSTI());
+    MCInst Jmp; // jmp $31, ($27)
+    Jmp.setOpcode(Alpha::JMP);
+    Jmp.addOperand(MCOperand::createReg(Alpha::R27));
+    Jmp.setLoc(IDLoc);
+    Out.emitInstruction(Jmp, getSTI());
+    return false;
+  }
+
+  // jsr $Ra, ($Rb), hint: a computed call whose third operand is a
+  // branch-prediction hint (an R_ALPHA_HINT we do not need to emit).
+  if (Mnemonic == "jsr" && Operands.size() == 4 && Operands[1]->isReg() &&
+      Operands[2]->isMem()) {
+    MCInst Inst;
+    Inst.setOpcode(Alpha::JSRr);
+    Inst.addOperand(MCOperand::createReg(
+        static_cast<AlphaOperand &>(*Operands[1]).getReg()));
+    Inst.addOperand(MCOperand::createReg(
+        static_cast<AlphaOperand &>(*Operands[2]).getMemBase()));
+    Inst.setLoc(IDLoc);
+    Out.emitInstruction(Inst, getSTI());
+    return false;
+  }
+
+  // ldq/ldl/ldbu/ldwu $R, symbol: in large-data (GOT) mode GNU as expands a
+  // load from a bare symbol into a load of the symbol's GOT entry (its address)
+  // followed by a dereference of the requested width.  (GNU as also tags the
+  // second load with an R_ALPHA_LITUSE relaxation hint; omitting it costs an
+  // optimization, not correctness.)
+  unsigned DerefOp = StringSwitch<unsigned>(Mnemonic)
+                         .Case("ldq", Alpha::LDQ)
+                         .Case("ldl", Alpha::LDL)
+                         .Case("ldbu", Alpha::LDBU)
+                         .Case("ldwu", Alpha::LDWU)
+                         .Default(0);
+  if (DerefOp && Operands.size() == 3 && Operands[1]->isReg() &&
+      Operands[2]->isImm()) {
+    const MCExpr *Sym = static_cast<AlphaOperand &>(*Operands[2]).getImm();
+    if (!isa<MCConstantExpr>(Sym)) {
+      MCRegister R = static_cast<AlphaOperand &>(*Operands[1]).getReg();
+      MCInst Ptr; // ldq $R, symbol($gp) !literal  (the GOT slot is a quadword)
+      Ptr.setOpcode(Alpha::LDQl);
+      Ptr.addOperand(MCOperand::createReg(R));
+      Ptr.addOperand(MCOperand::createExpr(Sym));
+      Ptr.setLoc(IDLoc);
+      Out.emitInstruction(Ptr, getSTI());
+      MCInst Deref; // <load> $R, 0($R)  (the load itself, of the given width)
+      Deref.setOpcode(DerefOp);
+      Deref.addOperand(MCOperand::createReg(R));
+      Deref.addOperand(MCOperand::createReg(R));
+      Deref.addOperand(MCOperand::createImm(0));
+      Deref.setLoc(IDLoc);
+      Out.emitInstruction(Deref, getSTI());
+      return false;
+    }
+  }
+
+  // lda $R, symbol: the address of a symbol is its GOT entry, so GNU as loads
+  // it directly (like the ldq form but without the dereference).  A base
+  // register (lda $R, disp($base)) or a constant makes this an ordinary lda
+  // instead.
+  if (Mnemonic == "lda" && Operands.size() == 3 && Operands[1]->isReg() &&
+      Operands[2]->isImm()) {
+    const MCExpr *Sym = static_cast<AlphaOperand &>(*Operands[2]).getImm();
+    if (!isa<MCConstantExpr>(Sym)) {
+      MCInst Ptr; // ldq $R, symbol($gp) !literal
+      Ptr.setOpcode(Alpha::LDQl);
+      Ptr.addOperand(MCOperand::createReg(
+          static_cast<AlphaOperand &>(*Operands[1]).getReg()));
+      Ptr.addOperand(MCOperand::createExpr(Sym));
+      Ptr.setLoc(IDLoc);
+      Out.emitInstruction(Ptr, getSTI());
+      return false;
+    }
   }
 
   MCInst Inst;

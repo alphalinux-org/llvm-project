@@ -53,6 +53,8 @@ protected:
       return IsPCRel ? ELF::R_ALPHA_SREL64 : ELF::R_ALPHA_REFQUAD;
     case Alpha::fixup_alpha_braddr:
       return ELF::R_ALPHA_BRADDR;
+    case Alpha::fixup_alpha_brsgp:
+      return ELF::R_ALPHA_BRSGP;
     case Alpha::fixup_alpha_literal:
       return ELF::R_ALPHA_LITERAL;
     case Alpha::fixup_alpha_gprelhigh:

@@ -1853,3 +1853,7 @@ def : InstAlias<"andnot $Ra, $lit, $Rc", (BICi GPRC:$Rc, GPRC:$Ra, u8imm:$lit)>;
 // ldiq: load an immediate quadword.  GNU as implements the general 64-bit case
 // as a multi-instruction macro; the common small case is a single lda.
 def : InstAlias<"ldiq $Rc, $imm", (LDAi GPRC:$Rc, s16imm:$imm)>;
+
+// or: GNU as's name for the bis (logical or) instruction.
+def : InstAlias<"or $Ra, $Rb, $Rc", (BIS GPRC:$Rc, GPRC:$Ra, GPRC:$Rb)>;
+def : InstAlias<"or $Ra, $lit, $Rc", (BISi GPRC:$Rc, GPRC:$Ra, u8imm:$lit)>;

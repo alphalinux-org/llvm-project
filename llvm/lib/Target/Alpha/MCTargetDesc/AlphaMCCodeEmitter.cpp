@@ -180,9 +180,12 @@ AlphaMCCodeEmitter::getBranchTargetEncoding(const MCInst &MI, unsigned OpNo,
   if (MO.isImm())
     return static_cast<unsigned>(MO.getImm());
   assert(MO.isExpr() && "expected an expression for a branch target");
-  Fixups.push_back(MCFixup::create(0, MO.getExpr(),
-                                   MCFixupKind(Alpha::fixup_alpha_braddr),
-                                   /*PCRel=*/true));
+  // A `!samegp` suffix requests a BRSGP relocation instead of the usual BRADDR.
+  Alpha::Fixups Kind = Alpha::fixup_alpha_braddr;
+  if (auto *SE = dyn_cast<MCSpecifierExpr>(MO.getExpr()))
+    Kind = static_cast<Alpha::Fixups>(SE->getSpecifier());
+  Fixups.push_back(
+      MCFixup::create(0, MO.getExpr(), MCFixupKind(Kind), /*PCRel=*/true));
   return 0;
 }
 

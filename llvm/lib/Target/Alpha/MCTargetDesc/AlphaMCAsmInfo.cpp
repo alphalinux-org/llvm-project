@@ -7,6 +7,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "AlphaMCAsmInfo.h"
+#include "AlphaFixupKinds.h"
+#include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCTargetOptions.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/TargetParser/Triple.h"
@@ -21,9 +23,21 @@ AlphaMCAsmInfo::AlphaMCAsmInfo(const Triple &TT, const MCTargetOptions &Options)
   CommentString = "#";
   // `.align N` aligns to a 2^N boundary, matching GNU as on Alpha.
   AlignmentIsInBytes = false;
+  // A trailing `!name` is a relocation specifier, not an infix `!` operator.
+  UseExclaimForSpecifier = true;
   Data64bitsDirective = "\t.quad\t";
   GlobalDirective = "\t.globl\t";
   UsesELFSectionDirectiveForBSS = true;
   SupportsDebugInformation = true;
   ExceptionsType = ExceptionHandling::DwarfCFI;
+}
+
+void AlphaMCAsmInfo::printSpecifierExpr(raw_ostream &OS,
+                                        const MCSpecifierExpr &Expr) const {
+  // A relocation specifier prints as the subexpression followed by `!name`
+  // (the specifier value is the Alpha fixup kind it selects).
+  printExpr(OS, *Expr.getSubExpr());
+  StringRef Name = Alpha::getSpecifierName(Expr.getSpecifier());
+  if (!Name.empty())
+    OS << " !" << Name;
 }
