@@ -296,5 +296,9 @@ MachineBasicBlock::iterator AlphaFrameLowering::eliminateCallFramePseudoInstr(
 }
 
 bool AlphaFrameLowering::hasFPImpl(const MachineFunction &MF) const {
-  return MF.getFrameInfo().hasVarSizedObjects();
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  // A frame pointer is needed when the stack pointer moves during the function,
+  // and when the frame address is taken, since that address then has to name
+  // something that does not move.
+  return MFI.hasVarSizedObjects() || MFI.isFrameAddressTaken();
 }
