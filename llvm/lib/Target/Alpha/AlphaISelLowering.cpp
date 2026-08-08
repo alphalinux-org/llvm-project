@@ -142,6 +142,10 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   for (auto VT : {MVT::i8, MVT::i16})
     setOperationAction(ISD::SIGN_EXTEND_INREG, VT,
                        STI.hasBWX() ? Legal : Expand);
+  // No single-bit sign-extend instruction either.  This one does not expand
+  // to the shift pair above: a single bit is masked off with and and negated
+  // with subq.
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1, Expand);
 
   // No byte-swap or rotate instructions; expand to shift/mask sequences.
   setOperationAction(ISD::BSWAP, MVT::i64, Expand);
