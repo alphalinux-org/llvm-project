@@ -165,6 +165,12 @@ public:
   getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
                                StringRef Constraint, MVT VT) const override;
 
+  // The DWARF2 EH unwinder delivers the exception pointer in $a0 (R16) and
+  // the type selector in $a1 (R17) when entering a landing pad, matching
+  // libgcc's EH_RETURN_DATA_REGNO(0/1) = 16/17 for Alpha.
+  Register getExceptionPointerRegister(const Constant *) const override;
+  Register getExceptionSelectorRegister(const Constant *) const override;
+
   // Jump-table entries are absolute 64-bit block addresses.
   unsigned getJumpTableEncoding() const override {
     return MachineJumpTableInfo::EK_BlockAddress;
