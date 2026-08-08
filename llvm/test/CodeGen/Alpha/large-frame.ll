@@ -52,3 +52,31 @@ define void @far() {
   call void @g(ptr %big)
   ret void
 }
+
+; The frame-pointer save slot is the one frame access that does not go through
+; eliminateFrameIndex -- the prologue writes it before $15 is the frame pointer
+; and the epilogue reads it after $15 has stopped being one, so both address it
+; through $30 directly.  Its displacement therefore has to be split here as
+; well, and was not: a frame this size emitted `stq $15, 39960($30)` and the
+; assembler answered "displacement out of range".  A by-value argument big
+; enough to need an outgoing-argument area is what pushes the slot out of
+; reach.
+%struct.big = type { [5000 x i64] }
+declare i64 @bigarg(%struct.big, i64)
+
+; CHECK-LABEL: fpslot:
+; CHECK:      ldah $28, 1($30)
+; CHECK-NEXT: stq $15, -25568($28)
+; CHECK:      bis $31, $30, $15
+; CHECK:      bis $31, $15, $30
+; CHECK:      ldah $28, 1($30)
+; CHECK-NEXT: ldq $15, -25568($28)
+; CHECK:      ret
+define i64 @fpslot(i64 %n) "frame-pointer"="all" {
+  %s = alloca %struct.big
+  %p0 = getelementptr %struct.big, ptr %s, i64 0, i32 0, i64 0
+  store i64 1, ptr %p0
+  %v = load %struct.big, ptr %s
+  %r = call i64 @bigarg(%struct.big %v, i64 %n)
+  ret i64 %r
+}
