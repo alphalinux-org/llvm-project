@@ -26,6 +26,8 @@ class PassRegistry;
 FunctionPass *createAlphaExpandAtomicPseudo();
 void initializeAlphaExpandAtomicPseudoPass(PassRegistry &);
 
+FunctionPass *createAlphaTrapBarriers();
+void initializeAlphaTrapBarriersPass(PassRegistry &);
 FunctionPass *createAlphaISelDag(AlphaTargetMachine &TM,
                                  CodeGenOptLevel OptLevel);
 
