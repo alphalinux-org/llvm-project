@@ -40,6 +40,9 @@ uint16_t ELF::convertArchNameToEMachine(StringRef Arch) {
       .Case("rh32", EM_RH32)
       .Case("rce", EM_RCE)
       .Case("arm", EM_ARM)
+      // EM_ALPHA_STD (41) is the standards-assigned value; every real Alpha
+      // object uses EM_ALPHA (0x9026), so plain "alpha" means that one.
+      .Case("alpha_std", EM_ALPHA_STD)
       .Case("alpha", EM_ALPHA)
       .Case("sh", EM_SH)
       .Case("sparcv9", EM_SPARCV9)
@@ -222,6 +225,8 @@ uint16_t ELF::convertTripleArchTypeToEMachine(Triple::ArchType ArchType) {
   case Triple::bpfel:
   case Triple::bpfeb:
     return EM_BPF;
+  case Triple::alpha:
+    return EM_ALPHA;
   case Triple::csky:
     return EM_CSKY;
   case Triple::hexagon:
@@ -318,6 +323,8 @@ StringRef ELF::convertEMachineToArchName(uint16_t EMachine) {
     return "arm";
   case EM_ALPHA:
     return "alpha";
+  case EM_ALPHA_STD:
+    return "alpha_std";
   case EM_SH:
     return "sh";
   case EM_SPARCV9:

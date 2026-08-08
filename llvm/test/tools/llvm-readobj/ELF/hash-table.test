@@ -66,8 +66,8 @@ ProgramHeaders:
 # WARN-HASH-NEXT: }
 
 # RUN: yaml2obj --docnum=1 -DMACHINE=EM_ALPHA %s -o %t.alpha
-# RUN: llvm-readobj --hash-table %t.alpha 2>&1 | FileCheck %s -DFILE=%t.alpha --check-prefixes=WARN-HASH -DNAME="EM_ALPHA"
-# RUN: llvm-readelf --hash-table %t.alpha 2>&1 | FileCheck %s -DFILE=%t.alpha --check-prefixes=WARN-HASH -DNAME="EM_ALPHA"
+# RUN: llvm-readobj --hash-table %t.alpha 2>&1 | FileCheck %s -DFILE=%t.alpha --check-prefixes=WARN-HASH -DNAME="Digital Alpha"
+# RUN: llvm-readelf --hash-table %t.alpha 2>&1 | FileCheck %s -DFILE=%t.alpha --check-prefixes=WARN-HASH -DNAME="Digital Alpha"
 
 ## We don't report warnings about the unsupported hash table on EM_S390 and EM_ALPHA platforms
 ## when --hash-table is not requested.
