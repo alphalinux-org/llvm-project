@@ -146,8 +146,9 @@ public:
   std::string_view getClobbers() const override { return ""; }
 
   bool isValidCPUName(StringRef Name) const override {
-    return Name == "generic" || Name == "ev4" || Name == "ev5" ||
-           Name == "ev56" || Name == "ev6" || Name == "ev67";
+    return Name == "generic" || Name == "ev4" || Name == "ev45" ||
+           Name == "ev5" || Name == "ev56" || Name == "pca56" ||
+           Name == "ev6" || Name == "ev67";
   }
 
   bool setCPU(StringRef Name) override {

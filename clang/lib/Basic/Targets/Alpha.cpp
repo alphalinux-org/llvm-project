@@ -55,9 +55,28 @@ void AlphaTargetInfo::getTargetDefines(const LangOptions &Opts,
                                        MacroBuilder &Builder) const {
   Builder.defineMacro("__alpha__");
   Builder.defineMacro("__alpha");
-  Builder.defineMacro("__alpha_ev4__");
   Builder.defineMacro("_LP64");
   Builder.defineMacro("__LP64__");
+
+  // Processor-family macro, matching GCC: the EV56/PCA56 share the EV5 core and
+  // EV67 shares the EV6 core, so the family macro follows the microarchitecture
+  // rather than the exact model.
+  StringRef Family = "__alpha_ev4__";
+  if (CPU == "ev5" || CPU == "ev56" || CPU == "pca56")
+    Family = "__alpha_ev5__";
+  else if (CPU == "ev6" || CPU == "ev67")
+    Family = "__alpha_ev6__";
+  Builder.defineMacro(Family);
+
+  // Instruction-set feature macros, matching GCC's -m<ext> defines.
+  if (HasBWX)
+    Builder.defineMacro("__alpha_bwx__");
+  if (HasMVI)
+    Builder.defineMacro("__alpha_max__");
+  if (HasFIX)
+    Builder.defineMacro("__alpha_fix__");
+  if (HasCIX)
+    Builder.defineMacro("__alpha_cix__");
   // Match GCC (config/alpha/alpha.h): -mieee defines _IEEE_FP, and
   // -mieee-with-inexact also _IEEE_FP_INEXACT.
   if (HasIEEE)
