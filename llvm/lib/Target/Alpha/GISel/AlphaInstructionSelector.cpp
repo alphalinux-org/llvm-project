@@ -217,6 +217,14 @@ bool AlphaInstructionSelector::selectLoadStore(MachineInstr &I,
   const MachineMemOperand &MMO = **I.memoperands_begin();
   uint64_t Size = MMO.getSizeInBits().getValue();
 
+  // An access narrower than its own width is a misaligned one, and Alpha has no
+  // instruction for it: the datum can straddle two quadwords, so it takes the
+  // read-modify-write of both that the SelectionDAG path lowers it to.  Leave
+  // it to that path rather than emit an access that would write only the part
+  // of the value that fell in one quadword.
+  if (MMO.getAlign().value() * 8 < Size)
+    return false;
+
   const AlphaSubtarget &STI =
       I.getParent()->getParent()->getSubtarget<AlphaSubtarget>();
   bool IsFP = RBI.getRegBank(ValReg, MRI, TRI)->getID() == Alpha::FPRRegBankID;
