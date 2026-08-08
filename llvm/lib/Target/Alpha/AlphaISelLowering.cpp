@@ -550,6 +550,16 @@ void AlphaTargetLowering::LowerAsmOperandForConstraint(
   TargetLowering::LowerAsmOperandForConstraint(Op, Constraint, Ops, DAG);
 }
 
+Register
+AlphaTargetLowering::getExceptionPointerRegister(const Constant *) const {
+  return Alpha::R16; // $a0 -- EH_RETURN_DATA_REGNO(0) = 16
+}
+
+Register
+AlphaTargetLowering::getExceptionSelectorRegister(const Constant *) const {
+  return Alpha::R17; // $a1 -- EH_RETURN_DATA_REGNO(1) = 17
+}
+
 std::pair<unsigned, const TargetRegisterClass *>
 AlphaTargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
                                                   StringRef Constraint,
