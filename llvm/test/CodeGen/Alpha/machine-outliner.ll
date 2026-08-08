@@ -117,6 +117,52 @@ define i64 @sec_c(i64 %a, i64 %b) minsize section ".mine" {
   %v = sub i64 %w, %y
   ret i64 %v
 }
+; The bsr overwrites $23, so a candidate whose call site has $23 live across it
+; is dropped: these three share a sequence but keep a value in $23 around it.
+; Naming any other temporary in the same shape leaves them outlined.
+; CHECK-LABEL: live23_a:
+; CHECK-NOT: bsr
+; CHECK-LABEL: live23_b:
+; CHECK-NOT: bsr
+; CHECK-LABEL: live23_c:
+; CHECK-NOT: bsr
+define i64 @live23_a(i64 %a, i64 %b) minsize {
+  %p = call { i64, i64 } asm sideeffect "bis $$31, $2, $0\0Abis $$31, $2, $1", "={$23},=r,r"(i64 %a)
+  %t = extractvalue { i64, i64 } %p, 0
+  %s = extractvalue { i64, i64 } %p, 1
+  %x = add i64 %s, %b
+  %y = xor i64 %x, %s
+  %z = and i64 %y, %b
+  %w = mul i64 %z, %x
+  %v = sub i64 %w, %y
+  %r = add i64 %v, %t
+  ret i64 %r
+}
+define i64 @live23_b(i64 %a, i64 %b) minsize {
+  %p = call { i64, i64 } asm sideeffect "bis $$31, $2, $0\0Abis $$31, $2, $1", "={$23},=r,r"(i64 %a)
+  %t = extractvalue { i64, i64 } %p, 0
+  %s = extractvalue { i64, i64 } %p, 1
+  %x = add i64 %s, %b
+  %y = xor i64 %x, %s
+  %z = and i64 %y, %b
+  %w = mul i64 %z, %x
+  %v = sub i64 %w, %y
+  %r = add i64 %v, %t
+  ret i64 %r
+}
+define i64 @live23_c(i64 %a, i64 %b) minsize {
+  %p = call { i64, i64 } asm sideeffect "bis $$31, $2, $0\0Abis $$31, $2, $1", "={$23},=r,r"(i64 %a)
+  %t = extractvalue { i64, i64 } %p, 0
+  %s = extractvalue { i64, i64 } %p, 1
+  %x = add i64 %s, %b
+  %y = xor i64 %x, %s
+  %z = and i64 %y, %b
+  %w = mul i64 %z, %x
+  %v = sub i64 %w, %y
+  %r = add i64 %v, %t
+  ret i64 %r
+}
+
 ; The outlined function ends by jumping back through $23.
 ; CHECK-LABEL: OUTLINED_FUNCTION_0:
 ; CHECK: jmp $31, ($23), 0
