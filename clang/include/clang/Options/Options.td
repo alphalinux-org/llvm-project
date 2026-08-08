@@ -7218,6 +7218,19 @@ def mno_ieee : Flag<["-"], "mno-ieee">, Group<m_alpha_Features_Group>;
 def mieee_with_inexact : Flag<["-"], "mieee-with-inexact">,
   Group<m_alpha_Features_Group>,
   HelpText<"Like -mieee but also maintain the IEEE inexact flag (Alpha)">;
+def mfp_regs : Flag<["-"], "mfp-regs">, Group<m_alpha_Features_Group>,
+  HelpText<"Use the floating-point registers (Alpha)">;
+def mno_fp_regs : Flag<["-"], "mno-fp-regs">, Group<m_alpha_Features_Group>,
+  HelpText<"Do not use the floating-point registers (Alpha)">;
+// GCC's decode_reg_name accepts both a bare register number and the register
+// name from REGISTER_NAMES, so -ffixed-9 and -ffixed-$9 both work there.
+// Accept both spellings so either form in a build system keeps working.
+foreach i = 0 ... 31 in {
+  def ffixed_alpha_#i : Flag<["-"], "ffixed-"#i>, Group<m_alpha_Features_Group>,
+    HelpText<"Reserve integer register $"#i#" (Alpha only)">;
+  def ffixed_alpha_dollar_#i : Flag<["-"], "ffixed-$"#i>,
+    Group<m_alpha_Features_Group>, Alias<!cast<Option>("ffixed_alpha_"#i)>;
+}
 
 // SPARC feature flags
 def mfpu : Flag<["-"], "mfpu">, Group<m_sparc_Features_Group>;
