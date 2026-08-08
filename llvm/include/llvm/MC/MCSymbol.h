@@ -40,6 +40,11 @@ class raw_ostream;
 /// Section member is set to indicate what section it lives in.  Otherwise, if
 /// it is a reference to an external entity, it has a null section.
 class MCSymbol {
+public:
+  /// The number of bits in Flags, which the object-file implementations
+  /// pack their own bitfields into.
+  enum : unsigned { NumFlagsBits = 16 };
+
 protected:
   // A symbol can be regular, equated to an expression, or a common symbol.
   enum Kind : uint8_t {
@@ -113,7 +118,6 @@ protected:
 
   /// The Flags field is used by object file implementations to store
   /// additional per symbol information which is not easily classified.
-  enum : unsigned { NumFlagsBits = 16 };
   mutable uint32_t Flags : NumFlagsBits;
 
   /// Index field, for use by the object file implementation.
