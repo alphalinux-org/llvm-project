@@ -28,6 +28,8 @@ void initializeAlphaExpandAtomicPseudoPass(PassRegistry &);
 FunctionPass *createAlphaVerifyInvariants();
 void initializeAlphaVerifyInvariantsPass(PassRegistry &);
 
+FunctionPass *createAlphaTrapBarriers();
+void initializeAlphaTrapBarriersPass(PassRegistry &);
 FunctionPass *createAlphaISelDag(AlphaTargetMachine &TM,
                                  CodeGenOptLevel OptLevel);
 

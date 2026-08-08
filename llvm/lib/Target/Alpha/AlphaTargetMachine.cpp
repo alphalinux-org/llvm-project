@@ -22,6 +22,7 @@ using namespace llvm;
 extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeAlphaTarget() {
   RegisterTargetMachine<AlphaTargetMachine> X(getTheAlphaTarget());
   PassRegistry &PR = *PassRegistry::getPassRegistry();
+  initializeAlphaTrapBarriersPass(PR);
   initializeAlphaExpandAtomicPseudoPass(PR);
   initializeAlphaVerifyInvariantsPass(PR);
 }
@@ -119,6 +120,8 @@ bool AlphaPassConfig::addILPOpts() {
 }
 
 void AlphaPassConfig::addPreEmitPass() {
+  // Under -mtrap-precision=i, follow each trapping FP instruction with a trapb.
+  addPass(createAlphaTrapBarriers());
   // Rewrite branches whose target is beyond the 21-bit displacement.
   addPass(&BranchRelaxationPassID);
 }

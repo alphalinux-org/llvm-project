@@ -65,12 +65,30 @@ def FeatureCIX : SubtargetFeature<"cix", "HasCIX", "true",
 def HasCIX : Predicate<"Subtarget->hasCIX()">,
              AssemblerPredicate<(all_of FeatureCIX)>;
 
+// -mtrap-precision=i (and -mieee-conformant): follow each trapping
+// floating-point instruction with a trap barrier so an arithmetic trap is
+// precise to the instruction that raised it.
+def FeatureTrapPrecisionInsn
+    : SubtargetFeature<"trap-precision-insn", "HasTrapPrecisionInsn", "true",
+                       "Insert trap barriers for instruction-precise FP traps">;
+
 // IEEE floating-point conformance (-mieee): arithmetic gets the software-
 // completion trap qualifier (/su) so denormals and exceptional values are
 // handled correctly.  -mieee-with-inexact adds inexact tracking (/sui).
+//
+// Software completion needs the trap to be precise to the instruction that
+// raised it: the handler reads the faulting instruction to work out what to
+// complete, so without a barrier it sees whatever instruction the trap happened
+// to land on and completes the wrong operation.  gcc says the same by forcing
+// alpha_tp to ALPHA_TP_INSN for TARGET_IEEE, and warns "fp software completion
+// requires -mtrap-precision=i" when an explicit -mtrap-precision says otherwise
+// (alpha_option_override in gcc/config/alpha/alpha.cc).  The barrier pass still
+// skips processors with precise hardware exceptions, which is gcc's
+// PROCESSOR_EV6 override.
 def FeatureIEEE : SubtargetFeature<"ieee", "HasIEEE", "true",
                                    "Generate IEEE-conformant floating point "
-                                   "with software completion (-mieee)">;
+                                   "with software completion (-mieee)",
+                                   [FeatureTrapPrecisionInsn]>;
 def FeatureIEEEInexact
     : SubtargetFeature<"ieee-with-inexact", "HasIEEEInexact", "true",
                        "IEEE floating point that also tracks the inexact flag "
@@ -92,6 +110,12 @@ def FeatureFPRoundMinus
 def FeatureFPRoundChopped
     : SubtargetFeature<"fpround-chopped", "HasFPRoundChopped", "true",
                        "Round floating point toward zero (/c)">;
+
+// The 21264 (ev6) and later implement precise arithmetic exceptions in
+// hardware, so trapb is a no-op there and need not be emitted.
+def FeaturePreciseArithTraps
+    : SubtargetFeature<"precise-arith-traps", "HasPreciseArithTraps", "true",
+                       "Arithmetic traps are precise in hardware (21264+)">;
 
 // Software-directed prefetch (a load to R31/F31) is architecturally defined
 // only on the 21264 and later; on earlier processors such a load is an ordinary

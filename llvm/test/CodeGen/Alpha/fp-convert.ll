@@ -11,6 +11,7 @@
 ; CHECK-NEXT:  ret
 ; IEEE-LABEL:  ext:
 ; IEEE:        cvtst/s $f16, $f0
+; IEEE-NEXT:   trapb
 ; IEEE-NEXT:   ret
 define double @ext(float %x) {
   %r = fpext float %x to double
