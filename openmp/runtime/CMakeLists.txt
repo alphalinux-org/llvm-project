@@ -62,6 +62,8 @@ elseif(LIBOMP_NATIVE_ARCH MATCHES "sparc")
   set(LIBOMP_ARCH sparc)
 elseif(LIBOMP_NATIVE_ARCH MATCHES "wasm")
   set(LIBOMP_ARCH wasm32)
+elseif(LIBOMP_NATIVE_ARCH MATCHES "alpha")
+  set(LIBOMP_ARCH alpha)
 else()
   # last ditch effort
   libomp_get_architecture(LIBOMP_ARCH)
@@ -86,7 +88,7 @@ if(LIBOMP_ENABLE_ARM64X)
   include(arm64x)
 endif()
 
-libomp_check_variable(LIBOMP_ARCH 32e x86_64 32 i386 arm ppc ppc64 ppc64le aarch64 aarch64_32 aarch64_a64fx arm64ec mic mips mips64 riscv64 loongarch64 ve s390x sparc sparcv9 wasm32)
+libomp_check_variable(LIBOMP_ARCH 32e x86_64 32 i386 arm ppc ppc64 ppc64le aarch64 aarch64_32 aarch64_a64fx arm64ec mic mips mips64 riscv64 loongarch64 ve s390x sparc sparcv9 wasm32 alpha)
 
 set(LIBOMP_LIB_TYPE normal CACHE STRING
   "Performance,Profiling,Stubs library (normal/profile/stubs)")
@@ -185,6 +187,7 @@ set(WASM FALSE)
 set(PPC FALSE)
 set(SPARC FALSE)
 set(SPARCV9 FALSE)
+set(ALPHA FALSE)
 if("${LIBOMP_ARCH}" STREQUAL "i386" OR "${LIBOMP_ARCH}" STREQUAL "32")    # IA-32 architecture
   set(IA32 TRUE)
 elseif("${LIBOMP_ARCH}" STREQUAL "x86_64" OR "${LIBOMP_ARCH}" STREQUAL "32e") # Intel(R) 64 architecture
@@ -227,6 +230,8 @@ elseif("${LIBOMP_ARCH}" STREQUAL "sparc") # SPARC architecture
     set(SPARC TRUE)
 elseif("${LIBOMP_ARCH}" STREQUAL "sparcv9") # SPARC V9 architecture
     set(SPARCV9 TRUE)
+elseif("${LIBOMP_ARCH}" STREQUAL "alpha") # Alpha architecture
+    set(ALPHA TRUE)
 endif()
 
 # Set some flags based on build_type

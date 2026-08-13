@@ -349,6 +349,14 @@ static void print_ids(int level) {
   printf("%" PRIu64 ": current_address=%p or %p\n",                            \
          ompt_get_thread_data()->value, ((char *)addr) - 12,                   \
          (char *)addr - 20)
+#elif KMP_ARCH_ALPHA
+// On Alpha the NOP instruction is 4 bytes long.  A call to a function outside
+// the current DSO is followed by the two-instruction `ldah'/`lda' reload of the
+// GP ($29), 8 more bytes, which sits between the return address and the label.
+#define print_possible_return_addresses(addr)                                  \
+  printf("%" PRIu64 ": current_address=%p or %p\n",                            \
+         ompt_get_thread_data()->value, ((char *)addr) - 4,                    \
+         ((char *)addr) - 12)
 #else
 #error Unsupported target architecture, cannot determine address offset!
 #endif

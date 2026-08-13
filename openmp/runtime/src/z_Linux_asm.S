@@ -2471,6 +2471,145 @@ __kmp_invoke_microtask:
 
 #endif /* KMP_ARCH_S390X */
 
+#if KMP_ARCH_ALPHA
+
+//------------------------------------------------------------------------
+//
+// typedef void (*microtask_t)(int *gtid, int *tid, ...);
+//
+// int __kmp_invoke_microtask(microtask_t pkfn, int gtid, int tid, int argc,
+//                            void *p_argv[]
+// #if OMPT_SUPPORT
+//                            ,
+//                            void **exit_frame_ptr
+// #endif
+//                            ) {
+// #if OMPT_SUPPORT
+//   *exit_frame_ptr = OMPT_GET_FRAME_ADDRESS(0);
+// #endif
+//
+//   (*pkfn)(&gtid, &tid, argv[0], ...);
+//
+//   return 1;
+// }
+//
+// Parameters:
+//   $16: pkfn
+//   $17: gtid
+//   $18: tid
+//   $19: argc
+//   $20: p_argv
+//   $21: exit_frame_ptr
+//
+// Alpha passes the first six arguments in $16-$21 and the rest on the stack
+// from 0($sp) up.  &gtid and &tid take the first two, so argv[0] through
+// argv[3] go in $18-$21 and argv[4] onwards are copied to the stack.
+//
+// Locals:
+//   16($15): gtid, spilled so its address can be passed
+//   20($15): tid, likewise
+//
+// Temp registers:
+//
+//  $1: dynamic stack size
+//  $2: number of pkfn arguments left to place
+//  $3: cursor into p_argv
+//  $4: pkfn, saved before $16 is overwritten
+//  $5: cursor into the outgoing stack argument area
+//  $22: the argument being copied to the stack
+//
+// This function references nothing through the global pointer, so it neither
+// establishes $29 on entry nor reloads it after the call.
+//
+// return: $0 (always 1/TRUE)
+//
+
+    .text
+    .align 4
+    .globl __kmp_invoke_microtask
+    .type __kmp_invoke_microtask,@function
+__kmp_invoke_microtask:
+    .cfi_startproc
+
+    lda $30, -32($30)
+    .cfi_def_cfa_offset 32
+    stq $26, 0($30)
+    .cfi_offset 26, -32
+    stq $15, 8($30)
+    .cfi_offset 15, -24
+    bis $31, $30, $15
+    .cfi_def_cfa_register 15
+
+    // Keep what is about to be overwritten.
+    bis $31, $16, $4
+    bis $31, $19, $2
+    bis $31, $20, $3
+
+    // gtid and tid live in the frame so that pkfn can take their addresses.
+    stl $17, 16($15)
+    stl $18, 20($15)
+
+#if OMPT_SUPPORT
+    // Record this frame for the OMPT frame walk.
+    stq $15, 0($21)
+#endif
+
+    // Reserve max(0, argc - 4) stack argument slots, keeping $sp 16-byte
+    // aligned.
+    subq $2, 4, $1
+    cmovlt $1, $31, $1
+    s8addq $1, $31, $1
+    addq $1, 15, $1
+    bic $1, 15, $1
+    subq $30, $1, $30
+
+    lda $16, 16($15)
+    lda $17, 20($15)
+
+    ble $2, .L_kmp_call
+    ldq $18, 0($3)
+    subq $2, 1, $2
+    ble $2, .L_kmp_call
+    ldq $19, 8($3)
+    subq $2, 1, $2
+    ble $2, .L_kmp_call
+    ldq $20, 16($3)
+    subq $2, 1, $2
+    ble $2, .L_kmp_call
+    ldq $21, 24($3)
+    subq $2, 1, $2
+    ble $2, .L_kmp_call
+
+    // Whatever is left goes on the stack, in order, from 0($sp).
+    lda $3, 32($3)
+    bis $31, $30, $5
+.L_kmp_copy:
+    ldq $22, 0($3)
+    stq $22, 0($5)
+    lda $3, 8($3)
+    lda $5, 8($5)
+    subq $2, 1, $2
+    bgt $2, .L_kmp_copy
+
+.L_kmp_call:
+    // The callee derives its own $29 from $27, so the procedure value has to
+    // be the address being called.
+    bis $31, $4, $27
+    jsr $26, ($27)
+
+    bis $31, 1, $0
+    bis $31, $15, $30
+    ldq $26, 0($30)
+    ldq $15, 8($30)
+    lda $30, 32($30)
+    ret $31, ($26), 1
+    .cfi_endproc
+    .size __kmp_invoke_microtask, .-__kmp_invoke_microtask
+
+// -- End  __kmp_invoke_microtask
+
+#endif /* KMP_ARCH_ALPHA */
+
 #if KMP_ARCH_ARM || KMP_ARCH_MIPS || KMP_ARCH_PPC || KMP_ARCH_AARCH64_32 || KMP_ARCH_SPARC32
 #ifndef KMP_PREFIX_UNDERSCORE
 # define KMP_PREFIX_UNDERSCORE(x) x
@@ -2490,7 +2629,7 @@ KMP_PREFIX_UNDERSCORE(__kmp_unnamed_critical_addr):
 
 #if KMP_ARCH_PPC64 || KMP_ARCH_AARCH64 || KMP_ARCH_MIPS64 ||                   \
     KMP_ARCH_RISCV64 || KMP_ARCH_LOONGARCH64 || KMP_ARCH_VE ||                 \
-    KMP_ARCH_S390X || KMP_ARCH_SPARC64
+    KMP_ARCH_S390X || KMP_ARCH_SPARC64 || KMP_ARCH_ALPHA
 #ifndef KMP_PREFIX_UNDERSCORE
 # define KMP_PREFIX_UNDERSCORE(x) x
 #endif
@@ -2506,8 +2645,8 @@ KMP_PREFIX_UNDERSCORE(__kmp_unnamed_critical_addr):
     .size KMP_PREFIX_UNDERSCORE(__kmp_unnamed_critical_addr),8
 #endif
 #endif /* KMP_ARCH_PPC64 || KMP_ARCH_AARCH64 || KMP_ARCH_MIPS64 ||
-          KMP_ARCH_RISCV64 || KMP_ARCH_LOONGARCH64 || KMP_ARCH_VE || 
-          KMP_ARCH_S390X || KMP_ARCH_SPARC64 */
+          KMP_ARCH_RISCV64 || KMP_ARCH_LOONGARCH64 || KMP_ARCH_VE ||
+          KMP_ARCH_S390X || KMP_ARCH_SPARC64 || KMP_ARCH_ALPHA */
 
 #if KMP_OS_LINUX
 # if KMP_ARCH_ARM || KMP_ARCH_AARCH64

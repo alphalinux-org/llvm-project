@@ -1,6 +1,11 @@
 // clang-format off
 // RUN: %libomp-compile-and-run | FileCheck %s
 // REQUIRES: ompt
+// Alpha has no frame chain: a frame carries no link to its caller, so
+// __builtin_frame_address(1) is 0.  This test binds an expected exit_frame or
+// reenter_frame from a print_frame(1) line in the harness, which prints (nil)
+// there.  See the comment on __kmpc_omp_task_begin_if0 in kmp_tasking.cpp.
+// XFAIL: alpha-target-arch
 // clang-format on
 #include "callback.h"
 #include <omp.h>

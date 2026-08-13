@@ -608,6 +608,15 @@ static void __kmpc_omp_task_begin_if0_ompt(ident_t *loc_ref, kmp_int32 gtid,
 // crash.
 __attribute__((target("backchain")))
 #endif
+// On Alpha there is no equivalent, and no answer to give: a frame carries no
+// link to its caller, most functions never establish a frame pointer, and
+// offset 0 of a frame that has one holds the saved return address rather than
+// a saved frame pointer.  __builtin_frame_address(1) is 0 there, which is what
+// LangRef asks a target with no identifiable caller frame to return, so the
+// tool sees a null parent_task_frame.reenter for a task created with
+// `#pragma omp task if (0)'.  That is the same trade s390x makes above -- an
+// unusable value here rather than a crash -- and the four ompt tests that bind
+// this field are XFAILed for alpha-target-arch.
 void __kmpc_omp_task_begin_if0(ident_t *loc_ref, kmp_int32 gtid,
                                kmp_task_t *task) {
 #if OMPT_SUPPORT
