@@ -765,6 +765,28 @@ def : Pat<(sext_inreg (mul GPRC:$x, 3), i32), (S4SUBL GPRC:$x, GPRC:$x)>;
 let Uses = [R27], Defs = [R29], hasSideEffects = 1, isPseudo = 1, Size = 8 in
 def LDGP : AlphaInst<(outs), (ins), "ldgp $$29, 0($$27)", []>;
 
+// Re-establish the global pointer at an exception handler.  A landing pad is
+// entered from the unwinder rather than by falling out of the invoke's jsr, so
+// the ldgp that follows the call never runs on the unwind path and $29 still
+// holds the unwinder's own global pointer.
+//
+// Nothing incoming can be used to rebuild it.  libgcc's __builtin_eh_return
+// leaves the handler's address in $26 (EH_RETURN_HANDLER_RTX aliases the saved
+// return address, which the epilogue restores and returns through), which is
+// what gcc's landing pads rely on, but libunwind's Registers_alpha::jumpto
+// jumps through $28 and restores $26 from the frame's own unwind info.  `br`
+// writes the address of the next instruction into $29 unconditionally, so the
+// !gpdisp pair that follows resolves against a base it established itself.
+//
+// The branch doubles as the padding gcc emits as `unop` (alpha_pad_function_end):
+// a landing pad usually follows a call to a noreturn function such as
+// __cxa_throw, and a gp reload directly adjacent to such a call can be deleted
+// by the linker's relaxation.
+let Defs = [R29], hasSideEffects = 1, isPseudo = 1, isCodeGenOnly = 1,
+    Size = 12 in
+def LDGPself : AlphaInst<(outs), (ins), "br $$29, 1f\n1:\tldgp $$29, 0($$29)",
+                         []>;
+
 // Load a global's address from its GOT slot via an R_ALPHA_LITERAL relocation.
 let mayLoad = 1, hasSideEffects = 0, Uses = [R29] in
 let isCodeGenOnly = 1 in

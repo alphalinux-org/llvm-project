@@ -129,6 +129,21 @@ void AlphaFrameLowering::determineCalleeSaves(MachineFunction &MF,
     MF.getInfo<AlphaMachineFunctionInfo>()->setUsesGP();
 }
 
+// Re-establish $29 at the top of every landing pad; see LDGPself in
+// AlphaInstrInfo.td for why one is needed.  The reload must come before
+// anything else in the block but after the label the LSDA points at, or the
+// unwinder lands past it.
+static void emitEHPadGPReloads(MachineFunction &MF, const AlphaInstrInfo &TII) {
+  for (MachineBasicBlock &MBB : MF) {
+    if (!MBB.isEHPad())
+      continue;
+    MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end();
+    while (I != E && (I->isEHLabel() || I->isCFIInstruction()))
+      ++I;
+    BuildMI(MBB, I, DebugLoc(), TII.get(Alpha::LDGPself));
+  }
+}
+
 void AlphaFrameLowering::emitPrologue(MachineFunction &MF,
                                       MachineBasicBlock &MBB) const {
   const AlphaInstrInfo &TII = *MF.getSubtarget<AlphaSubtarget>().getInstrInfo();
@@ -147,6 +162,7 @@ void AlphaFrameLowering::emitPrologue(MachineFunction &MF,
   if (AFI->usesGP()) {
     MBB.addLiveIn(Alpha::R27);
     BuildMI(MBB, MBBI, DL, TII.get(Alpha::LDGP));
+    emitEHPadGPReloads(MF, TII);
   }
 
   adjustStack(MBB, MBBI, DL, TII, -(int64_t)StackSize);
