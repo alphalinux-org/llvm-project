@@ -1,6 +1,12 @@
 // clang-format off
 // RUN: %libomp-compile-and-run | %sort-threads | FileCheck %s
 // REQUIRES: ompt
+// Alpha has no frame chain, so __builtin_frame_address(1) is 0.  This test
+// creates its task with `#pragma omp task if (0)', which the runtime enters
+// through __kmpc_omp_task_begin_if0; that passes OMPT_GET_FRAME_ADDRESS(1)
+// into enter_frame.ptr, so parent_task_frame.reenter prints (nil) here.  See
+// the comment on that function in kmp_tasking.cpp.
+// XFAIL: alpha-target-arch
 // clang-format on
 
 #include "callback.h"

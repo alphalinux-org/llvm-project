@@ -132,6 +132,7 @@
 #define KMP_ARCH_VE 0
 #define KMP_ARCH_S390X 0
 #define KMP_ARCH_SPARC 0
+#define KMP_ARCH_ALPHA 0
 
 #if KMP_OS_WINDOWS
 #if defined(_M_ARM64EC) || defined(__arm64ec__)
@@ -209,6 +210,9 @@
 #elif defined __sparc || defined __sparc__
 #undef KMP_ARCH_SPARC
 #define KMP_ARCH_SPARC 1
+#elif defined __alpha__
+#undef KMP_ARCH_ALPHA
+#define KMP_ARCH_ALPHA 1
 #endif
 #endif
 
@@ -295,7 +299,8 @@
               KMP_ARCH_AARCH64 + KMP_ARCH_MIPS + KMP_ARCH_MIPS64 +             \
               KMP_ARCH_RISCV64 + KMP_ARCH_LOONGARCH64 + KMP_ARCH_VE +          \
               KMP_ARCH_S390X + KMP_ARCH_WASM + KMP_ARCH_PPC +                  \
-              KMP_ARCH_AARCH64_32 + KMP_ARCH_SPARC + KMP_ARCH_ARM64EC)
+              KMP_ARCH_AARCH64_32 + KMP_ARCH_SPARC + KMP_ARCH_ARM64EC +        \
+              KMP_ARCH_ALPHA)
 #error Unknown or unsupported architecture
 #endif
 

@@ -66,6 +66,8 @@ function(libomp_get_architecture return_arch)
       #error ARCHITECTURE=sparcv9
     #elif defined(__sparc)
       #error ARCHITECTURE=sparc
+    #elif defined(__alpha__)
+      #error ARCHITECTURE=alpha
     #else
       #error ARCHITECTURE=UnknownArchitecture
     #endif
