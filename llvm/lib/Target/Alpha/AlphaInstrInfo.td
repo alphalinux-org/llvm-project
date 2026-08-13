@@ -1951,6 +1951,45 @@ def FBGE : FBForm<0x36, "fbge">;
 def FBGT : FBForm<0x37, "fbgt">;
 }
 
+// A branch on a floating-point comparison tests the comparison result itself,
+// which is 2.0 or 0.0, rather than materializing a 0/1 boolean to test in an
+// integer register: that costs an ftoit and a shift with the FIX extension, and
+// a round trip through the stack without it.  BR_CC is expanded for f32 and
+// f64, so the condition always reaches selection as a BRCOND of a SETCC, either
+// directly or inverted with an xor when the branch was reversed to fall
+// through; the inverted form picks fbeq over fbne and needs no xor of its own.
+class FBrPat<CondCode cc, ValueType vt, Instruction cmp, dag a, dag b>
+    : Pat<(brcond (i64 (setcc vt:$x, vt:$y, cc)), bb:$target),
+          (FBNE (cmp a, b), bb:$target)>;
+class FBrNotPat<CondCode cc, ValueType vt, Instruction cmp, dag a, dag b>
+    : Pat<(brcond (i64 (xor (setcc vt:$x, vt:$y, cc), 1)), bb:$target),
+          (FBEQ (cmp a, b), bb:$target)>;
+
+let AddedComplexity = 10 in
+foreach vt = [f32, f64] in {
+def : FBrPat<SETOEQ, vt, CMPTEQ, (vt $x), (vt $y)>;
+def : FBrPat<SETOLT, vt, CMPTLT, (vt $x), (vt $y)>;
+def : FBrPat<SETOLE, vt, CMPTLE, (vt $x), (vt $y)>;
+def : FBrPat<SETOGT, vt, CMPTLT, (vt $y), (vt $x)>;
+def : FBrPat<SETOGE, vt, CMPTLE, (vt $y), (vt $x)>;
+def : FBrPat<SETEQ, vt, CMPTEQ, (vt $x), (vt $y)>;
+def : FBrPat<SETLT, vt, CMPTLT, (vt $x), (vt $y)>;
+def : FBrPat<SETLE, vt, CMPTLE, (vt $x), (vt $y)>;
+def : FBrPat<SETGT, vt, CMPTLT, (vt $y), (vt $x)>;
+def : FBrPat<SETGE, vt, CMPTLE, (vt $y), (vt $x)>;
+
+def : FBrNotPat<SETOEQ, vt, CMPTEQ, (vt $x), (vt $y)>;
+def : FBrNotPat<SETOLT, vt, CMPTLT, (vt $x), (vt $y)>;
+def : FBrNotPat<SETOLE, vt, CMPTLE, (vt $x), (vt $y)>;
+def : FBrNotPat<SETOGT, vt, CMPTLT, (vt $y), (vt $x)>;
+def : FBrNotPat<SETOGE, vt, CMPTLE, (vt $y), (vt $x)>;
+def : FBrNotPat<SETEQ, vt, CMPTEQ, (vt $x), (vt $y)>;
+def : FBrNotPat<SETLT, vt, CMPTLT, (vt $x), (vt $y)>;
+def : FBrNotPat<SETLE, vt, CMPTLE, (vt $x), (vt $y)>;
+def : FBrNotPat<SETGT, vt, CMPTLT, (vt $y), (vt $x)>;
+def : FBrNotPat<SETGE, vt, CMPTLE, (vt $y), (vt $x)>;
+}
+
 def : Pat<(AlphaBrNE GPRC:$Ra, bb:$target), (BNE GPRC:$Ra, bb:$target)>;
 // A low-bit test folds the mask into blbs/blbc (branch on low bit set/clear).
 def : Pat<(AlphaBrNE (and GPRC:$Ra, 1), bb:$target),

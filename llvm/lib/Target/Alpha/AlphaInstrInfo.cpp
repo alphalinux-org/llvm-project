@@ -142,6 +142,11 @@ static bool isCondBranchOpcode(unsigned Opc) {
   case Alpha::BGE:
   case Alpha::BLBC:
   case Alpha::BLBS:
+  // The tested register is an FP one for these, which changes nothing here:
+  // Cond carries it as a plain operand.  Only the equality pair appears, since
+  // selection tests a compare result that is either 2.0 or 0.0.
+  case Alpha::FBEQ:
+  case Alpha::FBNE:
     return true;
   default:
     return false;
@@ -167,6 +172,13 @@ static unsigned getReversedBranchOpcode(unsigned Opc) {
     return Alpha::BLBS;
   case Alpha::BLBS:
     return Alpha::BLBC;
+  // Reversing an FP equality test is exact: a value either is zero or is not.
+  // The relational fb* branches are deliberately absent, since reversing one of
+  // those would only be valid for an operand known not to be NaN.
+  case Alpha::FBEQ:
+    return Alpha::FBNE;
+  case Alpha::FBNE:
+    return Alpha::FBEQ;
   default:
     return 0;
   }
