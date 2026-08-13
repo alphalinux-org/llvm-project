@@ -26,6 +26,10 @@
 
 using namespace llvm;
 
+// The branch a landing pad's gp reload is based on.  A zero displacement makes
+// it fall through to the ldah it puts the address of into $29.
+static constexpr uint32_t INSN_BR_GP = 0xc3a00000; // br $29, .+4
+
 namespace {
 class AlphaMCCodeEmitter : public MCCodeEmitter {
   AlphaMCCodeEmitter(const AlphaMCCodeEmitter &) = delete;
@@ -276,6 +280,12 @@ void AlphaMCCodeEmitter::encodeInstruction(const MCInst &MI,
   case Alpha::LDGP:
     // ldgp $29, 0($27): establish the GP from the procedure value.
     return emitLdgp(Alpha::R27, CB, Fixups, STI);
+  case Alpha::LDGPself:
+    // br $29, .+4 followed by an ldgp reload from the address it just wrote:
+    // establish the GP at a landing pad, which the unwinder enters with no
+    // register holding anything the reload could be based on.
+    support::endian::write<uint32_t>(CB, INSN_BR_GP, llvm::endianness::little);
+    return emitLdgp(Alpha::R29, CB, Fixups, STI);
   case Alpha::JSR:
   case Alpha::OTS_CALL: {
     // jsr $26, ($27) followed by an ldgp reload from the return address.
