@@ -60,6 +60,25 @@ public:
                           SmallVectorImpl<MCFixup> &Fixups,
                           const MCSubtargetInfo &STI) const;
 
+  // An immediate field holding an expression that carries no relocation
+  // specifier -- `lda $1, 99f-0b($26)`, say.  The value is not known until the
+  // section is laid out, so leave the field empty and let the fixup fold it in.
+  unsigned getPlainExprEncoding(const MCInst &MI, unsigned OpNo,
+                                SmallVectorImpl<MCFixup> &Fixups,
+                                const MCSubtargetInfo &STI,
+                                Alpha::Fixups Kind) const;
+  unsigned getDisp16Encoding(const MCInst &MI, unsigned OpNo,
+                             SmallVectorImpl<MCFixup> &Fixups,
+                             const MCSubtargetInfo &STI) const {
+    return getPlainExprEncoding(MI, OpNo, Fixups, STI,
+                                Alpha::fixup_alpha_disp16);
+  }
+  unsigned getLit8Encoding(const MCInst &MI, unsigned OpNo,
+                           SmallVectorImpl<MCFixup> &Fixups,
+                           const MCSubtargetInfo &STI) const {
+    return getPlainExprEncoding(MI, OpNo, Fixups, STI, Alpha::fixup_alpha_lit8);
+  }
+
   // Symbol operands whose 16-bit displacement is provided by a relocation.
   unsigned getSymEncoding(const MCInst &MI, unsigned OpNo,
                           SmallVectorImpl<MCFixup> &Fixups,
@@ -161,13 +180,23 @@ AlphaMCCodeEmitter::getMachineOpValue(const MCInst &MI, const MCOperand &MO,
   return 0;
 }
 
+unsigned AlphaMCCodeEmitter::getPlainExprEncoding(
+    const MCInst &MI, unsigned OpNo, SmallVectorImpl<MCFixup> &Fixups,
+    const MCSubtargetInfo &STI, Alpha::Fixups Kind) const {
+  const MCOperand &MO = MI.getOperand(OpNo);
+  if (!MO.isExpr() || isa<MCSpecifierExpr>(MO.getExpr()))
+    return getMachineOpValue(MI, MO, Fixups, STI);
+  Fixups.push_back(
+      MCFixup::create(0, MO.getExpr(), MCFixupKind(Kind), /*PCRel=*/false));
+  return 0;
+}
+
 unsigned AlphaMCCodeEmitter::getMemEncoding(const MCInst &MI, unsigned OpNo,
                                             SmallVectorImpl<MCFixup> &Fixups,
                                             const MCSubtargetInfo &STI) const {
   unsigned Base =
       getMachineOpValue(MI, MI.getOperand(OpNo), Fixups, STI) & 0x1f;
-  unsigned Disp =
-      getMachineOpValue(MI, MI.getOperand(OpNo + 1), Fixups, STI) & 0xffff;
+  unsigned Disp = getDisp16Encoding(MI, OpNo + 1, Fixups, STI) & 0xffff;
   return (Base << 16) | Disp;
 }
 

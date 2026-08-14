@@ -41,6 +41,11 @@ static uint64_t adjustFixupValue(unsigned Kind, uint64_t Value) {
   case Alpha::fixup_alpha_tprelhi:
   case Alpha::fixup_alpha_dtprelhi:
     return ((Value + 0x8000) >> 16) & 0xffff;
+  case Alpha::fixup_alpha_disp16:
+    return Value & 0xffff;
+  case Alpha::fixup_alpha_lit8:
+    // The operate-format literal sits in bits 20-13.
+    return (Value & 0xff) << 13;
   }
 }
 
@@ -63,7 +68,8 @@ public:
         {"fixup_alpha_tlsldm", 0, 16, 0},    {"fixup_alpha_dtprelhi", 0, 16, 0},
         {"fixup_alpha_dtprello", 0, 16, 0},  {"fixup_alpha_hint", 0, 14, 0},
         {"fixup_alpha_lituse_jsr", 0, 0, 0}, {"fixup_alpha_brsgp", 0, 21, 0},
-        {"fixup_alpha_gprel32", 0, 32, 0},
+        {"fixup_alpha_gprel32", 0, 32, 0},   {"fixup_alpha_disp16", 0, 16, 0},
+        {"fixup_alpha_lit8", 13, 8, 0},
     };
     if (mc::isRelocation(Kind))
       return {};
