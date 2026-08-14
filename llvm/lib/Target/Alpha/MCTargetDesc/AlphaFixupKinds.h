@@ -53,6 +53,13 @@ enum Fixups {
   fixup_alpha_brsgp,
   // A 32-bit GP-relative value (R_ALPHA_GPREL32), from a `.gprel32` directive.
   fixup_alpha_gprel32,
+  // An expression with no relocation specifier in the 16-bit displacement of a
+  // memory-format instruction, or in the 8-bit literal of an operate-format
+  // one.  These carry no relocation: the assembler has to fold the expression
+  // to a constant -- a difference of two labels in the same section, say -- and
+  // it is an error if it cannot.
+  fixup_alpha_disp16,
+  fixup_alpha_lit8,
 
   fixup_alpha_invalid,
   NumTargetFixupKinds = fixup_alpha_invalid - FirstTargetFixupKind
