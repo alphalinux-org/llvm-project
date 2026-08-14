@@ -170,13 +170,17 @@ def AlphaDtprelLo : SDNode<"AlphaISD::DTPREL_LO", SDTIntBinOp>;
 //===----------------------------------------------------------------------===//
 
 // A 16-bit signed displacement, as used by the memory-format instructions.
-def s16imm : Operand<i64>;
+def s16imm : Operand<i64> {
+  let EncoderMethod = "getDisp16Encoding";
+}
 
 // An immediate that fits in the 16-bit signed displacement of `lda`.
 def immSExt16 : ImmLeaf<i64, [{ return isInt<16>(Imm); }]>;
 
 // An 8-bit unsigned literal, as used by operate instructions in literal form.
-def u8imm : Operand<i64>;
+def u8imm : Operand<i64> {
+  let EncoderMethod = "getLit8Encoding";
+}
 
 // An immediate that fits in the 8-bit operate literal field.
 def immUExt8 : ImmLeaf<i64, [{ return isUInt<8>(Imm); }]>;

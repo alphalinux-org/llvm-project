@@ -87,6 +87,13 @@ protected:
       return ELF::R_ALPHA_HINT;
     case Alpha::fixup_alpha_lituse_jsr:
       return ELF::R_ALPHA_LITUSE;
+    case Alpha::fixup_alpha_disp16:
+    case Alpha::fixup_alpha_lit8:
+      // No relocation can fill a bare displacement or operate literal, so the
+      // expression had to fold to a constant at assembly time.
+      reportError(Fixup.getLoc(),
+                  "expression is not an assembly-time constant");
+      return ELF::R_ALPHA_NONE;
     default:
       reportError(Fixup.getLoc(), "unsupported relocation type");
       return ELF::R_ALPHA_NONE;
