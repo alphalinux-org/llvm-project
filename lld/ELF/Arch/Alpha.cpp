@@ -425,16 +425,20 @@ uint64_t Alpha::getGotEntry(Symbol &sym, int64_t addend, GotKind kind) {
     // the GOT instead. The dtp base is the TLS segment's address, which is
     // what R_DTPREL computes.
     if (sym.isPreemptible)
-      ctx.in.relaDyn->addSymbolReloc(tlsOffsetRel, got, off, sym);
+      ctx.in.relaDyn->addSymbolReloc(tlsOffsetRel, got, off, sym, addend);
     else
-      got.addConstant({R_DTPREL, symbolicRel, off, 0, &sym});
+      got.addConstant({R_DTPREL, symbolicRel, off, addend, &sym});
     break;
   case GK_TpOff:
     if (localInExe)
-      got.addConstant({R_TPREL, symbolicRel, off, 0, &sym});
+      got.addConstant({R_TPREL, symbolicRel, off, addend, &sym});
+    else if (sym.isPreemptible)
+      ctx.in.relaDyn->addSymbolReloc(tlsGotRel, got, off, sym, addend);
     else
-      ctx.in.relaDyn->addAddendOnlyRelocIfNonPreemptible(tlsGotRel, got, off,
-                                                         sym, symbolicRel);
+      // addAddendOnlyRelocIfNonPreemptible, but carrying the addend: the
+      // entry is keyed on it, so sym+N needs N in the slot.
+      ctx.in.relaDyn->addReloc(/*isAgainstSymbol=*/false, tlsGotRel, got, off,
+                               sym, addend, R_ABS, symbolicRel);
     break;
   case GK_DynTls:
     // The module index, then the offset of the symbol within that module's TLS
@@ -444,9 +448,9 @@ uint64_t Alpha::getGotEntry(Symbol &sym, int64_t addend, GotKind kind) {
     else
       ctx.in.relaDyn->addSymbolReloc(tlsModuleIndexRel, got, off, sym);
     if (sym.isPreemptible)
-      ctx.in.relaDyn->addSymbolReloc(tlsOffsetRel, got, off + 8, sym);
+      ctx.in.relaDyn->addSymbolReloc(tlsOffsetRel, got, off + 8, sym, addend);
     else
-      got.addConstant({R_ABS, tlsOffsetRel, off + 8, 0, &sym});
+      got.addConstant({R_ABS, tlsOffsetRel, off + 8, addend, &sym});
     break;
   case GK_TlsIndex:
     // Only the module index matters; the second slot stays zero and the caller
@@ -587,7 +591,7 @@ void Alpha::scanSectionImpl(InputSectionBase &sec, Relocs<RelTy> rels,
       sec.addReloc({RE_ALPHA_RELAX_INSN, R_ALPHA_NONE, p0,
                     memInsn(OP_LDQ, arg, 29), &sym});
       sec.addReloc({RE_ALPHA_GOT, R_ALPHA_GOTTPREL, p0,
-                    int64_t(getGotEntry(sym, 0, GK_TpOff)), &sym});
+                    int64_t(getGotEntry(sym, addend, GK_TpOff)), &sym});
       sec.addReloc({RE_ALPHA_RELAX_INSN, R_ALPHA_NONE, p1, INSN_UNOP, &sym});
     } else {
       return false;
@@ -706,17 +710,17 @@ void Alpha::scanSectionImpl(InputSectionBase &sec, Relocs<RelTy> rels,
       continue;
     case R_ALPHA_GOTTPREL:
       sec.addReloc({RE_ALPHA_GOT, type, offset,
-                    int64_t(getGotEntry(sym, 0, GK_TpOff)), &sym});
+                    int64_t(getGotEntry(sym, addend, GK_TpOff)), &sym});
       continue;
     case R_ALPHA_GOTDTPREL:
       sec.addReloc({RE_ALPHA_GOT, type, offset,
-                    int64_t(getGotEntry(sym, 0, GK_DtpOff)), &sym});
+                    int64_t(getGotEntry(sym, addend, GK_DtpOff)), &sym});
       continue;
     case R_ALPHA_TLSGD:
       if (relaxTlsCall(it, type, sym, addend))
         continue;
       sec.addReloc({RE_ALPHA_GOT, type, offset,
-                    int64_t(getGotEntry(sym, 0, GK_DynTls)), &sym});
+                    int64_t(getGotEntry(sym, addend, GK_DynTls)), &sym});
       continue;
     case R_ALPHA_TLSLDM:
       if (relaxTlsCall(it, type, sym, addend))
