@@ -136,6 +136,58 @@ multiclass AlphaInstRW {
                (instrs BEQ, BNE, BLT, BLE, BGT, BGE, BLBC, BLBS)>;
   def : InstRW<[Wr_JSR], (instrs JSR, JSRr, JSRd, JSRdl, JMP, RET)>;
   def : InstRW<[Wr_Misc], (instrs RPCC, MB, RDUNIQ)>;
+
+  // The immediate forms cost what their register forms do.
+  def : InstRW<[Wr_IALU], (instrs
+      ADDLi, SUBL, SUBLi, AMASKi,
+      S4ADDL, S4ADDLi, S4ADDQi, S4SUBL, S4SUBLi, S4SUBQi,
+      S8ADDL, S8ADDLi, S8ADDQi, S8SUBL, S8SUBLi, S8SUBQi,
+      LDAi, LDAHi, LDAd, LDAg, LDAt, LDAHd, LDAHg, LDAHt, LDAHm,
+      LDAtlsgd, LDAtlsldm, NOP)>;
+  def : InstRW<[Wr_ICmp], (instrs
+      CMPEQi, CMPLEi, CMPLTi, CMPULEi, CMPULTi, CMPBGEi)>;
+  def : InstRW<[Wr_ICmov, ReadDefault, Rd_ITest], (instrs
+      CMOVEQi, CMOVNEi, CMOVLTi, CMOVGTi, CMOVGEi, CMOVLEi,
+      CMOVLBC, CMOVLBCi, CMOVLBS, CMOVLBSi)>;
+  def : InstRW<[Wr_IShift], (instrs
+      ZAPi,
+      EXTBLi, EXTWLi, EXTLLi, EXTQLi, EXTWHi, EXTLHi, EXTQHi,
+      INSBLi, INSWLi, INSLLi, INSQLi, INSWHi, INSLHi, INSQHi,
+      MSKBLi, MSKWLi, MSKLLi, MSKQLi, MSKWHi, MSKLHi, MSKQHi)>;
+  // A 32-bit multiply takes the multiplier just as a 64-bit one does; leaving
+  // it unmapped made a mull chain schedule as though it were an addq.
+  def : InstRW<[Wr_IMul, Rd_IMulOp, Rd_IMulOp], (instrs MULL)>;
+  def : InstRW<[Wr_IMul, Rd_IMulOp], (instrs MULLi)>;
+  def : InstRW<[Wr_ILoad], (instrs LDQ_Um, UNOP)>;
+  def : InstRW<[Wr_IStore, Rd_StData], (instrs STQ_Um)>;
+  def : InstRW<[Wr_FLoad], (instrs LDSf64, LDSgf64)>;
+  // cpys and its sign-manipulating forms are add-pipe operations, as are the
+  // conversions with a baked-in qualifier.
+  def : InstRW<[Wr_FAdd], (instrs
+      FABSS, FABST, FNEGS, FNEGT, FCPYSS, FCPYST, FPEXTST,
+      CVTQT_D, CVTST_S, CVTTQ_SVID)>;
+  def : InstRW<[Wr_FDivT], (instrs DIVTC)>;
+  def : InstRW<[Wr_FtoI, Rd_FStData], (instrs FTOIS, FTOIT, MOVf2i_S)>;
+  def : InstRW<[Wr_ItoF], (instrs ITOFS, ITOFT, MOVi2f_S)>;
+  def : InstRW<[Wr_Br], (instrs BRr, BRt)>;
+  // An FP branch tests an FP register, which changes nothing here.
+  def : InstRW<[Wr_Br], (instrs FBEQ, FBNE, FBLT, FBLE, FBGT, FBGE)>;
+  def : InstRW<[Wr_JSR], (instrs
+      BSR, BSRr, CALLbsr, JSRt, JSRtlsgd, JSRtlsldm,
+      JMPab, JMPb, JMPt, RETab, RETabh, RETb,
+      TCRETURN, TCRETURNbr, TCRETURNd, TCRETURNdl, OTS_CALL, DIVCALL)>;
+  // The gp loads expand to an ldah/lda pair.
+  def : InstRW<[Wr_IALU, Wr_IALU], (instrs LDGP, LDGPself)>;
+  // These expand after scheduling into a load, a splice and a store, so they
+  // occupy the store pipe for at least as long as a store does.
+  def : InstRW<[Wr_IStore, Rd_StData], (instrs
+      RMW_STOREI8, RMW_STOREI16, RMW_USTORE, SAFE_USTORE)>;
+  def : InstRW<[Wr_Misc], (instrs
+      CALL_PAL, TRAPB, WMB, EXCB, ECB, WH64, WH64EN, FETCH, FETCH_M, WRUNIQ,
+      PREFR, PREFREN, PREFW, PREFWEN)>;
+  // A register-to-register copy is whatever it lowers to, and is gone before
+  // any scheduler sees it; give it the cheapest operate class.
+  def : InstRW<[Wr_IALU], (instrs COPY)>;
 }
 
 //===----------------------------------------------------------------------===//
@@ -147,7 +199,7 @@ def Alpha21064Model : SchedMachineModel {
   let MicroOpBufferSize = 0;  // In-order.
   let LoadLatency = 3;
   let MispredictPenalty = 5;
-  let CompleteModel = 0;
+  let CompleteModel = 1;
   // In-order, so schedule after register allocation to hide latencies.
   let PostRAScheduler = 1;
 }
@@ -221,7 +273,7 @@ def Alpha21164Model : SchedMachineModel {
   let MicroOpBufferSize = 0;  // In-order.
   let LoadLatency = 2;
   let MispredictPenalty = 5;
-  let CompleteModel = 0;
+  let CompleteModel = 1;
   // In-order, so schedule after register allocation to hide latencies.
   let PostRAScheduler = 1;
 }
@@ -303,7 +355,7 @@ def Alpha21264Model : SchedMachineModel {
   // actually pays, measured on an EV68AL across three branch densities, is
   // about 11 cycles -- which is the figure if-conversion decisions want.
   let MispredictPenalty = 11;
-  let CompleteModel = 0;
+  let CompleteModel = 1;
 }
 
 let SchedModel = Alpha21264Model in {
