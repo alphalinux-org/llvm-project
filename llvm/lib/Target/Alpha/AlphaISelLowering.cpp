@@ -282,6 +282,12 @@ SDValue AlphaTargetLowering::PerformDAGCombine(SDNode *N,
     if (SDValue V = LowerF128Convert(N, DCI))
       return V;
     break;
+  case ISD::SETCC:
+  case ISD::STRICT_FSETCC:
+  case ISD::STRICT_FSETCCS:
+    if (SDValue V = LowerF128Compare(N, DCI))
+      return V;
+    break;
   default:
     break;
   }
@@ -1183,6 +1189,136 @@ SDValue AlphaTargetLowering::LowerF128Convert(SDNode *N,
   }
 
   return SDValue();
+}
+
+SDValue AlphaTargetLowering::LowerF128Compare(SDNode *N,
+                                              DAGCombinerInfo &DCI) const {
+  if (!DCI.isBeforeLegalize())
+    return SDValue();
+
+  bool IsStrict = N->getOpcode() == ISD::STRICT_FSETCC ||
+                  N->getOpcode() == ISD::STRICT_FSETCCS;
+  // STRICT_FSETCC: (chain, LHS, RHS, CC);  SETCC: (LHS, RHS, CC)
+  SDValue LHS = IsStrict ? N->getOperand(1) : N->getOperand(0);
+  if (LHS.getSimpleValueType() != MVT::f128)
+    return SDValue();
+
+  SelectionDAG &DAG = DCI.DAG;
+  SDLoc DL(N);
+  MachineFunction &MF = DAG.getMachineFunction();
+  MF.getInfo<AlphaMachineFunctionInfo>()->setUsesGP();
+
+  SDValue RHS = IsStrict ? N->getOperand(2) : N->getOperand(1);
+  ISD::CondCode CC =
+      cast<CondCodeSDNode>(IsStrict ? N->getOperand(3) : N->getOperand(2))
+          ->get();
+
+  const char *Name;
+  bool Negate = false;
+  switch (CC) {
+  // Ordered comparisons map directly to _Ots routines.
+  case ISD::SETOEQ:
+    Name = "_OtsEqlX";
+    break;
+  case ISD::SETOLT:
+    Name = "_OtsLssX";
+    break;
+  case ISD::SETOLE:
+    Name = "_OtsLeqX";
+    break;
+  case ISD::SETOGT:
+    Name = "_OtsGtrX";
+    break;
+  case ISD::SETOGE:
+    Name = "_OtsGeqX";
+    break;
+  case ISD::SETONE:
+    Name = "_OtsNeqX";
+    break;
+  // Unordered comparisons are the logical complement of the ordered opposite.
+  // e.g. SETUNE(a,b) = !(a OEQ b) because if either operand is NaN, _OtsEqlX
+  // returns 0, so negating gives 1, which is correct for an unordered compare.
+  case ISD::SETUNE:
+    Name = "_OtsEqlX";
+    Negate = true;
+    break;
+  case ISD::SETUGT:
+    Name = "_OtsLeqX";
+    Negate = true;
+    break;
+  case ISD::SETUGE:
+    Name = "_OtsLssX";
+    Negate = true;
+    break;
+  case ISD::SETULT:
+    Name = "_OtsGeqX";
+    Negate = true;
+    break;
+  case ISD::SETULE:
+    Name = "_OtsGtrX";
+    Negate = true;
+    break;
+  case ISD::SETUEQ:
+    Name = "_OtsNeqX";
+    Negate = true;
+    break;
+  default:
+    return SDValue();
+  }
+
+  SDValue InChain = IsStrict ? N->getOperand(0) : DAG.getEntryNode();
+  auto [ALo, AHi] = splitF128(DAG, DL, MF, InChain, LHS);
+  auto [BLo, BHi] = splitF128(DAG, DL, MF, InChain, RHS);
+
+  SDValue Chain = DAG.getNode(
+      ISD::TokenFactor, DL, MVT::Other,
+      {ALo.getValue(1), AHi.getValue(1), BLo.getValue(1), BHi.getValue(1)});
+
+  SDValue Pv = DAG.getNode(AlphaISD::LITERAL, DL, MVT::i64,
+                           DAG.getTargetExternalSymbol(Name, MVT::i64));
+
+  SDValue Glue;
+  Chain = DAG.getCopyToReg(Chain, DL, Alpha::R16, ALo, Glue);
+  Glue = Chain.getValue(1);
+  Chain = DAG.getCopyToReg(Chain, DL, Alpha::R17, AHi, Glue);
+  Glue = Chain.getValue(1);
+  Chain = DAG.getCopyToReg(Chain, DL, Alpha::R18, BLo, Glue);
+  Glue = Chain.getValue(1);
+  Chain = DAG.getCopyToReg(Chain, DL, Alpha::R19, BHi, Glue);
+  Glue = Chain.getValue(1);
+  Chain = DAG.getCopyToReg(Chain, DL, Alpha::R27, Pv, Glue);
+  Glue = Chain.getValue(1);
+
+  Chain = emitOtsCall(DAG, DL, Subtarget, Chain, Pv,
+                      {DAG.getRegister(Alpha::R16, MVT::i64),
+                       DAG.getRegister(Alpha::R17, MVT::i64),
+                       DAG.getRegister(Alpha::R18, MVT::i64),
+                       DAG.getRegister(Alpha::R19, MVT::i64),
+                       DAG.getRegister(Alpha::R27, MVT::i64)},
+                      Glue);
+  Glue = Chain.getValue(1);
+
+  // Result: i64 bool in $0.
+  SDValue Result = DAG.getCopyFromReg(Chain, DL, Alpha::R0, MVT::i64, Glue);
+  Chain = Result.getValue(1);
+
+  if (Negate)
+    Result = DAG.getNode(ISD::XOR, DL, MVT::i64, Result,
+                         DAG.getConstant(1, DL, MVT::i64));
+
+  // visitFCmp creates SETCC with type i1 (getValueType(i1)), not with
+  // getSetCCResultType.  Return a value of the same type as the SETCC node to
+  // avoid a type mismatch that would leave an unselectable zero_extend
+  // i64->i64.
+  MVT SetCCVT = N->getSimpleValueType(0);
+  if (SetCCVT != MVT::i64)
+    Result = DAG.getNode(ISD::TRUNCATE, DL, SetCCVT, Result);
+
+  if (IsStrict) {
+    DCI.CombineTo(N, Result, Chain);
+    return SDValue(N, 0);
+  }
+  return Result;
 }
 
 SDValue AlphaTargetLowering::LowerDivRem(SDValue Op, SelectionDAG &DAG) const {
