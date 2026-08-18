@@ -317,6 +317,12 @@ SDValue AlphaTargetLowering::PerformDAGCombine(SDNode *N,
     if (SDValue V = LowerF128Compare(N, DCI))
       return V;
     break;
+  case ISD::FNEG:
+  case ISD::FABS:
+  case ISD::FCOPYSIGN:
+    if (SDValue V = LowerF128Bitwise(N, DCI))
+      return V;
+    break;
   default:
     break;
   }
@@ -1584,6 +1590,69 @@ SDValue AlphaTargetLowering::LowerF128Compare(SDNode *N,
     return SDValue(N, 0);
   }
   return Result;
+}
+
+SDValue AlphaTargetLowering::LowerF128Bitwise(SDNode *N,
+                                              DAGCombinerInfo &DCI) const {
+  if (!DCI.isBeforeLegalize())
+    return SDValue();
+  if (N->getValueType(0) != MVT::f128)
+    return SDValue();
+
+  SelectionDAG &DAG = DCI.DAG;
+  SDLoc DL(N);
+  MachineFunction &MF = DAG.getMachineFunction();
+
+  unsigned Opc = N->getOpcode();
+
+  SDValue Src = N->getOperand(0);
+  auto [Lo, Hi] = splitF128(DAG, DL, MF, DAG.getEntryNode(), Src);
+  SDValue Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other,
+                              {Lo.getValue(1), Hi.getValue(1)});
+
+  // The sign bit lives in the most significant bit of the high word.
+  SDValue SignMask = DAG.getConstant(APInt::getSignMask(64), DL, MVT::i64);
+
+  SDValue NewHi;
+  switch (Opc) {
+  case ISD::FNEG:
+    NewHi = DAG.getNode(ISD::XOR, DL, MVT::i64, Hi, SignMask);
+    break;
+  case ISD::FABS:
+    // Clear the sign bit.
+    NewHi = DAG.getNode(ISD::AND, DL, MVT::i64, Hi,
+                        DAG.getNode(ISD::XOR, DL, MVT::i64, SignMask,
+                                    DAG.getConstant(-1ULL, DL, MVT::i64)));
+    break;
+  case ISD::FCOPYSIGN: {
+    // Copy sign from operand 1; the magnitude stays from operand 0.  The sign
+    // operand does not have to be an f128: DAGCombiner folds
+    // copysign(x, fpext(y)) into a copysign that keeps y's narrower type.
+    SDValue Sign = N->getOperand(1);
+    EVT SignVT = Sign.getValueType();
+    SDValue SignHi;
+    if (SignVT == MVT::f128) {
+      SignHi = splitF128(DAG, DL, MF, DAG.getEntryNode(), Sign).second;
+    } else {
+      // Widening f32 to f64 is exact and keeps the sign bit, and an f64 moves
+      // to an integer register in one instruction.
+      if (SignVT != MVT::f64)
+        Sign = DAG.getNode(ISD::FP_EXTEND, DL, MVT::f64, Sign);
+      SignHi = DAG.getNode(ISD::BITCAST, DL, MVT::i64, Sign);
+    }
+    SDValue SignBit = DAG.getNode(ISD::AND, DL, MVT::i64, SignHi, SignMask);
+    SDValue MagBits =
+        DAG.getNode(ISD::AND, DL, MVT::i64, Hi,
+                    DAG.getNode(ISD::XOR, DL, MVT::i64, SignMask,
+                                DAG.getConstant(-1ULL, DL, MVT::i64)));
+    NewHi = DAG.getNode(ISD::OR, DL, MVT::i64, MagBits, SignBit);
+    break;
+  }
+  default:
+    return SDValue();
+  }
+
+  return joinF128(DAG, DL, MF, Chain, Lo, NewHi);
 }
 
 SDValue AlphaTargetLowering::LowerDivRem(SDValue Op, SelectionDAG &DAG) const {
