@@ -231,10 +231,10 @@ bool AlphaInstructionSelector::selectLoadStore(MachineInstr &I,
   // Which narrow store to use without BWX.  The plain read-modify-write updates
   // one field of a quadword in place and is not atomic against another thread
   // writing a different field of the same quadword; -msafe-bwa asks for the
-  // lock-based form instead.  RMW_STOREI8/16 carry Predicates = [UnsafeBWStore],
-  // which is exactly this condition, so selecting one without checking it emits
-  // an instruction whose own predicate says it must not appear.  The
-  // SelectionDAG path asks the same question in AlphaISelDAGToDAG.
+  // lock-based form instead.  RMW_STOREI8/16 carry Predicates =
+  // [UnsafeBWStore], which is exactly this condition, so selecting one without
+  // checking it emits an instruction whose own predicate says it must not
+  // appear.  The SelectionDAG path asks the same question in AlphaISelDAGToDAG.
   bool UseSafeBWStore = STI.hasSafeBWA();
 
   unsigned Opc;
@@ -497,6 +497,23 @@ bool AlphaInstructionSelector::select(MachineInstr &I) {
     return true;
 
   switch (I.getOpcode()) {
+  case TargetOpcode::G_IMPLICIT_DEF:
+    // Nothing to compute: the register just has to be given a class.
+    I.setDesc(TII.get(TargetOpcode::IMPLICIT_DEF));
+    RBI.constrainGenericRegister(
+        I.getOperand(0).getReg(),
+        RBI.getRegBank(I.getOperand(0).getReg(), MRI, TRI)->getID() ==
+                Alpha::FPRRegBankID
+            ? Alpha::FPRCRegClass
+            : Alpha::GPRCRegClass,
+        MRI);
+    return true;
+  case TargetOpcode::G_FREEZE:
+  case TargetOpcode::G_CONSTANT_FOLD_BARRIER:
+    // These only stop a value being reasoned about twice; they move nothing.
+    I.setDesc(TII.get(TargetOpcode::COPY));
+    constrainSelectedInstRegOperands(I, TII, TRI, RBI);
+    return true;
   case TargetOpcode::G_LOAD:
   case TargetOpcode::G_STORE:
     return selectLoadStore(I, MRI);
