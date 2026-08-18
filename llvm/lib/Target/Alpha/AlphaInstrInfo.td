@@ -207,6 +207,19 @@ def CVTTS : AlphaInst<(outs FPRC:$Fc), (ins FPRC:$Fb), "cvtts $Fb, $Fc",
   let Opcode = 0x16;
 }
 
+// Integer/floating conversions on values held in floating-point registers.
+def CVTQT : AlphaInst<(outs FPRC:$Fc), (ins FPRC:$Fb), "cvtqt $Fb, $Fc", []> {
+  let Opcode = 0x16;
+}
+def CVTQS : AlphaInst<(outs FPRC:$Fc), (ins FPRC:$Fb), "cvtqs $Fb, $Fc", []> {
+  let Opcode = 0x16;
+}
+// cvttq/c: convert T-floating to quadword with chopped (round-toward-zero)
+// rounding, matching C's fp-to-integer truncation semantics.
+def CVTTQ : AlphaInst<(outs FPRC:$Fc), (ins FPRC:$Fb), "cvttq/c $Fb, $Fc", []> {
+  let Opcode = 0x16;
+}
+
 // Load address: `lda $Rc, $disp($Rb)` computes $Rc = $Rb + sign_ext($disp).
 // With $Rb = $31 (zero) this materializes a 16-bit signed constant.
 def LDA : MFormD<0x08, (outs GPRC:$Ra), (ins s16imm:$disp, GPRC:$Rb),
@@ -241,6 +254,13 @@ def MOVi2f : AlphaPseudo<(outs FPRC:$dst), (ins GPRC:$src), "# MOVi2f",
 def MOVf2i : AlphaPseudo<(outs GPRC:$dst), (ins FPRC:$src), "# MOVf2i",
                          [(set i64:$dst, (bitconvert f64:$src))]>;
 }
+
+// Signed integer/floating conversions: move the bits into a floating-point
+// register, then convert.  f32 results/inputs go through f64.
+def : Pat<(f64 (sint_to_fp GPRC:$x)), (CVTQT (MOVi2f GPRC:$x))>;
+def : Pat<(f32 (sint_to_fp GPRC:$x)), (CVTQS (MOVi2f GPRC:$x))>;
+def : Pat<(i64 (fp_to_sint f64:$x)), (MOVf2i (CVTTQ f64:$x))>;
+def : Pat<(i64 (fp_to_sint f32:$x)), (MOVf2i (CVTTQ (CVTST f32:$x)))>;
 
 // Zero-extension of the low 1/2/4 bytes via zapnot (the byte mask keeps the
 // low N bytes).  This also lets `and` with these masks avoid materializing a
