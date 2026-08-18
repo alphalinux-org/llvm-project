@@ -19,6 +19,7 @@
 #include "Plugins/Process/Utility/RegisterContextFreeBSD_i386.h"
 #include "Plugins/Process/Utility/RegisterContextFreeBSD_powerpc.h"
 #include "Plugins/Process/Utility/RegisterContextFreeBSD_x86_64.h"
+#include "Plugins/Process/Utility/RegisterContextLinux_alpha.h"
 #include "Plugins/Process/Utility/RegisterContextLinux_i386.h"
 #include "Plugins/Process/Utility/RegisterContextLinux_s390x.h"
 #include "Plugins/Process/Utility/RegisterContextLinux_x86_64.h"
@@ -31,6 +32,7 @@
 #include "Plugins/Process/Utility/RegisterInfoPOSIX_ppc64le.h"
 #include "ProcessElfCore.h"
 #include "RegisterContextLinuxCore_x86.h"
+#include "RegisterContextPOSIXCore_alpha.h"
 #include "RegisterContextPOSIXCore_arm.h"
 #include "RegisterContextPOSIXCore_arm64.h"
 #include "RegisterContextPOSIXCore_loongarch64.h"
@@ -130,6 +132,9 @@ ThreadElfCore::CreateRegisterContextForFrame(StackFrame *frame) {
       switch (arch.GetMachine()) {
       case llvm::Triple::aarch64:
         break;
+      case llvm::Triple::alpha:
+        reg_interface = new RegisterContextLinux_alpha(arch);
+        break;
       case llvm::Triple::ppc64le:
         reg_interface = new RegisterInfoPOSIX_ppc64le(arch);
         break;
@@ -182,6 +187,10 @@ ThreadElfCore::CreateRegisterContextForFrame(StackFrame *frame) {
     case llvm::Triple::aarch64:
       m_thread_reg_ctx_sp = RegisterContextCorePOSIX_arm64::Create(
           *this, arch, m_gpregset_data, m_notes);
+      break;
+    case llvm::Triple::alpha:
+      m_thread_reg_ctx_sp = std::make_shared<RegisterContextCorePOSIX_alpha>(
+          *this, reg_interface, m_gpregset_data, m_notes);
       break;
     case llvm::Triple::arm:
       m_thread_reg_ctx_sp = std::make_shared<RegisterContextCorePOSIX_arm>(
