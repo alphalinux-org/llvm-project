@@ -389,6 +389,13 @@ void AlphaMCCodeEmitter::encodeInstruction(const MCInst &MI,
       RM = Alpha::fpRounds(TrapClass) ? getFPRoundMode(STI)
                                       : Alpha::FPRoundNormal;
     }
+    // The merge is an OR into the function field rather than a clear and set,
+    // because the bits a base encoding already has there are part of what it
+    // is: cvtst is cvtts with 0x200 in the trap-mode position.  That only
+    // stays sound while every qualifier reaching here is one the class
+    // defines, which the parser and the disassembler both check.
+    assert(Alpha::fpQualIsLegal(TrapClass, TrapBits, RM) &&
+           "floating-point qualifier is not defined for this instruction");
     Bits |= TrapBits << 5;
     if (Alpha::fpTakesWrittenRound(TrapClass) && RM != Alpha::FPRoundNormal)
       Bits = (Bits & ~(0xc0u << 5)) | (Alpha::getFPRoundFuncBits(RM) << 5);

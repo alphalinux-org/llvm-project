@@ -192,6 +192,14 @@ class AlphaAsmParser : public MCTargetAsmParser {
   // sets.
   MCSymbol *CurEntSym = nullptr;
 
+  // A floating-point qualifier written on the mnemonic, as MCInst flags, and
+  // the mnemonic without it.  Set while parsing and consumed when matching:
+  // most qualified operates are spelled `addt/su' with no def of their own, so
+  // the match is retried against the base name with the qualifier recorded.
+  unsigned PendingFPQual = 0;
+  bool PendingFPQualIsV = false;
+  StringRef PendingFPQualBase;
+
 #define GET_ASSEMBLER_HEADER
 #include "AlphaGenAsmMatcher.inc"
 
@@ -508,7 +516,60 @@ ParseStatus AlphaAsmParser::parseMemOperand(OperandVector &Operands) {
 bool AlphaAsmParser::parseInstruction(ParseInstructionInfo &Info,
                                       StringRef Name, SMLoc NameLoc,
                                       OperandVector &Operands) {
-  Operands.push_back(AlphaOperand::createToken(Name, NameLoc));
+  // Alpha FP instructions can carry a qualifier suffix: divt/c, cvttq/c, etc.
+  // The lexer splits "divt/c" into three tokens (divt, /, c), so we must
+  // reassemble the full mnemonic before looking it up.
+  PendingFPQual = 0;
+  PendingFPQualIsV = false;
+  PendingFPQualBase = StringRef();
+  StringRef Mnem = Name;
+  if (getLexer().is(AsmToken::Slash)) {
+    SMLoc SlashLoc = getLexer().getLoc();
+    getParser().Lex(); // /
+    if (getLexer().is(AsmToken::Identifier)) {
+      // Build "base/qualifier" and intern it in the context's bump allocator
+      // so the StringRef stored in the token operand remains valid after this
+      // function returns (createToken stores a raw pointer, not a copy).
+      StringRef Qual = getLexer().getTok().getIdentifier();
+      SmallString<16> Buf;
+      Buf += Name;
+      Buf += '/';
+      Buf += Qual;
+      Mnem = getParser().getContext().allocateString(Buf);
+      getParser().Lex(); // qualifier
+
+      // A trap qualifier, optionally followed by a rounding letter: su, sui,
+      // sud, c, and so on.  Anything else is part of a mnemonic that is spelled
+      // with its qualifier, such as cvttq/svid, and is matched as written.
+      StringRef Trap = Qual;
+      unsigned RM = Alpha::FPRoundNormal;
+      if (Trap.size() > 1 || Trap == "c" || Trap == "m" || Trap == "d") {
+        unsigned Cand = StringSwitch<unsigned>(Trap.take_back())
+                            .Case("c", Alpha::FPRoundChopped)
+                            .Case("m", Alpha::FPRoundMinus)
+                            .Case("d", Alpha::FPRoundDynamic)
+                            .Default(~0u);
+        bool Ok = false;
+        if (Cand != ~0u) {
+          Alpha::getFPTrapFuncBitsForSpelling(Trap.drop_back(), Ok);
+          if (Ok) {
+            RM = Cand;
+            Trap = Trap.drop_back();
+          }
+        }
+      }
+      bool Ok = false;
+      unsigned TrapBits = Alpha::getFPTrapFuncBitsForSpelling(Trap, Ok);
+      if (Ok && (TrapBits || RM != Alpha::FPRoundNormal)) {
+        PendingFPQual = Alpha::encodeFPQual(TrapBits, RM);
+        PendingFPQualIsV = Trap.contains('v');
+        PendingFPQualBase = Name;
+      }
+    } else {
+      return Error(SlashLoc, "expected qualifier after '/'");
+    }
+  }
+  Operands.push_back(AlphaOperand::createToken(Mnem, NameLoc));
 
   if (getLexer().is(AsmToken::EndOfStatement))
     return false;
@@ -965,16 +1026,52 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   MCInst Inst;
   unsigned Result =
       MatchInstructionImpl(Operands, Inst, ErrorInfo, MatchingInlineAsm);
+  unsigned Flags = 0;
+  if (Result != Match_Success && PendingFPQual) {
+    // Most qualified operates have no def of their own -- `addt/su' is `addt'
+    // with bits in its function field -- so match the base mnemonic and carry
+    // the qualifier alongside.  The few that are spelled out, such as
+    // cvttq/svid, matched above and keep their own encoding.
+    Operands[0] = AlphaOperand::createToken(PendingFPQualBase, IDLoc);
+    MCInst Retry;
+    unsigned R2 =
+        MatchInstructionImpl(Operands, Retry, ErrorInfo, MatchingInlineAsm);
+    if (R2 == Match_Success) {
+      // Only an instruction that has a qualifier field can be given one.
+      unsigned TrapClass = MII.get(Retry.getOpcode()).TSFlags &
+                           Alpha::TrapClassMask;
+      if (!TrapClass)
+        return Error(IDLoc, "instruction does not take a floating-point "
+                            "qualifier");
+      // And only one of the combinations its class defines.  The function
+      // field has room for spellings no instruction has -- a rounding letter
+      // on a compare, an underflow bit without inexact on cvtqt -- and merging
+      // one in produces a word that is reserved at best and, for cvtst, reads
+      // back as a different real instruction.
+      if (!Alpha::fpQualIsLegal(TrapClass,
+                                Alpha::fpQualTrapBits(PendingFPQual),
+                                Alpha::fpQualRoundMode(PendingFPQual)) ||
+          !Alpha::fpTrapSpellingMatchesClass(
+              TrapClass, Alpha::fpQualTrapBits(PendingFPQual),
+              PendingFPQualIsV))
+        return Error(IDLoc, "invalid floating-point qualifier for this "
+                            "instruction");
+      Inst = Retry;
+      Result = R2;
+      Flags = PendingFPQual;
+    }
+  }
   switch (Result) {
   case Match_Success:
     Inst.setLoc(IDLoc);
     // Whatever was written is what this instruction carries -- including
-    // nothing, which is a qualifier too.  Recording it is what stops -mieee
-    // from turning a hand-written `addt' into `addt/su': the encoder applies
-    // the subtarget's policy only to an instruction that carries no qualifier
-    // of its own, and everything the assembler sees carries one.
+    // nothing, which is a qualifier too.  Recording it stops -mieee from
+    // turning a written `addt' into `addt/su'.  A mnemonic spelled with its
+    // qualifier, such as cvttq/svid, already has it in the encoding and needs
+    // no flag; it has TrapClass 0 for that reason.
     if (MII.get(Inst.getOpcode()).TSFlags & Alpha::TrapClassMask)
-      Inst.setFlags(Alpha::encodeFPQual(0, Alpha::FPRoundNormal));
+      Inst.setFlags(Flags ? Flags
+                          : Alpha::encodeFPQual(0, Alpha::FPRoundNormal));
     Out.emitInstruction(Inst, getSTI());
     return false;
   case Match_MnemonicFail:

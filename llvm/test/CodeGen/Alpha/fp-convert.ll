@@ -1,6 +1,15 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu -mattr=+ieee < %s \
 ; RUN:   | FileCheck %s --check-prefix=IEEE
+; RUN: llc -mtriple=alpha-unknown-linux-gnu -mattr=+ieee -filetype=obj < %s \
+; RUN:   | llvm-objdump -d - | FileCheck %s --check-prefix=OBJ
+
+; The object path is checked too, and not only because an encoding is worth
+; checking: cvtst/s is a mnemonic of its own rather than cvtst with a qualifier,
+; so selecting the wrong one of the two is invisible in the assembly the printer
+; produces and shows up only when the function field is built.
+; OBJ-LABEL: <ext>:
+; OBJ:       cvtst/s $f16, $f0
 
 ; A float in a register is already held in T_floating form, so widening one is a
 ; register move.  Under -mieee it goes through cvtst, whose /s form is completed

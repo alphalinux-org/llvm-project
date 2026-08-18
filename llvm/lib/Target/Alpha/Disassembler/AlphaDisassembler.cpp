@@ -13,6 +13,7 @@
 #include "llvm/MC/MCDecoderOps.h"
 #include "llvm/MC/MCDisassembler/MCDisassembler.h"
 #include "llvm/MC/MCInst.h"
+#include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/Endian.h"
 
@@ -23,11 +24,27 @@ using namespace llvm::MCD;
 
 typedef MCDisassembler::DecodeStatus DecodeStatus;
 
+// The trap and rounding qualifier a floating-point operate word carries, as
+// MCInst flags.  Rounding is bits 7:6 of the function field, where the
+// unqualified form rounds to nearest.
+static unsigned qualFromWord(uint32_t Insn) {
+  unsigned Func = (Insn >> 5) & 0x7ff;
+  unsigned RoundBits = Func & 0x0c0;
+  unsigned RM = RoundBits == 0x000   ? Alpha::FPRoundChopped
+                : RoundBits == 0x040 ? Alpha::FPRoundMinus
+                : RoundBits == 0x0c0 ? Alpha::FPRoundDynamic
+                                     : Alpha::FPRoundNormal;
+  return Alpha::encodeFPQual(Func & 0x700, RM);
+}
+
 namespace {
 class AlphaDisassembler : public MCDisassembler {
+  std::unique_ptr<const MCInstrInfo> MCII;
+
 public:
-  AlphaDisassembler(const MCSubtargetInfo &STI, MCContext &Ctx)
-      : MCDisassembler(STI, Ctx) {}
+  AlphaDisassembler(const MCSubtargetInfo &STI, MCContext &Ctx,
+                    std::unique_ptr<const MCInstrInfo> MCII)
+      : MCDisassembler(STI, Ctx), MCII(std::move(MCII)) {}
   ~AlphaDisassembler() override = default;
 
   DecodeStatus getInstruction(MCInst &Instr, uint64_t &Size,
@@ -123,13 +140,92 @@ DecodeStatus AlphaDisassembler::getInstruction(MCInst &Instr, uint64_t &Size,
   }
   Size = 4;
   uint32_t Insn = support::endian::read32le(Bytes.data());
-  return decodeInstruction(DecoderTable32, Instr, Insn, Address, this, STI);
+  DecodeStatus S =
+      decodeInstruction(DecoderTable32, Instr, Insn, Address, this, STI);
+  if (S != MCDisassembler::Fail) {
+    // Record what the bits say about the qualifier, so the printer shows that
+    // rather than deriving one from -mattr: the same word must not read as
+    // `addt' or `addt/su' depending on a flag.
+    if (unsigned TrapClass = MCII->get(Instr.getOpcode()).TSFlags & Alpha::TrapClassMask) {
+      unsigned Qual = qualFromWord(Insn);
+      unsigned TrapBits = Alpha::fpTrapFieldIsQualifier(TrapClass)
+                              ? Alpha::fpQualTrapBits(Qual)
+                              : 0;
+      // A class that does not take the ambient rounding mode has a table entry
+      // per rounding field -- cvttq/c and cvttq are separate defs -- so its
+      // mnemonic already spells the mode.  Recording it again would print it
+      // twice, as cvttq/cc.
+      unsigned RM = Alpha::fpRounds(TrapClass) ? Alpha::fpQualRoundMode(Qual)
+                                               : Alpha::FPRoundNormal;
+      if (!Alpha::fpQualIsLegal(TrapClass, TrapBits, RM))
+        return MCDisassembler::Fail;
+      Instr.setFlags(Alpha::encodeFPQual(TrapBits, RM));
+    }
+    return S;
+  }
+
+  // A floating-point operate carries its trap and rounding qualifiers in the
+  // function field, and only the unqualified encodings have a table entry.  So
+  // an instruction assembled with -mieee -- including one this compiler
+  // produced -- would not decode at all.  Take the qualifier out, decode what
+  // is left, and hand the qualifier to the printer through the instruction's
+  // flags so it prints what the bits actually say.
+  // 0x14 is the FIX/CIX operate group, which sqrts and sqrtt live in and which
+  // carries the same qualifier field; leaving it out left every qualified
+  // square root in the platform's own libm undecodable.
+  unsigned Opcode = Insn >> 26;
+  if (Opcode != 0x14 && Opcode != 0x15 && Opcode != 0x16 && Opcode != 0x17)
+    return MCDisassembler::Fail;
+
+  unsigned Func = (Insn >> 5) & 0x7ff;
+  unsigned TrapBits = Func & 0x700;
+  unsigned RM = Alpha::fpQualRoundMode(qualFromWord(Insn));
+  if (!TrapBits && RM == Alpha::FPRoundNormal)
+    return MCDisassembler::Fail;
+
+  // Two ways the qualifier can sit on top of a base encoding.  Most operates
+  // have the round-to-nearest bits in their own function field, so taking the
+  // rounding letter out means restoring those; but cvtql has no rounding field
+  // at all and its base encoding leaves those bits clear, so restoring them
+  // would name a different instruction.  Try the common shape first and the
+  // other only if nothing decodes.
+  const struct {
+    uint32_t Base;
+    unsigned RM;
+  } Candidates[] = {
+      // The rounding letter comes out of the function field, so the base
+      // encoding's own round-to-nearest bits go back in.
+      {(Insn & ~(0x7ffu << 5)) | ((Func & ~0x7c0u) << 5) | (0x080u << 5), RM},
+  };
+  MCInst Bare;
+  unsigned TrapClass = 0;
+  S = MCDisassembler::Fail;
+  for (const auto &C : Candidates) {
+    MCInst Try;
+    if (decodeInstruction(DecoderTable32, Try, C.Base, Address, this, STI) ==
+        MCDisassembler::Fail)
+      continue;
+    unsigned TC = MCII->get(Try.getOpcode()).TSFlags & Alpha::TrapClassMask;
+    if (!TC || !Alpha::fpQualIsLegal(TC, TrapBits, C.RM))
+      continue;
+    Bare = Try;
+    TrapClass = TC;
+    RM = C.RM;
+    S = MCDisassembler::Success;
+    break;
+  }
+  if (S == MCDisassembler::Fail)
+    return S;
+  Instr = Bare;
+  Instr.setFlags(Alpha::encodeFPQual(TrapBits, RM));
+  return S;
 }
 
 static MCDisassembler *createAlphaDisassembler(const Target &T,
                                                const MCSubtargetInfo &STI,
                                                MCContext &Ctx) {
-  return new AlphaDisassembler(STI, Ctx);
+  return new AlphaDisassembler(
+      STI, Ctx, std::unique_ptr<const MCInstrInfo>(T.createMCInstrInfo()));
 }
 
 extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeAlphaDisassembler() {
