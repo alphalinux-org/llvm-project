@@ -40,6 +40,13 @@
 	ldq $1, x($29) !
 # CHECK: [[#@LINE-1]]:18: error: expected relocation name
 
+## A floating-point qualifier suffix: the '/' has to be followed by one, and
+## only an instruction with a trap/rounding field can carry one at all.
+	addt/ $f1, $f2, $f3
+# CHECK: [[#@LINE-1]]:6: error: expected qualifier after '/'
+	addq/su $1, $2, $3
+# CHECK: [[#@LINE-1]]:2: error: instruction does not take a floating-point qualifier
+
 .endif
 
 ## The same fields filled in at layout time by a fixup rather than written

@@ -656,6 +656,9 @@ let TrapClass = 5 in
 def CVTST : FP_r<0x16, 0x2ac, "cvtst", []>;
 let isCodeGenOnly = 1, Predicates = [NotIEEE] in
 def FPEXTST : FMov<[(set f64:$Rc, (fpextend f32:$Rb))]>;
+// cvtst/s: S-to-T with software completion, used in hand-written asm under -mieee
+// (e.g. glibc s_rintf.c).
+def CVTST_S : FP_r<0x16, 0x6ac, "cvtst/s", []>;
 let TrapClass = 1 in  // T-to-S convert is arithmetic: su / sui.
 def CVTTS : FP_r<0x16, 0x0ac, "cvtts", [(set f32:$Rc, (fpround f64:$Rb))]>;
 
@@ -671,11 +674,26 @@ let TrapClass = 4 in {
 def CVTQT : FP_r<0x16, 0x0be, "cvtqt", []>;
 def CVTQS : FP_r<0x16, 0x0bc, "cvtqs", []>;
 }
+// cvtqt/d: integer-to-float with dynamic rounding mode (from FPCR).
+// Used in hand-written asm under -mfp-rounding-mode=d (e.g. glibc s_rint.c).
+def CVTQT_D : FP_r<0x16, 0x0fe, "cvtqt/d", []>;
+
 // cvttq/c: convert T-floating to quadword with chopped (round-toward-zero)
 // rounding, matching C's fp-to-integer truncation semantics.  Float-to-int
 // takes the sv / svi qualifier.
-let TrapClass = 3 in
+let TrapClass = 3 in {
 def CVTTQ : FP_r<0x16, 0x02f, "cvttq/c", []>;
+// The same conversion rounding to nearest, which hand-written assembly may ask
+// for and GNU as accepts.  Codegen never selects it -- C truncates -- but the
+// assembler has to be able to say what the architecture can encode, and the
+// disassembler to read it back.
+def CVTTQn : FP_r<0x16, 0x0af, "cvttq", []>;
+}
+
+// cvttq/svid: float-to-integer with software completion, overflow, inexact,
+// and dynamic rounding mode.  Used in hand-written asm under -mieee-with-inexact
+// -mfp-rounding-mode=d (e.g. glibc s_rint.c).
+def CVTTQ_SVID : FP_r<0x16, 0x7ef, "cvttq/svid", []>;
 
 // Move the floating-point control register to/from a floating register.  The
 // operand is encoded in all three register fields.  These carry no pattern and
