@@ -190,15 +190,19 @@ def tlsgd_sym : SymOperand<"getTlsgdEncoding">;
 def tlsldm_sym : SymOperand<"getTlsldmEncoding">;
 def dtprelhi_sym : SymOperand<"getDtprelHighEncoding">;
 def dtprello_sym : SymOperand<"getDtprelLowEncoding">;
-// Retained alias so existing definitions read naturally.
-def symbol : SymOperand<"getGprelLowEncoding">;
-
 // A register printed inside parentheses, `($reg)`, as used by the jsr/jmp/ldq_u
 // address forms.  Written this way (rather than literal parens in the asm
 // string) so the instructions stay in the assembler matcher and disassembler.
+def ParenRegAsmOperand : AsmOperandClass {
+  let Name = "ParenReg";
+  let PredicateMethod = "isParenReg";
+  let RenderMethod = "addParenRegOperands";
+  let ParserMethod = "parseMemOperand";
+}
 def parenGPR : RegisterOperand<GPRC> {
   let PrintMethod = "printParenReg";
   let DecoderMethod = "DecodeGPRCRegisterClass";
+  let ParserMatchClass = ParenRegAsmOperand;
 }
 
 // The base register of ldq_u/stq_u, printed `0($reg)`: unlike jsr/jmp, the
@@ -232,6 +236,18 @@ let hasSideEffects = 1 in
 def MB : AlphaInst<(outs), (ins), "mb", [(atomic_fence timm, timm)]> {
   let Opcode = 0x18;
   let Inst{25-0} = 0x4000;
+}
+
+// The other misc-format barriers: write memory barrier and the trap barriers.
+class MiscBarrier<bits<26> func, string mnem>
+    : AlphaInst<(outs), (ins), mnem, []> {
+  let Opcode = 0x18;
+  let Inst{25-0} = func;
+}
+let hasSideEffects = 1 in {
+def WMB   : MiscBarrier<0x4400, "wmb">;
+def TRAPB : MiscBarrier<0x0000, "trapb">;
+def EXCB  : MiscBarrier<0x0400, "excb">;
 }
 
 // Register-register integer operate instruction: `<mnem> $Ra, $Rb, $Rc`
@@ -1296,7 +1312,7 @@ def : Pat<(truncstorei16 (i64 0), ADDRri:$addr), (STW R31, memri:$addr)>;
 // word at the position given by the low address bits, zero-extended.
 // ldq_u/stq_u take a base register with an implicit zero displacement; the CPU
 // ignores the low three address bits.
-let mayLoad = 1, hasSideEffects = 0 in
+let mayLoad = 1, hasSideEffects = 0, isCodeGenOnly = 1 in
 def LDQ_U : AlphaInst<(outs GPRC:$Ra), (ins memzGPR:$base), "ldq_u $Ra, $base",
                       [(set i64:$Ra, (AlphaLdqU i64:$base))]> {
   bits<5> Ra;
@@ -1361,7 +1377,7 @@ def : Pat<(and GPRC:$x, (not (shl (i64 0xffffffff), (shl GPRC:$n, (i64 3))))),
           (MSKLL GPRC:$x, GPRC:$n)>;
 }
 
-let mayStore = 1, hasSideEffects = 0 in
+let mayStore = 1, hasSideEffects = 0, isCodeGenOnly = 1 in
 def STQ_U : AlphaInst<(outs), (ins GPRC:$Ra, memzGPR:$base), "stq_u $Ra, $base",
                       [(AlphaStqU i64:$Ra, i64:$base)]> {
   bits<5> Ra;
@@ -1698,3 +1714,142 @@ def : Pat<(int_alpha_mskwl i64:$a, i64:$b), (MSKWL GPRC:$a, GPRC:$b)>;
 def : Pat<(int_alpha_ctpop i64:$x), (CTPOP GPRC:$x)>;
 def : Pat<(int_alpha_ctlz i64:$x),  (CTLZ GPRC:$x)>;
 def : Pat<(int_alpha_cttz i64:$x),  (CTTZ GPRC:$x)>;
+
+//===----------------------------------------------------------------------===//
+// Additional operand forms accepted by the assembler (GNU as compatibility).
+//
+// These parse the syntaxes the kernel's hand-written assembly uses.  They carry
+// no codegen patterns; the codegen forms above stay isCodeGenOnly where a
+// spelling differs.
+//===----------------------------------------------------------------------===//
+
+let hasSideEffects = 0 in {
+
+// Byte/word/long/quad extract, insert and mask, plus zap and cmpbge, with a
+// literal position (the register forms are defined above; the byte/word low
+// ext forms and zapnot already carry their own literal form).
+class BLit<bits<6> opc, bits<7> func, string mnem>
+    : OFormL<opc, func, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
+             mnem # " $Ra, $lit, $Rc", []>;
+def CMPBGEi : BLit<0x10, 0x0f, "cmpbge">;
+def ZAPi    : BLit<0x12, 0x30, "zap">;
+def EXTQLi  : BLit<0x12, 0x36, "extql">;
+def EXTWHi  : BLit<0x12, 0x5a, "extwh">;
+def EXTLHi  : BLit<0x12, 0x6a, "extlh">;
+def EXTQHi  : BLit<0x12, 0x7a, "extqh">;
+def INSBLi  : BLit<0x12, 0x0b, "insbl">;
+def INSWLi  : BLit<0x12, 0x1b, "inswl">;
+def INSLLi  : BLit<0x12, 0x2b, "insll">;
+def INSQLi  : BLit<0x12, 0x3b, "insql">;
+def INSWHi  : BLit<0x12, 0x57, "inswh">;
+def INSLHi  : BLit<0x12, 0x67, "inslh">;
+def INSQHi  : BLit<0x12, 0x77, "insqh">;
+def MSKBLi  : BLit<0x12, 0x02, "mskbl">;
+def MSKWLi  : BLit<0x12, 0x12, "mskwl">;
+def MSKLLi  : BLit<0x12, 0x22, "mskll">;
+def MSKQLi  : BLit<0x12, 0x32, "mskql">;
+def MSKWHi  : BLit<0x12, 0x52, "mskwh">;
+def MSKLHi  : BLit<0x12, 0x62, "msklh">;
+def MSKQHi  : BLit<0x12, 0x72, "mskqh">;
+
+// Conditional moves with a literal true-value, cmovXX $Ra, $lit, $Rc.
+def CMOVEQi  : BLit<0x11, 0x24, "cmoveq">;
+def CMOVNEi  : BLit<0x11, 0x26, "cmovne">;
+def CMOVLTi  : BLit<0x11, 0x44, "cmovlt">;
+def CMOVGEi  : BLit<0x11, 0x46, "cmovge">;
+def CMOVLEi  : BLit<0x11, 0x64, "cmovle">;
+def CMOVGTi  : BLit<0x11, 0x66, "cmovgt">;
+def CMOVLBSi : BLit<0x11, 0x14, "cmovlbs">;
+def CMOVLBCi : BLit<0x11, 0x16, "cmovlbc">;
+
+// amask with a literal mask, amask $lit, $Rc ($Ra is the zero register).
+def AMASKi : OFormL<0x11, 0x61, (outs GPRC:$Rc), (ins u8imm:$lit),
+                    "amask $lit, $Rc", []> {
+  let Ra = 31;
+}
+
+// ldq_u/stq_u with the memory operand the assembler writes, disp($base).
+let mayLoad = 1 in
+def LDQ_Um : MForm<0x0b, (outs GPRC:$Ra), (ins memri:$addr),
+                   "ldq_u $Ra, $addr", []>;
+let mayStore = 1 in
+def STQ_Um : MForm<0x0f, (outs GPRC:$Ra), (ins memri:$addr),
+                   "stq_u $Ra, $addr", []>;
+
+// lda/ldah with a bare displacement (implicit $31 base): materialize a signed
+// 16-bit constant, e.g. `lda $0, 128`.
+let isAsmParserOnly = 1 in {
+def LDAi  : MFormD<0x08, (outs GPRC:$Rc), (ins s16imm:$disp), "lda $Rc, $disp",
+                   []> { let Rb = 31; }
+def LDAHi : MFormD<0x09, (outs GPRC:$Rc), (ins s16imm:$disp), "ldah $Rc, $disp",
+                   []> { let Rb = 31; }
+}
+
+// unop: the canonical no-op, ldq_u $31, 0($30).
+let isAsmParserOnly = 1 in
+def UNOP : AlphaInst<(outs), (ins), "unop", []> {
+  let Opcode = 0x0b;
+  let Inst{25-21} = 31;
+  let Inst{20-16} = 30;
+  let Inst{15-0} = 0;
+}
+
+// The misc-format cache hints: opcode 0x18 with the address in $Rb and $Ra
+// tied off to $31.  They are hints, so dropping one is always legal.
+class MiscHint<bits<16> func, string mnem>
+    : AlphaInst<(outs), (ins parenGPR:$Rb), mnem # " $Rb", []> {
+  bits<5> Rb;
+  let Opcode = 0x18;
+  let Inst{25-21} = 31;
+  let Inst{20-16} = Rb;
+  let Inst{15-0} = func;
+}
+
+def FETCH   : MiscHint<0x8000, "fetch">;
+def FETCH_M : MiscHint<0xa000, "fetch_m">;
+def ECB     : MiscHint<0xe800, "ecb">;
+def WH64    : MiscHint<0xf800, "wh64">;
+def WH64EN  : MiscHint<0xfc00, "wh64en">;
+} // hasSideEffects = 0
+
+// bsr with an explicit link register, e.g. the millicode `bsr $23, __divqu`.
+let isCall = 1 in
+def BSRr : BForm<0x34, (outs), (ins GPRC:$Ra, brtarget:$target),
+                 "bsr $Ra, $target", []>;
+
+// br with an explicit link register / a bare target ($31 discards the saved PC).
+let isBranch = 1, isTerminator = 1, isBarrier = 1, isAsmParserOnly = 1 in {
+def BRr : BForm<0x30, (outs), (ins GPRC:$Ra, brtarget:$target),
+                "br $Ra, $target", []>;
+let Ra = 31 in
+def BRt : BForm<0x30, (outs), (ins brtarget:$target), "br $target", []>;
+}
+
+// ret/jmp with the explicit operand forms the assembler writes.  ret defaults
+// its hint to 1 (return prediction) unless a link register is given.
+let isReturn = 1, isTerminator = 1, isBarrier = 1, isAsmParserOnly = 1 in {
+def RETb : MbrForm<0b10, (outs), (ins parenGPR:$Rb), "ret $Rb", []> {
+  let Ra = 31;
+  let hint = 1;
+}
+def RETab : MbrForm<0b10, (outs), (ins GPRC:$Ra, parenGPR:$Rb), "ret $Ra, $Rb",
+                    []> {
+  let hint = 0;
+}
+}
+let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1,
+    isAsmParserOnly = 1 in {
+def JMPb : MbrForm<0b00, (outs), (ins parenGPR:$Rb), "jmp $Rb", []> {
+  let Ra = 31;
+}
+def JMPab : MbrForm<0b00, (outs), (ins GPRC:$Ra, parenGPR:$Rb), "jmp $Ra, $Rb",
+                    []>;
+}
+
+// andnot: an alias of bic (and with the complement of the second operand).
+def : InstAlias<"andnot $Ra, $Rb, $Rc", (BIC GPRC:$Rc, GPRC:$Ra, GPRC:$Rb)>;
+def : InstAlias<"andnot $Ra, $lit, $Rc", (BICi GPRC:$Rc, GPRC:$Ra, u8imm:$lit)>;
+
+// ldiq: load an immediate quadword.  GNU as implements the general 64-bit case
+// as a multi-instruction macro; the common small case is a single lda.
+def : InstAlias<"ldiq $Rc, $imm", (LDAi GPRC:$Rc, s16imm:$imm)>;

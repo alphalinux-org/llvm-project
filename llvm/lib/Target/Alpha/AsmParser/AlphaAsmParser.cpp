@@ -61,6 +61,10 @@ public:
   bool isReg() const override { return Kind == Register; }
   bool isImm() const override { return Kind == Immediate; }
   bool isMem() const override { return Kind == Memory; }
+  // A register written in parentheses, `($reg)`, as jsr/jmp/ret/wh64 use: the
+  // parser produces a memory operand (base with a zero displacement) that these
+  // instructions consume as a plain base register.
+  bool isParenReg() const { return Kind == Memory; }
 
   StringRef getToken() const {
     assert(Kind == Token);
@@ -118,6 +122,10 @@ public:
     assert(N == 2);
     Inst.addOperand(MCOperand::createReg(Mem.Base));
     addExpr(Inst, Mem.Off);
+  }
+  void addParenRegOperands(MCInst &Inst, unsigned N) const {
+    assert(N == 1);
+    Inst.addOperand(MCOperand::createReg(Mem.Base));
   }
 
   // Wrap the displacement/immediate in a relocation-specifier expression from a
@@ -177,6 +185,8 @@ public:
                  const MCInstrInfo &MII)
       : MCTargetAsmParser(STI, MII), Parser(P) {
     setAvailableFeatures(ComputeAvailableFeatures(STI.getFeatureBits()));
+    // On Alpha `.word` is a 16-bit datum, matching GNU as.
+    P.addAliasForDirective(".word", ".2byte");
   }
 
   bool parseRegister(MCRegister &Reg, SMLoc &StartLoc, SMLoc &EndLoc) override;
@@ -203,6 +213,45 @@ public:
 
 bool AlphaAsmParser::matchRegister(StringRef Name, MCRegister &Reg) {
   Reg = MatchRegisterName(Name);
+  if (Reg)
+    return false;
+  // The ABI register aliases (used throughout hand-written kernel assembly) are
+  // not produced by the generated matcher, so map them here.
+  Reg = StringSwitch<MCRegister>(Name)
+            .Case("$v0", Alpha::R0)
+            .Case("$t0", Alpha::R1)
+            .Case("$t1", Alpha::R2)
+            .Case("$t2", Alpha::R3)
+            .Case("$t3", Alpha::R4)
+            .Case("$t4", Alpha::R5)
+            .Case("$t5", Alpha::R6)
+            .Case("$t6", Alpha::R7)
+            .Case("$t7", Alpha::R8)
+            .Case("$s0", Alpha::R9)
+            .Case("$s1", Alpha::R10)
+            .Case("$s2", Alpha::R11)
+            .Case("$s3", Alpha::R12)
+            .Case("$s4", Alpha::R13)
+            .Case("$s5", Alpha::R14)
+            .Case("$fp", Alpha::R15)
+            .Case("$s6", Alpha::R15)
+            .Case("$a0", Alpha::R16)
+            .Case("$a1", Alpha::R17)
+            .Case("$a2", Alpha::R18)
+            .Case("$a3", Alpha::R19)
+            .Case("$a4", Alpha::R20)
+            .Case("$a5", Alpha::R21)
+            .Case("$t8", Alpha::R22)
+            .Case("$t9", Alpha::R23)
+            .Case("$t10", Alpha::R24)
+            .Case("$t11", Alpha::R25)
+            .Case("$ra", Alpha::R26)
+            .Case("$pv", Alpha::R27)
+            .Case("$t12", Alpha::R27)
+            .Case("$at", Alpha::R28)
+            .Case("$gp", Alpha::R29)
+            .Case("$sp", Alpha::R30)
+            .Default(MCRegister());
   return Reg == MCRegister();
 }
 
@@ -245,6 +294,17 @@ ParseStatus AlphaAsmParser::parseDirective(AsmToken DirectiveID) {
         return ParseStatus::Success;
       }
     }
+  }
+
+  // ECOFF/OSF procedure-descriptor directives (.ent/.end/.frame/.prologue/
+  // .mask/.fmask) carry hand-written-assembly bookkeeping that the ELF object
+  // does not need.  Accept and ignore them.  .end in particular must be caught
+  // here, ahead of the generic directive that would otherwise stop assembly.
+  StringRef ID = DirectiveID.getIdentifier();
+  if (ID == ".ent" || ID == ".end" || ID == ".frame" || ID == ".prologue" ||
+      ID == ".mask" || ID == ".fmask" || ID == ".usepv") {
+    getParser().eatToEndOfStatement();
+    return ParseStatus::Success;
   }
   return ParseStatus::NoMatch;
 }
