@@ -410,6 +410,14 @@ MachineBasicBlock *
 AlphaTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
                                                  MachineBasicBlock *MBB) const {
   switch (MI.getOpcode()) {
+  case Alpha::SAFE_STOREI8:
+    return emitAtomicLoop(MI, MBB, Alpha::SAFE_STORE_LOOP,
+                          /*NumScratch=*/3, /*NumDefs=*/0,
+                          {0});
+  case Alpha::SAFE_STOREI16:
+    return emitAtomicLoop(MI, MBB, Alpha::SAFE_STORE_LOOP,
+                          /*NumScratch=*/3, /*NumDefs=*/0,
+                          {1});
   case Alpha::ATOMIC_ADD_I64:
     return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_RMW_LOOP,
                           /*NumScratch=*/1, /*NumDefs=*/1,

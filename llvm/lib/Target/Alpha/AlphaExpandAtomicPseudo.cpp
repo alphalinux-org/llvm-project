@@ -70,6 +70,8 @@ private:
   bool expandAtomicCmpXchg(MachineBasicBlock &MBB,
                            MachineBasicBlock::iterator MBBI,
                            MachineBasicBlock::iterator &NextMBBI);
+  bool expandSafeStore(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
+                       MachineBasicBlock::iterator &NextMBBI);
 };
 
 char AlphaExpandAtomicPseudo::ID = 0;
@@ -110,6 +112,8 @@ bool AlphaExpandAtomicPseudo::expandMI(MachineBasicBlock &MBB,
     return expandAtomicRMW(MBB, MBBI, NextMBBI);
   case Alpha::ATOMIC_CAS_LOOP:
     return expandAtomicCmpXchg(MBB, MBBI, NextMBBI);
+  case Alpha::SAFE_STORE_LOOP:
+    return expandSafeStore(MBB, MBBI, NextMBBI);
   }
   return false;
 }
@@ -289,6 +293,50 @@ bool AlphaExpandAtomicPseudo::expandAtomicCmpXchg(
 //          bis    Old, Ins, Old
 //          stq_c  Old, 0(Aligned)      ; Old <- success
 //          beq    Old, LoopBB
+bool AlphaExpandAtomicPseudo::expandSafeStore(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
+    MachineBasicBlock::iterator &NextMBBI) {
+  MachineInstr &MI = *MBBI;
+  const DebugLoc &DL = MI.getDebugLoc();
+
+  Register Aligned = MI.getOperand(0).getReg();
+  Register Ins = MI.getOperand(1).getReg();
+  Register Old = MI.getOperand(2).getReg();
+  Register Val = MI.getOperand(3).getReg();
+  Register Addr = MI.getOperand(4).getReg();
+  bool IsWord = MI.getOperand(5).getImm() != 0;
+  unsigned MskOpc = IsWord ? Alpha::MSKWL : Alpha::MSKBL;
+  unsigned InsOpc = IsWord ? Alpha::INSWL : Alpha::INSBL;
+
+  BuildMI(MBB, MI, DL, TII->get(Alpha::BICi), Aligned).addReg(Addr).addImm(7);
+  BuildMI(MBB, MI, DL, TII->get(InsOpc), Ins).addReg(Val).addReg(Addr);
+
+  SmallVector<MachineBasicBlock *, 2> Blocks;
+  splitBlock(MBB, MI, Blocks, 2);
+  MachineBasicBlock *LoopBB = Blocks[0], *ExitBB = Blocks[1];
+  MBB.addSuccessor(LoopBB);
+  LoopBB->addSuccessor(LoopBB);
+  LoopBB->addSuccessor(ExitBB);
+
+  MachineInstrBuilder MIB =
+      BuildMI(LoopBB, DL, TII->get(Alpha::LDQ_L), Old)
+          .addReg(Aligned)
+          .addImm(0);
+  addNarrowedMemOperands(MIB, MI, MachineMemOperand::MOLoad);
+  BuildMI(LoopBB, DL, TII->get(MskOpc), Old).addReg(Old).addReg(Addr);
+  BuildMI(LoopBB, DL, TII->get(Alpha::BIS), Old).addReg(Ins).addReg(Old);
+  MIB = BuildMI(LoopBB, DL, TII->get(Alpha::STQ_C), Old)
+            .addReg(Old)
+            .addReg(Aligned)
+            .addImm(0);
+  addNarrowedMemOperands(MIB, MI, MachineMemOperand::MOStore);
+  BuildMI(LoopBB, DL, TII->get(Alpha::BEQ)).addReg(Old).addMBB(LoopBB);
+
+  NextMBBI = MBB.end();
+  MI.eraseFromParent();
+  addLiveIns(Blocks);
+  return true;
+}
 
 // A misaligned store updates the one or two aligned quadwords the field falls
 // in, each with its own lock loop, so a concurrent access to adjacent bytes of

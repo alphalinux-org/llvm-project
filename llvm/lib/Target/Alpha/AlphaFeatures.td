@@ -23,6 +23,16 @@ def FeatureMVI : SubtargetFeature<"mvi", "HasMVI", "true",
 def HasMVI : Predicate<"Subtarget->hasMVI()">,
              AssemblerPredicate<(all_of FeatureMVI)>;
 
+// Without BWX, use a lock-based (ldq_l/stq_c) sequence for byte/word stores so
+// that they are safe against concurrent accesses to the same quadword.
+def FeatureSafeBWA : SubtargetFeature<"safe-bwa", "HasSafeBWA", "true",
+    "Use a lock-based sequence for pre-BWX byte/word stores">;
+// Pre-BWX byte/word store variants: plain read-modify-write vs. lock-based.
+def UnsafeBWStore
+    : Predicate<"!Subtarget->hasBWX() && !Subtarget->hasSafeBWA()">;
+def SafeBWStore
+    : Predicate<"!Subtarget->hasBWX() && Subtarget->hasSafeBWA()">;
+
 def FeatureFIX : SubtargetFeature<"fix", "HasFIX", "true",
                                   "Enable FIX square-root and register-move "
                                   "instructions (sqrts, sqrtt, itof, ftoi)">;
