@@ -135,9 +135,41 @@ public:
 
   bool validateAsmConstraint(const char *&Name,
                              TargetInfo::ConstraintInfo &Info) const override {
+    // Constraint letters match GCC's alpha back end
+    // (config/alpha/constraints.md).
     switch (*Name) {
     case 'f': // Floating-point register.
       Info.setAllowsRegister();
+      return true;
+    case 'I': // Unsigned 8-bit constant (logical/arithmetic immediate).
+      Info.setRequiresImmediate(0, 255);
+      return true;
+    case 'J': // The constant zero.
+      Info.setRequiresImmediate(0, 0);
+      return true;
+    case 'K': // Signed 16-bit constant (lda).
+      Info.setRequiresImmediate(-32768, 32767);
+      return true;
+    case 'P': // The constant 1, 2 or 3 (scaled add/shift).
+      Info.setRequiresImmediate(1, 3);
+      return true;
+    case 'S': // Unsigned 6-bit constant (shift count).
+      Info.setRequiresImmediate(0, 63);
+      return true;
+    case 'L': // ldah constant (low 16 bits zero).
+    case 'M': // zap byte-mask constant.
+    case 'N': // Complemented unsigned 8-bit constant.
+    case 'O': // Negated unsigned 8-bit constant.
+      Info.setRequiresImmediate();
+      return true;
+    // GCC also has 'G' and 'H' for floating-point constants and 'T' for a
+    // high-part relocation.  Nothing lowers those here, so they are rejected
+    // rather than accepted and handed to a back end with no case for them.
+    case 'Q': // A memory operand.
+    case 'U': // A memory address operand.
+      Info.setAllowsMemory();
+      return true;
+    case 'R': // A symbolic operand within one instruction of the referent.
       return true;
     }
     return false;
