@@ -70,6 +70,17 @@ private:
                              MachineBasicBlock::iterator It, const DebugLoc &DL,
                              unsigned Opc, Register Def = Register()) const;
 
+  // The high half of a gp-relative address: ldah Hi, sym($29) !gprelhigh,
+  // which is also what makes the function need a global pointer.  The low half
+  // is folded into whichever instruction uses the address, so it is left to
+  // the caller when that instruction is not a plain lda or load.
+  Register emitGprelHigh(MachineInstr &I, const MachineOperand &Sym,
+                         MachineRegisterInfo &MRI) const;
+  // Both halves, where the low one is an instruction of its own.
+  MachineInstrBuilder emitGprelPair(MachineInstr &I, unsigned LoOpc,
+                                    Register Def, const MachineOperand &Sym,
+                                    MachineRegisterInfo &MRI) const;
+
   // What select() has built for the instruction it is selecting.
   mutable SmallVector<MachineInstr *, 8> ToConstrain;
 
@@ -118,6 +129,24 @@ MachineInstrBuilder AlphaInstructionSelector::emit(MachineInstr &I,
                                                    unsigned Opc,
                                                    Register Def) const {
   return emitAt(*I.getParent(), I, I.getDebugLoc(), Opc, Def);
+}
+
+Register
+AlphaInstructionSelector::emitGprelHigh(MachineInstr &I,
+                                        const MachineOperand &Sym,
+                                        MachineRegisterInfo &MRI) const {
+  I.getParent()->getParent()->getInfo<AlphaMachineFunctionInfo>()->setUsesGP();
+  Register Hi = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  emit(I, Alpha::LDAHg, Hi).add(Sym).addUse(Alpha::R29);
+  return Hi;
+}
+
+MachineInstrBuilder
+AlphaInstructionSelector::emitGprelPair(MachineInstr &I, unsigned LoOpc,
+                                        Register Def, const MachineOperand &Sym,
+                                        MachineRegisterInfo &MRI) const {
+  Register Hi = emitGprelHigh(I, Sym, MRI);
+  return emit(I, LoOpc, Def).add(Sym).addUse(Hi);
 }
 
 // Which bank a register belongs to, whether it has been given a class already
@@ -387,12 +416,7 @@ bool AlphaInstructionSelector::selectLoadStore(MachineInstr &I,
         GOpc = IsLoad ? (IsFP ? Alpha::LDSg : Alpha::LDLg)
                       : (IsFP ? Alpha::STSg : Alpha::STLg);
 
-      I.getParent()
-          ->getParent()
-          ->getInfo<AlphaMachineFunctionInfo>()
-          ->setUsesGP();
-      Register Hi = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
-      emit(I, Alpha::LDAHg, Hi).add(AddrDef->getOperand(1)).addReg(Alpha::R29);
+      Register Hi = emitGprelHigh(I, AddrDef->getOperand(1), MRI);
       MachineInstrBuilder GMIB = emit(I, GOpc);
       if (IsLoad)
         GMIB.addDef(ValReg);
@@ -521,15 +545,10 @@ bool AlphaInstructionSelector::selectFConstant(MachineInstr &I,
 
   Align Alignment(Ty.getSizeInBytes());
   unsigned CPI = MF.getConstantPool()->getConstantPoolIndex(CFP, Alignment);
-  MF.getInfo<AlphaMachineFunctionInfo>()->setUsesGP();
 
-  Register HighReg = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
-  emit(I, Alpha::LDAHg, HighReg).addConstantPoolIndex(CPI).addUse(Alpha::R29);
-
-  emit(I, Ty == LLT::scalar(32) ? Alpha::LDSg : Alpha::LDTg,
-       I.getOperand(0).getReg())
-      .addConstantPoolIndex(CPI)
-      .addUse(HighReg);
+  emitGprelPair(I, Ty == LLT::scalar(32) ? Alpha::LDSg : Alpha::LDTg,
+                I.getOperand(0).getReg(), MachineOperand::CreateCPI(CPI, 0),
+                MRI);
 
   I.eraseFromParent();
   return true;
@@ -871,10 +890,42 @@ bool AlphaInstructionSelector::selectInstr(MachineInstr &I) const {
   if (I.getOpcode() == TargetOpcode::G_BRCOND && selectBrCond(I, MRI))
     return true;
 
+  // A fence within a single thread orders nothing another processor can see:
+  // it exists only to keep the compiler from moving accesses across it, which
+  // MEMBARRIER says without asking for an instruction.  The imported pattern
+  // does not look at the scope, so without this a single-thread fence becomes
+  // a real mb bought for nothing.  The SelectionDAG path lowers it the same
+  // way.
+  if (I.getOpcode() == TargetOpcode::G_FENCE &&
+      static_cast<SyncScope::ID>(I.getOperand(1).getImm()) ==
+          SyncScope::SingleThread) {
+    I.setDesc(TII.get(TargetOpcode::MEMBARRIER));
+    while (I.getNumOperands())
+      I.removeOperand(I.getNumOperands() - 1);
+    return true;
+  }
+
   if (selectImpl(I, *CoverageInfo))
     return true;
 
   switch (I.getOpcode()) {
+  case TargetOpcode::G_IMPLICIT_DEF:
+    // Nothing to compute: the register just has to be given a class.
+    I.setDesc(TII.get(TargetOpcode::IMPLICIT_DEF));
+    RBI.constrainGenericRegister(
+        I.getOperand(0).getReg(),
+        RBI.getRegBank(I.getOperand(0).getReg(), MRI, TRI)->getID() ==
+                Alpha::FPRRegBankID
+            ? Alpha::FPRCRegClass
+            : Alpha::GPRCRegClass,
+        MRI);
+    return true;
+  case TargetOpcode::G_FREEZE:
+  case TargetOpcode::G_CONSTANT_FOLD_BARRIER:
+    // These only stop a value being reasoned about twice; they move nothing.
+    I.setDesc(TII.get(TargetOpcode::COPY));
+    constrainSelectedInstRegOperands(I, TII, TRI, RBI);
+    return true;
   case TargetOpcode::G_LOAD:
   case TargetOpcode::G_STORE:
     return selectLoadStore(I, MRI);
@@ -899,11 +950,8 @@ bool AlphaInstructionSelector::selectInstr(MachineInstr &I) const {
     // from the GOT.  Only a global the GOT entry has to answer for is loaded.
     const GlobalValue *GV = I.getOperand(1).getGlobal();
     if (isAlphaGprelAddressable(*GV)) {
-      Register Hi = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
-      emit(I, Alpha::LDAHg, Hi).add(I.getOperand(1)).addReg(Alpha::R29);
-      emit(I, Alpha::LDAg, I.getOperand(0).getReg())
-          .add(I.getOperand(1))
-          .addReg(Hi);
+      emitGprelPair(I, Alpha::LDAg, I.getOperand(0).getReg(), I.getOperand(1),
+                    MRI);
     } else {
       emit(I, Alpha::LDQl, I.getOperand(0).getReg()).add(I.getOperand(1));
     }

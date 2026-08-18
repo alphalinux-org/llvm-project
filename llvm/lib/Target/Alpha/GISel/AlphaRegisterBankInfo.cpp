@@ -73,7 +73,20 @@ static bool isFPOpcode(unsigned Opc) {
   case TargetOpcode::G_FCONSTANT:
   case TargetOpcode::G_FPEXT:
   case TargetOpcode::G_FPTRUNC:
+  case TargetOpcode::G_FSQRT:
+  case TargetOpcode::G_FMA:
+  case TargetOpcode::G_FREM:
+  case TargetOpcode::G_FCOPYSIGN:
+  case TargetOpcode::G_FMINNUM:
+  case TargetOpcode::G_FMAXNUM:
     return true;
+  // G_FCMP, G_SITOFP, G_FPTOSI, G_UITOFP, G_FPTOUI and G_SELECT are absent on
+  // purpose.  This asks whether every register an opcode touches is floating,
+  // which is what makes it usable for both the value a load defines and the
+  // value a store uses.  Those six have one end in each bank -- a compare
+  // answers in an integer register, a conversion has an integer on one side --
+  // and G_SELECT follows the type of what it chooses between.  getInstrMapping
+  // names their operands one at a time instead.
   default:
     return false;
   }
@@ -233,6 +246,73 @@ AlphaRegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
   case G_FCONSTANT:
     OperandsMapping =
         getOperandsMapping({&Alpha::ValueMappings[Alpha::FPR3OpsIdx], nullptr});
+    break;
+  // All-integer operations, whose operands are all registers.
+  case G_SMIN:
+  case G_SMAX:
+  case G_UMIN:
+  case G_UMAX:
+  case G_ABS:
+  case G_BSWAP:
+  case G_BITREVERSE:
+  case G_CTLZ:
+  case G_CTTZ:
+  case G_CTPOP:
+  case G_CTLZ_ZERO_POISON:
+  case G_CTTZ_ZERO_POISON:
+  case G_UMULH:
+  case G_UADDO:
+  case G_USUBO:
+  case G_UADDE:
+  case G_USUBE:
+  case G_SADDO:
+  case G_SSUBO:
+  case G_SADDE:
+  case G_SSUBE:
+  case G_MERGE_VALUES:
+  case G_UNMERGE_VALUES:
+    break;
+  // All-floating operations.
+  case G_FNEG:
+  case G_FABS:
+  case G_FSQRT:
+  case G_FCOPYSIGN:
+    OperandsMapping = &Alpha::ValueMappings[Alpha::FPR3OpsIdx];
+    break;
+  // A bitcast is the one operation whose two ends may sit in different banks,
+  // which is the whole reason it exists here.
+  case G_BITCAST: {
+    bool DstFP = usedByFP(MI.getOperand(0).getReg(), MRI);
+    bool SrcFP = definedByFP(MI.getOperand(1).getReg(), MRI);
+    OperandsMapping = getOperandsMapping(
+        {&Alpha::ValueMappings[DstFP ? Alpha::FPR3OpsIdx : Alpha::GPR3OpsIdx],
+         &Alpha::ValueMappings[SrcFP ? Alpha::FPR3OpsIdx : Alpha::GPR3OpsIdx]});
+    break;
+  }
+  // A value with no computation behind it, and the barriers that pin one down,
+  // belong wherever they are used -- the same question a phi asks.
+  case G_IMPLICIT_DEF:
+  case G_FREEZE:
+  case G_CONSTANT_FOLD_BARRIER: {
+    bool IsFP = usedByFP(MI.getOperand(0).getReg(), MRI);
+    if (!IsFP && NumOperands > 1 && MI.getOperand(1).isReg())
+      IsFP = definedByFP(MI.getOperand(1).getReg(), MRI);
+    OperandsMapping =
+        &Alpha::ValueMappings[IsFP ? Alpha::FPR3OpsIdx : Alpha::GPR3OpsIdx];
+    if (NumOperands > 1)
+      OperandsMapping = getOperandsMapping(
+          {&Alpha::ValueMappings[IsFP ? Alpha::FPR3OpsIdx : Alpha::GPR3OpsIdx],
+           &Alpha::ValueMappings[IsFP ? Alpha::FPR3OpsIdx
+                                      : Alpha::GPR3OpsIdx]});
+    else
+      OperandsMapping =
+          getOperandsMapping({&Alpha::ValueMappings[IsFP ? Alpha::FPR3OpsIdx
+                                                         : Alpha::GPR3OpsIdx]});
+    break;
+  }
+  // The ordering carries no register.
+  case G_FENCE:
+    OperandsMapping = getOperandsMapping({nullptr, nullptr});
     break;
   default:
     return getInvalidInstructionMapping();

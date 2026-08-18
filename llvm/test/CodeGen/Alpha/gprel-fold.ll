@@ -1,4 +1,6 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
+; RUN: llc -mtriple=alpha-unknown-linux-gnu -global-isel -global-isel-abort=1 \
+; RUN:   < %s | FileCheck %s
 
 ; The !gprellow low part folds into the load or store displacement, so reaching
 ; one of these globals is the ldah !gprelhigh and the access, not three

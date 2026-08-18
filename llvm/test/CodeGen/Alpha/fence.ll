@@ -1,5 +1,7 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu -verify-machineinstrs < %s \
 ; RUN:   | FileCheck %s
+; RUN: llc -mtriple=alpha-unknown-linux-gnu -verify-machineinstrs -global-isel \
+; RUN:   -global-isel-abort=1 < %s | FileCheck %s
 
 ; A cross-thread fence is an mb, whatever its ordering: Alpha's memory model
 ; reorders everything a barrier does not pin down, so acquire and release get
