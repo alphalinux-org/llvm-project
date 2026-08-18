@@ -30,6 +30,7 @@ add_lldb_library(lldbPluginProcessUtility
   RegisterContextFreeBSD_powerpc.cpp
   RegisterContextFreeBSD_x86_64.cpp
   RegisterContextHistory.cpp
+  RegisterContextLinux_alpha.cpp
   RegisterContextLinux_i386.cpp
   RegisterContextLinux_x86_64.cpp
   RegisterContextLinux_s390x.cpp
@@ -40,6 +41,7 @@ add_lldb_library(lldbPluginProcessUtility
   RegisterContextNetBSD_x86_64.cpp
   RegisterContextOpenBSD_i386.cpp
   RegisterContextOpenBSD_x86_64.cpp
+  RegisterContextPOSIX_alpha.cpp
   RegisterContextPOSIX_arm.cpp
   RegisterContextPOSIX_arm64.cpp
   RegisterContextPOSIX_loongarch64.cpp

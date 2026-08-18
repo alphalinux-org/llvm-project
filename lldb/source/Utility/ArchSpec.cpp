@@ -350,6 +350,9 @@ static constexpr const CoreDefinition g_core_definitions[] = {
     AMD_GPU_CORE_DEF_GCN(GFX13_GENERIC),
     {eByteOrderLittle, 8, 4, 16, llvm::Triple::amdgpu,
      ArchSpec::eCore_amd_gpu_unknown, "amdgpu"},
+
+    {eByteOrderLittle, 8, 4, 4, llvm::Triple::alpha, ArchSpec::eCore_alpha,
+     "alpha"},
 };
 
 // Ensure that we have an entry in the g_core_definitions for each core. If you
@@ -517,6 +520,7 @@ static const ArchDefinitionEntry g_elf_arch_entries[] = {
     {ArchSpec::eCore_mips64r6el,      llvm::ELF::EM_MIPS,       ArchSpec::eMIPSSubType_mips64r6el}, // mips64r6el
     {ArchSpec::eCore_msp430,          llvm::ELF::EM_MSP430      }, // MSP430
     {ArchSpec::eCore_hexagon_generic, llvm::ELF::EM_HEXAGON     }, // HEXAGON
+    {ArchSpec::eCore_alpha,           llvm::ELF::EM_ALPHA       }, // DEC Alpha
     {ArchSpec::eCore_arc,             llvm::ELF::EM_ARC_COMPACT2}, // ARC
     {ArchSpec::eCore_avr,             llvm::ELF::EM_AVR         }, // AVR
     {ArchSpec::eCore_riscv32,         llvm::ELF::EM_RISCV,      ArchSpec::eRISCVSubType_riscv32}, // riscv32
