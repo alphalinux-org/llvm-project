@@ -1952,9 +1952,7 @@ def : Pat<(AlphaTCReturnBr texternalsym:$t), (TCRETURNbr texternalsym:$t)>;
 // GAS-compatible pseudo-instruction aliases.
 //===----------------------------------------------------------------------===//
 
-// mov copies a register (bis $31, src, dst); clr zeros one; nop is bis of $31.
-// bis operands are (Rc, Ra, Rb); the result register is Rc.  mov copies Rb
-// into Rc (bis $31, Rb, Rc); clr zeros Rc.  (nop is the def above.)
+// bis operands are (Rc, Ra, Rb), so mov copies Rb into Rc and clr zeros Rc.
 def : InstAlias<"mov $src, $dst", (BIS GPRC:$dst, R31, GPRC:$src)>;
 def : InstAlias<"clr $dst", (BIS GPRC:$dst, R31, R31)>;
 

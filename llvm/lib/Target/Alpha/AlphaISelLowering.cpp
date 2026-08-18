@@ -70,7 +70,6 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   // stronger orderings.  Wider atomic read-modify-writes are not handled yet.
   setMaxAtomicSizeInBitsSupported(64);
 
-  // Variadic function support.
   setOperationAction(ISD::VASTART, MVT::Other, Custom);
   setOperationAction(ISD::VAARG, MVT::Other, Custom);
   setOperationAction(ISD::VACOPY, MVT::Other, Custom);
@@ -1027,7 +1026,6 @@ SDValue AlphaTargetLowering::LowerF128Binary(SDNode *N,
                       Glue);
   Glue = Chain.getValue(1);
 
-  // Result in $16/$17 (lo/hi).
   SDValue ResLo = DAG.getCopyFromReg(Chain, DL, Alpha::R16, MVT::i64, Glue);
   Chain = ResLo.getValue(1);
   Glue = ResLo.getValue(2);
@@ -1429,7 +1427,6 @@ SDValue AlphaTargetLowering::LowerF128Compare(SDNode *N,
                       Glue);
   Glue = Chain.getValue(1);
 
-  // Result: i64 bool in $0.
   SDValue Result = DAG.getCopyFromReg(Chain, DL, Alpha::R0, MVT::i64, Glue);
   Chain = Result.getValue(1);
 
@@ -2194,7 +2191,6 @@ SDValue AlphaTargetLowering::LowerVASTART(SDValue Op, SelectionDAG &DAG) const {
   SDValue VAList = Op.getOperand(1);
   const Value *SV = cast<SrcValueSDNode>(Op.getOperand(2))->getValue();
 
-  // *va_list = base
   Chain = DAG.getStore(Chain, DL, Base, VAList, MachinePointerInfo(SV));
   // va_list[8] = offset, which is an int: gcc's alpha_build_builtin_va_list
   // gives the field integer_type_node, so writing a quadword here would
@@ -2261,7 +2257,6 @@ SDValue AlphaTargetLowering::LowerVAARG(SDValue Op, SelectionDAG &DAG) const {
     Addr = DAG.getSelect(DL, MVT::i64, InReg, FPAddr, Addr);
   }
 
-  // Advance the offset by one 8-byte slot.
   SDValue NextOff = DAG.getNode(ISD::ADD, DL, MVT::i64, Offset,
                                 DAG.getConstant(8, DL, MVT::i64));
   Chain = DAG.getTruncStore(Chain, DL, NextOff, OffPtr,

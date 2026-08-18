@@ -54,7 +54,6 @@ static void adjustStack(MachineBasicBlock &MBB,
       .addReg(Alpha::R28);
 }
 
-// Copy one integer register to another with `bis $31, Src, Dst`.
 static void copyReg(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
                     const DebugLoc &DL, const AlphaInstrInfo &TII, Register Dst,
                     Register Src) {

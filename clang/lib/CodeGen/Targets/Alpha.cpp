@@ -93,7 +93,6 @@ ABIArgInfo AlphaABIInfo::classifyReturnType(QualType Ty) const {
   if (getContext().getTypeSize(Ty) > 64)
     return getNaturalAlignIndirect(Ty, getDataLayout().getAllocaAddrSpace(),
                                    /*ByVal=*/false);
-  // Extend a sub-64-bit integer return value in the return register.
   if (Ty->isIntegralOrEnumerationType() && getContext().getTypeSize(Ty) < 64)
     return extendIntegerInRegister(Ty);
   return DefaultABIInfo::classifyReturnType(Ty);
@@ -141,7 +140,6 @@ ABIArgInfo AlphaABIInfo::classifyArgumentType(QualType Ty) const {
     return ABIArgInfo::getDirect(Coerced);
   }
 
-  // Extend a sub-64-bit integer argument in its argument register.
   if (Ty->isIntegralOrEnumerationType() && getContext().getTypeSize(Ty) < 64)
     return extendIntegerInRegister(Ty);
 

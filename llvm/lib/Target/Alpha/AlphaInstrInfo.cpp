@@ -162,11 +162,9 @@ bool AlphaInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
   MachineInstr *LastInst = &*I;
   unsigned LastOpc = LastInst->getOpcode();
 
-  // Is there a terminator before the last one?
   bool HasSecond = I != MBB.begin() && isUnpredicatedTerminator(*std::prev(I));
   MachineInstr *SecondLast = HasSecond ? &*std::prev(I) : nullptr;
 
-  // A single terminator.
   if (!HasSecond) {
     if (LastOpc == Alpha::BR) {
       TBB = LastInst->getOperand(0).getMBB();
@@ -181,7 +179,6 @@ bool AlphaInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
     return true; // Indirect or otherwise unanalyzable.
   }
 
-  // Two terminators: a conditional branch followed by an unconditional one.
   if (isCondBranchOpcode(SecondLast->getOpcode()) && LastOpc == Alpha::BR) {
     // Only if there is no third one.  A block ending beq / bne / br is not a
     // two-way block: reporting it as one loses the first branch's edge, since
@@ -374,7 +371,6 @@ bool AlphaInstrInfo::isSchedulingBoundary(const MachineInstr &MI,
 
 MachineBasicBlock *
 AlphaInstrInfo::getBranchDestBlock(const MachineInstr &MI) const {
-  // The branch target is the machine-basic-block operand.
   for (const MachineOperand &MO : MI.operands())
     if (MO.isMBB())
       return MO.getMBB();
