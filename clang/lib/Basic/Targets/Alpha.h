@@ -52,6 +52,10 @@ public:
     LongDoubleWidth = LongDoubleAlign = 128;
     LongDoubleFormat = &llvm::APFloat::IEEEquad();
 
+    // The FPU has dynamic rounding and IEEE trapping, so -frounding-math and
+    // -ftrapping-math (constrained floating point) are supported.
+    HasStrictFP = true;
+
     // ldl_l/stl_c and ldq_l/stq_c give lock-free 32- and 64-bit atomics.
     MaxAtomicPromoteWidth = 128;
     MaxAtomicInlineWidth = 64;
