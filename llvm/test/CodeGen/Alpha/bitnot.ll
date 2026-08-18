@@ -1,8 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
 
-; Logical operations with a complemented operand fold the `not` into a single
-; instruction and avoid materializing -1.
-
 ; CHECK-LABEL: nott:
 ; CHECK:       ornot $31, $16, $0
 ; CHECK-NEXT:  ret

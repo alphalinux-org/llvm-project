@@ -1,8 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
 
-; A select whose condition compares against zero folds into a single
-; conditional move (cmoveq/cmovlt/...) with no separate compare.
-
 ; CHECK-LABEL: slt:
 ; CHECK-NOT:   cmp
 ; CHECK:       cmovlt $16, $17, $0

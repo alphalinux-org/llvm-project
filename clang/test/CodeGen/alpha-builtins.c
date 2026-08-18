@@ -1,7 +1,5 @@
 // RUN: %clang_cc1 -triple alpha-unknown-linux-gnu -emit-llvm -O0 -o - %s | FileCheck %s
 
-// The __builtin_alpha_* functions map to the llvm.alpha.* intrinsics.
-
 // CHECK-LABEL: @test_implver
 // CHECK: call i64 @llvm.alpha.implver()
 long test_implver(void) { return __builtin_alpha_implver(); }

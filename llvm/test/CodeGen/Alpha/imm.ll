@@ -1,9 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
 
-; Materialization of small signed constants with `lda`.  Only immediates that
-; fit in the 16-bit signed displacement are handled for now; wider constants
-; are not yet supported.
-
 ; CHECK-LABEL: five:
 ; CHECK:       lda $0, 5($31)
 ; CHECK-NEXT:  ret

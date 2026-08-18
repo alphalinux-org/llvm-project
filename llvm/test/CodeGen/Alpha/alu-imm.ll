@@ -1,8 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
 
-; Operate instructions have a literal form taking an 8-bit unsigned immediate,
-; which avoids materializing small constants in a register.
-
 ; CHECK-LABEL: addi:
 ; CHECK:       addq $16, 5, $0
 ; CHECK-NEXT:  ret

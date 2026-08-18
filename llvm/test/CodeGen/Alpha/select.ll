@@ -1,9 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
 
-; i64 select maps to a conditional move: the false value is placed in the
-; destination and cmovne overwrites it with the true value when the condition
-; register is non-zero.
-
 ; CHECK-LABEL: selcmp:
 ; CHECK:       bis $31, $19, $0
 ; CHECK:       cmplt $16, $17, $1

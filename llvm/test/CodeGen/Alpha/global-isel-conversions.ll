@@ -5,46 +5,46 @@
 ; is no unsigned conversion instruction; both directions are built from the
 ; signed one.
 
-; CHECK-LABEL: s2d:
+; CHECK-LABEL: sitofp_double:
 ; CHECK: cvtqt
-define double @s2d(i64 %x) {
+define double @sitofp_double(i64 %x) {
   %r = sitofp i64 %x to double
   ret double %r
 }
 
-; CHECK-LABEL: s2f:
+; CHECK-LABEL: sitofp_float:
 ; CHECK: cvtqs
-define float @s2f(i64 %x) {
+define float @sitofp_float(i64 %x) {
   %r = sitofp i64 %x to float
   ret float %r
 }
 
 ; A float in a register is already in T_floating form, so one convert serves
 ; both widths.
-; CHECK-LABEL: d2s:
+; CHECK-LABEL: fptosi_double:
 ; CHECK: cvttq/c
-define i64 @d2s(double %x) {
+define i64 @fptosi_double(double %x) {
   %r = fptosi double %x to i64
   ret i64 %r
 }
 
-; CHECK-LABEL: f2s:
+; CHECK-LABEL: fptosi_float:
 ; CHECK: cvttq/c
-define i64 @f2s(float %x) {
+define i64 @fptosi_float(float %x) {
   %r = fptosi float %x to i64
   ret i64 %r
 }
 
-; CHECK-LABEL: u2d:
+; CHECK-LABEL: uitofp_double:
 ; CHECK: subt
-define double @u2d(i64 %x) {
+define double @uitofp_double(i64 %x) {
   %r = uitofp i64 %x to double
   ret double %r
 }
 
-; CHECK-LABEL: d2u:
+; CHECK-LABEL: fptoui_double:
 ; CHECK: cmovne
-define i64 @d2u(double %x) {
+define i64 @fptoui_double(double %x) {
   %r = fptoui double %x to i64
   ret i64 %r
 }

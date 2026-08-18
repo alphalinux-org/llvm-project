@@ -1,8 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
 
-; 32-bit memory access.  ldl sign-extends a loaded word; a zero-extending load
-; clears the high half with zapnot; stl stores the low 32 bits.
-
 ; CHECK-LABEL: sextload:
 ; CHECK:       ldl $0, 0($16)
 ; CHECK-NEXT:  ret

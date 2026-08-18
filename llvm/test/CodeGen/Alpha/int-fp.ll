@@ -1,9 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
 
-; Alpha has no direct move between integer and floating-point registers, so
-; conversions bounce the bits through an 8-byte stack slot and then use a cvt
-; instruction.
-
 ; CHECK-LABEL: sitofp_f64:
 ; CHECK:       stq $16, {{[0-9]+}}($30)
 ; CHECK:       ldt $f0, {{[0-9]+}}($30)

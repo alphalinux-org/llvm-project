@@ -14,11 +14,11 @@
 ; The plain form is not atomic against another thread writing a different field
 ; of the same quadword; -msafe-bwa asks for the lock-based one instead, and
 ; RMW_STOREI8 carries a predicate saying it must not be selected here.
-; SAFEBWA-LABEL: sb:
+; SAFEBWA-LABEL: store_i8:
 ; SAFEBWA:       ldq_l
 ; SAFEBWA:       stq_c
 ; SAFEBWA-NOT:   ldq_u
-define void @sb(ptr %p, i8 %v) {
+define void @store_i8(ptr %p, i8 %v) {
   store i8 %v, ptr %p, align 1
   ret void
 }

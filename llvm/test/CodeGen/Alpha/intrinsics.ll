@@ -1,8 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu -mattr=+cix,+mvi < %s | FileCheck %s
 
-; The __builtin_alpha_* functions lower to llvm.alpha.* intrinsics, which select
-; the corresponding Alpha instructions.
-
 ; CHECK-LABEL: test_implver:
 ; CHECK: implver $0
 define i64 @test_implver() {

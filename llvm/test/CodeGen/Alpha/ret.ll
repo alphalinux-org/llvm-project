@@ -1,9 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
 
-; Argument and return lowering for the OSF/ELF ABI: integer arguments arrive in
-; $16-$21 and return in $0; floating-point arguments arrive in $f16-$f21 and
-; return in $f0.
-
 ; CHECK-LABEL: v:
 ; CHECK:       ret
 define void @v() {

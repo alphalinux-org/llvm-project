@@ -1,8 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu -mcpu=ev6 < %s | FileCheck %s
 
-; Sign-extending a single bit has no dedicated instruction; it lowers to a mask
-; of bit 0 followed by a negate, giving 0 or -1.
-
 ; CHECK-LABEL: sexti1:
 ; CHECK: and $16, 1, $0
 ; CHECK: subq $31, $0, $0

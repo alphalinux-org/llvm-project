@@ -1,8 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
 
-; Frame lowering: the prologue allocates the frame by decrementing $sp, stack
-; objects are accessed relative to $sp, and the epilogue restores $sp.
-
 ; CHECK-LABEL: alloca_roundtrip:
 ; CHECK:       lda $30, -16($30)
 ; CHECK:       stq $16, 8($30)

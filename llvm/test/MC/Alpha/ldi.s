@@ -1,7 +1,5 @@
 # RUN: llvm-mc -triple=alpha-unknown-linux-gnu %s | FileCheck %s
 
-# ldi/ldiq load an immediate, materializing it in code.
-
 # CHECK: lda $0, 5
 	ldi $0, 5
 # CHECK: lda $1, -7

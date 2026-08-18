@@ -1,8 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu -mcpu=ev6 < %s | FileCheck %s
 
-; Storing a constant zero reads the zero register directly rather than
-; materializing 0 into a temporary with an lda.
-
 ; CHECK-LABEL: q:
 ; CHECK-NOT:  lda
 ; CHECK:      stq $31, 0($16)

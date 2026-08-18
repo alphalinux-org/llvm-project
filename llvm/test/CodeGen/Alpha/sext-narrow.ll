@@ -1,8 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
 
-; Without BWX, i8/i16 sign-extension shifts the field to the top of the register
-; and back with an arithmetic shift.
-
 ; CHECK-LABEL: sext8:
 ; CHECK:       sll $16, 56, $0
 ; CHECK-NEXT:  sra $0, 56, $0

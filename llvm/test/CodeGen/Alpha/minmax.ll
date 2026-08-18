@@ -1,9 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
 
-; Integer min/max and abs have no dedicated instructions, but lower to a
-; branchless compare-and-conditional-move (or shift/xor for abs) rather than a
-; conditional branch.
-
 ; CHECK-LABEL: smax:
 ; CHECK:      cmplt $0, $16, $1
 ; CHECK-NEXT: cmovne $1, $16, $0

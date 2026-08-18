@@ -1,9 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
 
-; Unsigned integer/floating conversions expand through the signed conversions
-; plus a correction, now that constant pools and floating-point comparisons are
-; available.  Just check that they select and use the cvt instructions.
-
 ; CHECK-LABEL: uitofp:
 ; CHECK:       subt
 ; CHECK:       addt

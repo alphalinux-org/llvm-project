@@ -1,8 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
 
-; IEEE floating-point arithmetic.  The `s` forms operate on f32 (S_floating),
-; the `t` forms on f64 (T_floating).
-
 ; CHECK-LABEL: fadd_f32:
 ; CHECK:       adds $f16, $f17, $f0
 ; CHECK-NEXT:  ret

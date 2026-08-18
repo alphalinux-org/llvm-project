@@ -1,8 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu -O2 < %s | FileCheck %s
 
-; stacksave/stackrestore read and write the stack pointer $30 (used to bracket
-; a stack allocation, e.g. a VLA inside a loop).
-
 declare ptr @llvm.stacksave()
 declare void @llvm.stackrestore(ptr)
 declare void @use(ptr)

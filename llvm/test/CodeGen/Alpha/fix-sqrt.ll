@@ -1,7 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu -mcpu=ev6 < %s | FileCheck %s
 
-; The FIX extension provides hardware square root.
-
 declare double @llvm.sqrt.f64(double)
 declare float @llvm.sqrt.f32(float)
 

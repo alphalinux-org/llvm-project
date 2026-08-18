@@ -1,7 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
 
-; Floating-point operations with no Alpha instruction lower to libm calls.
-
 declare double @llvm.floor.f64(double)
 declare double @llvm.sin.f64(double)
 declare double @llvm.pow.f64(double, double)

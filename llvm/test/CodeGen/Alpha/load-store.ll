@@ -1,7 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
 
-; Aligned loads and stores using a base register and 16-bit displacement.
-
 ; CHECK-LABEL: ldq:
 ; CHECK:       ldq $0, 0($16)
 ; CHECK-NEXT:  ret

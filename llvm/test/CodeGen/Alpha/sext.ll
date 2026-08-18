@@ -1,9 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
 
-; Sign-extension of the low 32 bits with addl.  i32 values are modeled as
-; sign-extended i64, so a 32-bit operation whose result is used as a signed
-; i64 is followed by an addl.
-
 ; CHECK-LABEL: sext32:
 ; CHECK:       addl $16, $31, $0
 ; CHECK-NEXT:  ret

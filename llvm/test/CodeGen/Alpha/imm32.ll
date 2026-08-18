@@ -1,9 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
 
-; Constants that do not fit in the 16-bit `lda` displacement but decompose into
-; two 16-bit signed halves are materialized with an ldah/lda pair
-; (value = (Hi << 16) + Lo).
-
 ; 100000 = 2 * 65536 - 31072
 ; CHECK-LABEL: pos:
 ; CHECK:       ldah $0, 2($31)

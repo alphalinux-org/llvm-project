@@ -1,8 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu -mcpu=ev6 < %s | FileCheck %s
 
-; The multiplier is slow, so a multiply by a small constant is strength-reduced
-; to scaled add/subtract and shift/add sequences.
-
 ; x * 3 = 4x - x.
 ; CHECK-LABEL: mul3:
 ; CHECK:      s4subq $16, $16, $0

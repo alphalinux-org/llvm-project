@@ -8,53 +8,53 @@ declare i64 @llvm.ctlz.i64(i64, i1)
 declare i64 @llvm.cttz.i64(i64, i1)
 
 ; With the CIX extension the counts are single instructions.
-; CIX-LABEL: pc:
+; CIX-LABEL: ctpop_i64:
 ; CIX:       ctpop $16, $0
 ; Without it, they expand and there is no ctpop.
-; NOCIX-LABEL: pc:
-; NOCIX-NOT:  ctpop
-define i64 @pc(i64 %x) {
+; NOCIX-LABEL: ctpop_i64:
+; NOCIX-NOT:  ctpop $
+define i64 @ctpop_i64(i64 %x) {
   %r = call i64 @llvm.ctpop.i64(i64 %x)
   ret i64 %r
 }
 
-; CIX-LABEL: lz:
+; CIX-LABEL: ctlz_i64:
 ; CIX:       ctlz $16, $0
-define i64 @lz(i64 %x) {
+define i64 @ctlz_i64(i64 %x) {
   %r = call i64 @llvm.ctlz.i64(i64 %x, i1 false)
   ret i64 %r
 }
 
-; CIX-LABEL: tz:
+; CIX-LABEL: cttz_i64:
 ; CIX:       cttz $16, $0
-define i64 @tz(i64 %x) {
+define i64 @cttz_i64(i64 %x) {
   %r = call i64 @llvm.cttz.i64(i64 %x, i1 false)
   ret i64 %r
 }
 
 ; __builtin_popcount on a 32-bit value: zero-extend the low word, then ctpop.
-; CIX-LABEL: pc32:
+; CIX-LABEL: ctpop_i32:
 ; CIX:       zapnot $16, 15, $0
 ; CIX-NEXT:  ctpop $0, $0
-define i32 @pc32(i32 %x) {
+define i32 @ctpop_i32(i32 %x) {
   %r = call i32 @llvm.ctpop.i32(i32 %x)
   ret i32 %r
 }
 
 ; __builtin_clz on a 32-bit value (undefined at zero): shift the value into the
 ; high word so its leading zeros are the 32-bit count, then ctlz.
-; CIX-LABEL: lz32:
+; CIX-LABEL: ctlz_i32:
 ; CIX:       sll $16, 32, $0
 ; CIX-NEXT:  ctlz $0, $0
-define i32 @lz32(i32 %x) {
+define i32 @ctlz_i32(i32 %x) {
   %r = call i32 @llvm.ctlz.i32(i32 %x, i1 true)
   ret i32 %r
 }
 
 ; __builtin_ctz on a 32-bit value (undefined at zero) is a plain cttz.
-; CIX-LABEL: tz32:
+; CIX-LABEL: cttz_i32:
 ; CIX:       cttz $16, $0
-define i32 @tz32(i32 %x) {
+define i32 @cttz_i32(i32 %x) {
   %r = call i32 @llvm.cttz.i32(i32 %x, i1 true)
   ret i32 %r
 }

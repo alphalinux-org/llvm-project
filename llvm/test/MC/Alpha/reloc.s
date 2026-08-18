@@ -1,9 +1,6 @@
 # RUN: llvm-mc -triple=alpha-unknown-linux-gnu -filetype=obj %s \
 # RUN:   | llvm-readobj -r - | FileCheck %s
 
-# The assembler understands the ldgp macro, the bare jsr word and the
-# relocation-specifier suffixes.
-
 # CHECK: R_ALPHA_GPDISP
 # CHECK: R_ALPHA_LITERAL g
 # CHECK: R_ALPHA_GPRELHIGH g

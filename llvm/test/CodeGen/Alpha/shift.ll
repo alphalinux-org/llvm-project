@@ -1,7 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
 
-; Register-register shifts on i64.  The shift amount is the low 6 bits of $Rb.
-
 ; CHECK-LABEL: shl:
 ; CHECK:       sll $16, $17, $0
 ; CHECK-NEXT:  ret

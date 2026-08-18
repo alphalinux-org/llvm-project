@@ -1,8 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
 
-; Conditional and unconditional branches.  Conditional branches test a register
-; against zero (bne/beq); br is the unconditional form.
-
 ; CHECK-LABEL: diamond:
 ; CHECK:       bne $0,
 ; CHECK:       ret

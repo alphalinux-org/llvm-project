@@ -2,8 +2,6 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu -mattr=+ieee < %s \
 ; RUN:   | FileCheck %s --check-prefix=IEEE
 
-; Precision conversions between f32 (S_floating) and f64 (T_floating).
-
 ; A float in a register is already held in T_floating form, so widening one is a
 ; register move.  Under -mieee it goes through cvtst, whose /s form is completed
 ; in software and handles a denormal; the plain form would fault on an infinity

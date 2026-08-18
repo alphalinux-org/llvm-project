@@ -1,8 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
 
-; The "r" constraint selects an integer register and the $N placeholders are
-; substituted with the allocated registers.
-
 ; CHECK-LABEL: add:
 ; CHECK:       addq $16, $17, $0
 ; CHECK:       ret

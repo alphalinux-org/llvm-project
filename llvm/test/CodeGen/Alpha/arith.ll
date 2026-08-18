@@ -1,7 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
 
-; Register-register integer arithmetic and logical operations on i64.
-
 ; CHECK-LABEL: addq:
 ; CHECK:       addq $16, $17, $0
 ; CHECK-NEXT:  ret

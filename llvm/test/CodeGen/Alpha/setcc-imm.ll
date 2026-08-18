@@ -1,9 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu -mcpu=ev6 < %s | FileCheck %s
 
-; A comparison against a small unsigned constant folds the constant into the
-; compare rather than materializing it in a register first.  Comparing against
-; zero is the common case.
-
 ; CHECK-LABEL: eq0:
 ; CHECK:      cmpeq $16, 0, $0
 ; CHECK-NEXT: ret

@@ -5,14 +5,14 @@
 ; shared function, called with a PC-relative bsr that saves the return address
 ; in $23; the outlined function returns with a jump through $23.
 
-; CHECK-LABEL: f1:
+; CHECK-LABEL: outline_a:
 ; CHECK: bsr $23, OUTLINED_FUNCTION_0
-; CHECK-LABEL: f2:
+; CHECK-LABEL: outline_b:
 ; CHECK: bsr $23, OUTLINED_FUNCTION_0
-; CHECK-LABEL: f3:
+; CHECK-LABEL: outline_c:
 ; CHECK: bsr $23, OUTLINED_FUNCTION_0
 
-define i64 @f1(i64 %a, i64 %b) minsize {
+define i64 @outline_a(i64 %a, i64 %b) minsize {
   %x = add i64 %a, %b
   %y = xor i64 %x, %a
   %z = and i64 %y, %b
@@ -20,7 +20,7 @@ define i64 @f1(i64 %a, i64 %b) minsize {
   %v = sub i64 %w, %y
   ret i64 %v
 }
-define i64 @f2(i64 %a, i64 %b) minsize {
+define i64 @outline_b(i64 %a, i64 %b) minsize {
   %x = add i64 %a, %b
   %y = xor i64 %x, %a
   %z = and i64 %y, %b
@@ -28,7 +28,7 @@ define i64 @f2(i64 %a, i64 %b) minsize {
   %v = sub i64 %w, %y
   ret i64 %v
 }
-define i64 @f3(i64 %a, i64 %b) minsize {
+define i64 @outline_c(i64 %a, i64 %b) minsize {
   %x = add i64 %a, %b
   %y = xor i64 %x, %a
   %z = and i64 %y, %b

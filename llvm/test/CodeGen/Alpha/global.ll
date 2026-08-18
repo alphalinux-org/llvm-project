@@ -1,9 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
 
-; The Alpha backend is still a skeleton: only the target registration, data
-; layout and global/data emission work.  Instruction selection is not
-; implemented yet, so this test only exercises the data path.
-
 target datalayout = "e-m:e-p:64:64-i64:64-i128:128-n64-S128"
 
 ; CHECK:      .globl  word

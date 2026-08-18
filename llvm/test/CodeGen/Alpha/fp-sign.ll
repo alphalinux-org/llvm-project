@@ -1,7 +1,5 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
 
-; Floating-point sign manipulation, built from cpys/cpysn.
-
 ; CHECK-LABEL: fneg_f64:
 ; CHECK:       cpysn $f16, $f16, $f0
 ; CHECK-NEXT:  ret
