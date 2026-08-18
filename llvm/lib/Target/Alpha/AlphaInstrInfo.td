@@ -396,6 +396,24 @@ def S8SUBL : OForm<0x10, 0x1b, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
                    "s8subl $Ra, $Rb, $Rc",
                    [(set i64:$Rc, (sext_inreg (sub (shl i64:$Ra, (i64 3)),
                                                    i64:$Rb), i32))]>;
+// Literal forms of scaled add/subtract (assembler-only; no DAG patterns needed
+// since the compiler always uses register forms from the patterns above).
+def S4ADDQi : OFormL<0x10, 0x22, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
+                     "s4addq $Ra, $lit, $Rc", []>;
+def S8ADDQi : OFormL<0x10, 0x32, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
+                     "s8addq $Ra, $lit, $Rc", []>;
+def S4SUBQi : OFormL<0x10, 0x2b, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
+                     "s4subq $Ra, $lit, $Rc", []>;
+def S8SUBQi : OFormL<0x10, 0x3b, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
+                     "s8subq $Ra, $lit, $Rc", []>;
+def S4ADDLi : OFormL<0x10, 0x02, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
+                     "s4addl $Ra, $lit, $Rc", []>;
+def S8ADDLi : OFormL<0x10, 0x12, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
+                     "s8addl $Ra, $lit, $Rc", []>;
+def S4SUBLi : OFormL<0x10, 0x0b, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
+                     "s4subl $Ra, $lit, $Rc", []>;
+def S8SUBLi : OFormL<0x10, 0x1b, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
+                     "s8subl $Ra, $lit, $Rc", []>;
 }
 
 // Literal (8-bit immediate) form of an operate instruction:
@@ -609,6 +627,11 @@ def MULT : FP_rr<0x0a2, "mult", f64, fmul>;
 def DIVS : FP_rr<0x083, "divs", f32, fdiv>;
 def DIVT : FP_rr<0x0a3, "divt", f64, fdiv>;
 
+// Assembler-only chopped (round-toward-zero) divide used by libgcc/glibc
+// software integer-division routines.  No DAG patterns; codegen uses DIVT.
+def DIVTC : FForm<0x16, 0x023, (outs FPRC:$Rc), (ins FPRC:$Ra, FPRC:$Rb),
+                  "divt/c $Ra, $Rb, $Rc", []>;
+
 // Floating-point comparisons write 2.0 (true) or 0.0 (false) into an FP
 // register.  They operate on the T_floating register format, which both f32 and
 // f64 values use, so the same instructions serve both.
@@ -642,6 +665,9 @@ let TrapClass = 5 in
 def CVTST : FP_r<0x16, 0x2ac, "cvtst", []>;
 let isCodeGenOnly = 1, Predicates = [NotIEEE] in
 def FPEXTST : FMov<[(set f64:$Rc, (fpextend f32:$Rb))]>;
+// cvtst/s: S-to-T with software completion, used in hand-written asm under -mieee
+// (e.g. glibc s_rintf.c).
+def CVTST_S : FP_r<0x16, 0x6ac, "cvtst/s", []>;
 let TrapClass = 1 in  // T-to-S convert is arithmetic: su / sui.
 def CVTTS : FP_r<0x16, 0x0ac, "cvtts", [(set f32:$Rc, (fpround f64:$Rb))]>;
 
@@ -657,11 +683,20 @@ let TrapClass = 4 in {
 def CVTQT : FP_r<0x16, 0x0be, "cvtqt", []>;
 def CVTQS : FP_r<0x16, 0x0bc, "cvtqs", []>;
 }
+// cvtqt/d: integer-to-float with dynamic rounding mode (from FPCR).
+// Used in hand-written asm under -mfp-rounding-mode=d (e.g. glibc s_rint.c).
+def CVTQT_D : FP_r<0x16, 0x0fe, "cvtqt/d", []>;
+
 // cvttq/c: convert T-floating to quadword with chopped (round-toward-zero)
 // rounding, matching C's fp-to-integer truncation semantics.  Float-to-int
 // takes the sv / svi qualifier.
 let TrapClass = 3 in
 def CVTTQ : FP_r<0x16, 0x02f, "cvttq/c", []>;
+
+// cvttq/svid: float-to-integer with software completion, overflow, inexact,
+// and dynamic rounding mode.  Used in hand-written asm under -mieee-with-inexact
+// -mfp-rounding-mode=d (e.g. glibc s_rint.c).
+def CVTTQ_SVID : FP_r<0x16, 0x7ef, "cvttq/svid", []>;
 
 // Move the floating-point control register to/from a floating register.  The
 // operand is encoded in all three register fields.  These carry no pattern and
@@ -1856,6 +1891,11 @@ def CMOVLEi  : BLit<0x11, 0x64, "cmovle">;
 def CMOVGTi  : BLit<0x11, 0x66, "cmovgt">;
 def CMOVLBSi : BLit<0x11, 0x14, "cmovlbs">;
 def CMOVLBCi : BLit<0x11, 0x16, "cmovlbc">;
+// Register-register conditional moves on low bit set/clear.
+def CMOVLBS : OForm<0x11, 0x14, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                    "cmovlbs $Ra, $Rb, $Rc", []>;
+def CMOVLBC : OForm<0x11, 0x16, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                    "cmovlbc $Ra, $Rb, $Rc", []>;
 
 // amask with a literal mask, amask $lit, $Rc ($Ra is the zero register).
 def AMASKi : OFormL<0x11, 0x61, (outs GPRC:$Rc), (ins u8imm:$lit),

@@ -461,7 +461,29 @@ ParseStatus AlphaAsmParser::parseMemOperand(OperandVector &Operands) {
 bool AlphaAsmParser::parseInstruction(ParseInstructionInfo &Info,
                                       StringRef Name, SMLoc NameLoc,
                                       OperandVector &Operands) {
-  Operands.push_back(AlphaOperand::createToken(Name, NameLoc));
+  // Alpha FP instructions can carry a qualifier suffix: divt/c, cvttq/c, etc.
+  // The lexer splits "divt/c" into three tokens (divt, /, c), so we must
+  // reassemble the full mnemonic before looking it up.
+  StringRef Mnem = Name;
+  if (getLexer().is(AsmToken::Slash)) {
+    SMLoc SlashLoc = getLexer().getLoc();
+    getParser().Lex(); // /
+    if (getLexer().is(AsmToken::Identifier)) {
+      // Build "base/qualifier" and intern it in the context's bump allocator
+      // so the StringRef stored in the token operand remains valid after this
+      // function returns (createToken stores a raw pointer, not a copy).
+      StringRef Qual = getLexer().getTok().getIdentifier();
+      SmallString<16> Buf;
+      Buf += Name;
+      Buf += '/';
+      Buf += Qual;
+      Mnem = getParser().getContext().allocateString(Buf);
+      getParser().Lex(); // qualifier
+    } else {
+      return Error(SlashLoc, "expected qualifier after '/'");
+    }
+  }
+  Operands.push_back(AlphaOperand::createToken(Mnem, NameLoc));
 
   if (getLexer().is(AsmToken::EndOfStatement))
     return false;
