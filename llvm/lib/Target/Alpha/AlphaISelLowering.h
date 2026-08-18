@@ -140,6 +140,9 @@ public:
 private:
   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerVASTART(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerVAARG(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerVACOPY(SDValue Op, SelectionDAG &DAG) const;
 
   const AlphaSubtarget &Subtarget;
 };

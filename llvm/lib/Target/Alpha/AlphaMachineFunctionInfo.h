@@ -23,6 +23,13 @@ class AlphaMachineFunctionInfo : public MachineFunctionInfo {
   /// function has no such argument.
   Register SRetReturnReg;
 
+  /// Frame index of the integer register save area (the va_list base) in a
+  /// variadic function.
+  int VarArgsFrameIndex = 0;
+
+  /// The initial va_list offset: the number of bytes of named arguments.
+  unsigned VarArgsOffset = 0;
+
 public:
   AlphaMachineFunctionInfo() = default;
   AlphaMachineFunctionInfo(const Function &F, const TargetSubtargetInfo *STI) {}
@@ -32,6 +39,12 @@ public:
 
   Register getSRetReturnReg() const { return SRetReturnReg; }
   void setSRetReturnReg(Register R) { SRetReturnReg = R; }
+
+  int getVarArgsFrameIndex() const { return VarArgsFrameIndex; }
+  void setVarArgsFrameIndex(int FI) { VarArgsFrameIndex = FI; }
+
+  unsigned getVarArgsOffset() const { return VarArgsOffset; }
+  void setVarArgsOffset(unsigned O) { VarArgsOffset = O; }
 };
 
 } // end namespace llvm
