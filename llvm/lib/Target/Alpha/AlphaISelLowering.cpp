@@ -56,6 +56,12 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   // stronger orderings.  Wider atomic read-modify-writes are not handled yet.
   setMaxAtomicSizeInBitsSupported(64);
 
+  // Variadic function support.
+  setOperationAction(ISD::VASTART, MVT::Other, Custom);
+  setOperationAction(ISD::VAARG, MVT::Other, Custom);
+  setOperationAction(ISD::VACOPY, MVT::Other, Custom);
+  setOperationAction(ISD::VAEND, MVT::Other, Expand);
+
   // Global addresses are loaded from the GOT; constant pools are GP-relative.
   setOperationAction(ISD::GlobalAddress, MVT::i64, Custom);
   setOperationAction(ISD::ConstantPool, MVT::i64, Custom);
@@ -107,6 +113,12 @@ SDValue AlphaTargetLowering::LowerOperation(SDValue Op,
     return LowerGlobalAddress(Op, DAG);
   case ISD::ConstantPool:
     return LowerConstantPool(Op, DAG);
+  case ISD::VASTART:
+    return LowerVASTART(Op, DAG);
+  case ISD::VAARG:
+    return LowerVAARG(Op, DAG);
+  case ISD::VACOPY:
+    return LowerVACOPY(Op, DAG);
   default:
     llvm_unreachable("unexpected operation to lower");
   }
@@ -265,6 +277,55 @@ SDValue AlphaTargetLowering::LowerFormalArguments(
     }
   }
 
+  if (IsVarArg) {
+    // Save the unnamed argument registers to a save area so va_arg can reach
+    // them.  Layout (from the base): integer registers at [base, base+48),
+    // floating-point registers at [base-48, base); stack arguments follow at
+    // base+48.  The slot index is shared between the two areas.
+    static const MCPhysReg IntArgRegs[] = {Alpha::R16, Alpha::R17, Alpha::R18,
+                                           Alpha::R19, Alpha::R20, Alpha::R21};
+    static const MCPhysReg FPArgRegs[] = {Alpha::F16, Alpha::F17, Alpha::F18,
+                                          Alpha::F19, Alpha::F20, Alpha::F21};
+    // Slot N of the argument list lives at IntBase + N*8 for every N: the six
+    // register slots are the save area itself, and slot 6 onwards are the
+    // caller's stack arguments, which start at the incoming stack pointer.  So
+    // the integer save area must sit immediately below the incoming stack
+    // pointer, at a fixed -48, with the floating-point area below it at -96.
+    // These offsets do not depend on how much stack the named arguments used.
+    unsigned NumNamed = CCInfo.getStackSize() / 8;
+    for (const CCValAssign &VA : ArgLocs)
+      if (VA.isRegLoc())
+        ++NumNamed;
+    int IntFI = MFI.CreateFixedObject(48, -48, /*IsImmutable=*/false);
+    int FpFI = MFI.CreateFixedObject(48, -96, /*IsImmutable=*/false);
+    SDValue IntBase = DAG.getFrameIndex(IntFI, MVT::i64);
+    SDValue FpBase = DAG.getFrameIndex(FpFI, MVT::i64);
+
+    SmallVector<SDValue, 12> Stores;
+    for (unsigned I = NumNamed; I < 6; ++I) {
+      Register IntReg = MF.addLiveIn(IntArgRegs[I], &Alpha::GPRCRegClass);
+      SDValue IntVal = DAG.getCopyFromReg(Chain, DL, IntReg, MVT::i64);
+      SDValue IntPtr =
+          DAG.getMemBasePlusOffset(IntBase, TypeSize::getFixed(I * 8), DL);
+      Stores.push_back(
+          DAG.getStore(Chain, DL, IntVal, IntPtr,
+                       MachinePointerInfo::getFixedStack(MF, IntFI, I * 8)));
+      Register FPReg = MF.addLiveIn(FPArgRegs[I], &Alpha::FPRCRegClass);
+      SDValue FPVal = DAG.getCopyFromReg(Chain, DL, FPReg, MVT::f64);
+      SDValue FPPtr =
+          DAG.getMemBasePlusOffset(FpBase, TypeSize::getFixed(I * 8), DL);
+      Stores.push_back(
+          DAG.getStore(Chain, DL, FPVal, FPPtr,
+                       MachinePointerInfo::getFixedStack(MF, FpFI, I * 8)));
+    }
+    if (!Stores.empty())
+      Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other, Stores);
+
+    auto *FI = MF.getInfo<AlphaMachineFunctionInfo>();
+    FI->setVarArgsFrameIndex(IntFI);
+    FI->setVarArgsOffset(NumNamed * 8);
+  }
+
   return Chain;
 }
 
@@ -291,6 +352,82 @@ Instruction *AlphaTargetLowering::emitTrailingFence(IRBuilderBase &Builder,
   if (isAcquireOrStronger(Ord))
     return Builder.CreateFence(AtomicOrdering::Acquire);
   return nullptr;
+}
+
+SDValue AlphaTargetLowering::LowerVASTART(SDValue Op, SelectionDAG &DAG) const {
+  // Store the va_list { base, offset } that describes the argument save area.
+  MachineFunction &MF = DAG.getMachineFunction();
+  auto *FI = MF.getInfo<AlphaMachineFunctionInfo>();
+  SDLoc DL(Op);
+
+  SDValue Base = DAG.getFrameIndex(FI->getVarArgsFrameIndex(), MVT::i64);
+  SDValue Chain = Op.getOperand(0);
+  SDValue VAList = Op.getOperand(1);
+  const Value *SV = cast<SrcValueSDNode>(Op.getOperand(2))->getValue();
+
+  // *va_list = base
+  Chain = DAG.getStore(Chain, DL, Base, VAList, MachinePointerInfo(SV));
+  // va_list[8] = offset
+  SDValue OffPtr = DAG.getMemBasePlusOffset(VAList, TypeSize::getFixed(8), DL);
+  SDValue Off = DAG.getConstant(FI->getVarArgsOffset(), DL, MVT::i64);
+  return DAG.getStore(Chain, DL, Off, OffPtr, MachinePointerInfo(SV, 8));
+}
+
+SDValue AlphaTargetLowering::LowerVACOPY(SDValue Op, SelectionDAG &DAG) const {
+  // The va_list is a { base, offset } pair, so both quadwords must be copied;
+  // the default expansion copies only a single pointer.
+  SDLoc DL(Op);
+  SDValue Chain = Op.getOperand(0);
+  SDValue DstPtr = Op.getOperand(1);
+  SDValue SrcPtr = Op.getOperand(2);
+  const Value *DstSV = cast<SrcValueSDNode>(Op.getOperand(3))->getValue();
+  const Value *SrcSV = cast<SrcValueSDNode>(Op.getOperand(4))->getValue();
+
+  SDValue Base =
+      DAG.getLoad(MVT::i64, DL, Chain, SrcPtr, MachinePointerInfo(SrcSV));
+  Chain = Base.getValue(1);
+  SDValue SrcOff = DAG.getMemBasePlusOffset(SrcPtr, TypeSize::getFixed(8), DL);
+  SDValue Off =
+      DAG.getLoad(MVT::i64, DL, Chain, SrcOff, MachinePointerInfo(SrcSV, 8));
+  Chain = Off.getValue(1);
+
+  Chain = DAG.getStore(Chain, DL, Base, DstPtr, MachinePointerInfo(DstSV));
+  SDValue DstOff = DAG.getMemBasePlusOffset(DstPtr, TypeSize::getFixed(8), DL);
+  return DAG.getStore(Chain, DL, Off, DstOff, MachinePointerInfo(DstSV, 8));
+}
+
+SDValue AlphaTargetLowering::LowerVAARG(SDValue Op, SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  SDValue Chain = Op.getOperand(0);
+  SDValue VAList = Op.getOperand(1);
+  const Value *SV = cast<SrcValueSDNode>(Op.getOperand(2))->getValue();
+  EVT VT = Op.getValueType();
+
+  SDValue Base =
+      DAG.getLoad(MVT::i64, DL, Chain, VAList, MachinePointerInfo(SV));
+  Chain = Base.getValue(1);
+  SDValue OffPtr = DAG.getMemBasePlusOffset(VAList, TypeSize::getFixed(8), DL);
+  SDValue Offset =
+      DAG.getLoad(MVT::i64, DL, Chain, OffPtr, MachinePointerInfo(SV, 8));
+  Chain = Offset.getValue(1);
+
+  // Integer arguments are at base + offset; floating-point arguments in a
+  // register slot (offset < 48) are 48 bytes below that.
+  SDValue Addr = DAG.getNode(ISD::ADD, DL, MVT::i64, Base, Offset);
+  if (VT.isFloatingPoint()) {
+    SDValue InReg = DAG.getSetCC(
+        DL, MVT::i64, Offset, DAG.getConstant(48, DL, MVT::i64), ISD::SETULT);
+    SDValue FPAddr = DAG.getNode(ISD::SUB, DL, MVT::i64, Addr,
+                                 DAG.getConstant(48, DL, MVT::i64));
+    Addr = DAG.getSelect(DL, MVT::i64, InReg, FPAddr, Addr);
+  }
+
+  // Advance the offset by one 8-byte slot.
+  SDValue NextOff = DAG.getNode(ISD::ADD, DL, MVT::i64, Offset,
+                                DAG.getConstant(8, DL, MVT::i64));
+  Chain = DAG.getStore(Chain, DL, NextOff, OffPtr, MachinePointerInfo(SV, 8));
+
+  return DAG.getLoad(VT, DL, Chain, Addr, MachinePointerInfo());
 }
 
 SDValue

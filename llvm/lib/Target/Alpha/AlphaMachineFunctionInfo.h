@@ -19,12 +19,25 @@ class AlphaMachineFunctionInfo : public MachineFunctionInfo {
   /// which requires an ldgp in the prologue.
   bool UsesGP = false;
 
+  /// Frame index of the integer register save area (the va_list base) in a
+  /// variadic function.
+  int VarArgsFrameIndex = 0;
+
+  /// The initial va_list offset: the number of bytes of named arguments.
+  unsigned VarArgsOffset = 0;
+
 public:
   AlphaMachineFunctionInfo() = default;
   AlphaMachineFunctionInfo(const Function &F, const TargetSubtargetInfo *STI) {}
 
   bool usesGP() const { return UsesGP; }
   void setUsesGP(bool U = true) { UsesGP = U; }
+
+  int getVarArgsFrameIndex() const { return VarArgsFrameIndex; }
+  void setVarArgsFrameIndex(int FI) { VarArgsFrameIndex = FI; }
+
+  unsigned getVarArgsOffset() const { return VarArgsOffset; }
+  void setVarArgsOffset(unsigned O) { VarArgsOffset = O; }
 };
 
 } // end namespace llvm
