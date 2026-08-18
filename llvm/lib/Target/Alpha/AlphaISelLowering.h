@@ -394,6 +394,7 @@ private:
   SDValue LowerF128LibCall(SDNode *N, DAGCombinerInfo &DCI) const;
   SDValue LowerF128Binary(SDNode *N, DAGCombinerInfo &DCI) const;
   SDValue LowerF128Convert(SDNode *N, DAGCombinerInfo &DCI) const;
+  SDValue LowerF128Compare(SDNode *N, DAGCombinerInfo &DCI) const;
 
   const AlphaSubtarget &Subtarget;
 };
