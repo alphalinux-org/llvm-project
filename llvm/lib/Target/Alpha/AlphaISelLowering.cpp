@@ -475,10 +475,72 @@ static MachineBasicBlock *emitAtomicCmpXchg(MachineInstr &MI,
   return ExitBB;
 }
 
+// Expand a lock-based pre-BWX byte/word store into an ldq_l/stq_c loop that
+// reads the containing quadword, splices in the new field and stores it back.
+static MachineBasicBlock *emitSafeStore(MachineInstr &MI, MachineBasicBlock *BB,
+                                        bool IsWord) {
+  MachineFunction &MF = *BB->getParent();
+  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
+  MachineRegisterInfo &MRI = MF.getRegInfo();
+  const DebugLoc &DL = MI.getDebugLoc();
+
+  Register Val = MI.getOperand(0).getReg();
+  Register Addr = MI.getOperand(1).getReg();
+  unsigned MskOpc = IsWord ? Alpha::MSKWL : Alpha::MSKBL;
+  unsigned InsOpc = IsWord ? Alpha::INSWL : Alpha::INSBL;
+
+  // Compute the aligned address and the positioned field once, before the loop.
+  Register Aligned = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  BuildMI(*BB, MI, DL, TII.get(Alpha::BICi), Aligned).addReg(Addr).addImm(7);
+  Register Ins = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  BuildMI(*BB, MI, DL, TII.get(InsOpc), Ins).addReg(Val).addReg(Addr);
+
+  const BasicBlock *LLVMBB = BB->getBasicBlock();
+  MachineFunction::iterator It = ++BB->getIterator();
+  MachineBasicBlock *LoopBB = MF.CreateMachineBasicBlock(LLVMBB);
+  MachineBasicBlock *ExitBB = MF.CreateMachineBasicBlock(LLVMBB);
+  MF.insert(It, LoopBB);
+  MF.insert(It, ExitBB);
+
+  ExitBB->splice(ExitBB->begin(), BB, std::next(MI.getIterator()), BB->end());
+  ExitBB->transferSuccessorsAndUpdatePHIs(BB);
+  BB->addSuccessor(LoopBB);
+  LoopBB->addSuccessor(LoopBB);
+  LoopBB->addSuccessor(ExitBB);
+
+  //   ldq_l  Old, 0(Aligned)
+  //   msk    Old, Addr, Cleared
+  //   bis    Ins, Cleared, Merged
+  //   stq_c  Merged, 0(Aligned)   ; Merged <- success
+  //   beq    Merged, LoopBB
+  Register Old = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  addNarrowedMemOperands(
+      BuildMI(LoopBB, DL, TII.get(Alpha::LDQ_L), Old).addReg(Aligned).addImm(0),
+      MI, MachineMemOperand::MOLoad);
+  Register Cleared = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  BuildMI(LoopBB, DL, TII.get(MskOpc), Cleared).addReg(Old).addReg(Addr);
+  Register Merged = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  BuildMI(LoopBB, DL, TII.get(Alpha::BIS), Merged).addReg(Ins).addReg(Cleared);
+  Register Success = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  addNarrowedMemOperands(BuildMI(LoopBB, DL, TII.get(Alpha::STQ_C), Success)
+                             .addReg(Merged)
+                             .addReg(Aligned)
+                             .addImm(0),
+                         MI, MachineMemOperand::MOStore);
+  BuildMI(LoopBB, DL, TII.get(Alpha::BEQ)).addReg(Success).addMBB(LoopBB);
+
+  MI.eraseFromParent();
+  return ExitBB;
+}
+
 MachineBasicBlock *
 AlphaTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
                                                  MachineBasicBlock *MBB) const {
   switch (MI.getOpcode()) {
+  case Alpha::SAFE_STOREI8:
+    return emitSafeStore(MI, MBB, /*IsWord=*/false);
+  case Alpha::SAFE_STOREI16:
+    return emitSafeStore(MI, MBB, /*IsWord=*/true);
   case Alpha::ATOMIC_ADD_I64:
   case Alpha::ATOMIC_SUB_I64:
   case Alpha::ATOMIC_AND_I64:
