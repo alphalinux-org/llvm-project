@@ -13,6 +13,7 @@
 #include "llvm/MC/MCDecoderOps.h"
 #include "llvm/MC/MCDisassembler/MCDisassembler.h"
 #include "llvm/MC/MCInst.h"
+#include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/Endian.h"
 
@@ -23,11 +24,27 @@ using namespace llvm::MCD;
 
 typedef MCDisassembler::DecodeStatus DecodeStatus;
 
+// The trap and rounding qualifier a floating-point operate word carries, as
+// MCInst flags.  Rounding is bits 7:6 of the function field, where the
+// unqualified form rounds to nearest.
+static unsigned qualFromWord(uint32_t Insn) {
+  unsigned Func = (Insn >> 5) & 0x7ff;
+  unsigned RoundBits = Func & 0x0c0;
+  unsigned RM = RoundBits == 0x000   ? Alpha::FPRoundChopped
+                : RoundBits == 0x040 ? Alpha::FPRoundMinus
+                : RoundBits == 0x0c0 ? Alpha::FPRoundDynamic
+                                     : Alpha::FPRoundNormal;
+  return Alpha::encodeFPQual(Func & 0x700, RM);
+}
+
 namespace {
 class AlphaDisassembler : public MCDisassembler {
+  std::unique_ptr<const MCInstrInfo> MCII;
+
 public:
-  AlphaDisassembler(const MCSubtargetInfo &STI, MCContext &Ctx)
-      : MCDisassembler(STI, Ctx) {}
+  AlphaDisassembler(const MCSubtargetInfo &STI, MCContext &Ctx,
+                    std::unique_ptr<const MCInstrInfo> MCII)
+      : MCDisassembler(STI, Ctx), MCII(std::move(MCII)) {}
   ~AlphaDisassembler() override = default;
 
   DecodeStatus getInstruction(MCInst &Instr, uint64_t &Size,
@@ -117,13 +134,63 @@ DecodeStatus AlphaDisassembler::getInstruction(MCInst &Instr, uint64_t &Size,
   }
   Size = 4;
   uint32_t Insn = support::endian::read32le(Bytes.data());
-  return decodeInstruction(DecoderTable32, Instr, Insn, Address, this, STI);
+  DecodeStatus S =
+      decodeInstruction(DecoderTable32, Instr, Insn, Address, this, STI);
+  if (S != MCDisassembler::Fail) {
+    // Record what the bits say about the qualifier, so the printer shows that
+    // rather than deriving one from -mattr: the same word must not read as
+    // `addt' or `addt/su' depending on a flag.
+    if (unsigned TrapClass = MCII->get(Instr.getOpcode()).TSFlags & Alpha::TrapClassMask) {
+      unsigned Qual = qualFromWord(Insn);
+      // A class that does not take the ambient rounding mode has a table entry
+      // per rounding field -- cvttq/c and cvttq are separate defs -- so its
+      // mnemonic already spells the mode.  Recording it again would print it
+      // twice, as cvttq/cc.
+      if (!Alpha::fpRounds(TrapClass))
+        Qual = Alpha::encodeFPQual(Alpha::fpQualTrapBits(Qual),
+                                   Alpha::FPRoundNormal);
+      Instr.setFlags(Qual);
+    }
+    return S;
+  }
+
+  // A floating-point operate carries its trap and rounding qualifiers in the
+  // function field, and only the unqualified encodings have a table entry.  So
+  // an instruction assembled with -mieee -- including one this compiler
+  // produced -- would not decode at all.  Take the qualifier out, decode what
+  // is left, and hand the qualifier to the printer through the instruction's
+  // flags so it prints what the bits actually say.
+  unsigned Opcode = Insn >> 26;
+  if (Opcode != 0x15 && Opcode != 0x16 && Opcode != 0x17)
+    return MCDisassembler::Fail;
+
+  unsigned Func = (Insn >> 5) & 0x7ff;
+  unsigned TrapBits = Func & 0x700;
+  unsigned RM = Alpha::fpQualRoundMode(qualFromWord(Insn));
+  if (!TrapBits && RM == Alpha::FPRoundNormal)
+    return MCDisassembler::Fail;
+
+  uint32_t Base =
+      (Insn & ~(0x7ffu << 5)) | ((Func & ~0x7c0u) << 5) | (0x080u << 5);
+  MCInst Bare;
+  S = decodeInstruction(DecoderTable32, Bare, Base, Address, this, STI);
+  if (S == MCDisassembler::Fail)
+    return S;
+  unsigned TrapClass = MCII->get(Bare.getOpcode()).TSFlags & Alpha::TrapClassMask;
+  if (!TrapClass)
+    return MCDisassembler::Fail;
+  if (!Alpha::fpTakesWrittenRound(TrapClass) && RM != Alpha::FPRoundNormal)
+    return MCDisassembler::Fail;
+  Instr = Bare;
+  Instr.setFlags(Alpha::encodeFPQual(TrapBits, RM));
+  return S;
 }
 
 static MCDisassembler *createAlphaDisassembler(const Target &T,
                                                const MCSubtargetInfo &STI,
                                                MCContext &Ctx) {
-  return new AlphaDisassembler(STI, Ctx);
+  return new AlphaDisassembler(
+      STI, Ctx, std::unique_ptr<const MCInstrInfo>(T.createMCInstrInfo()));
 }
 
 extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeAlphaDisassembler() {

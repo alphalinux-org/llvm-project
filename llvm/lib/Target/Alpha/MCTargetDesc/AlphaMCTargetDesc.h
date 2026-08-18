@@ -137,6 +137,23 @@ inline unsigned fpQualRoundMode(unsigned Flags) {
   return (Flags >> FPQualRoundShift) & FPQualRoundMask;
 }
 
+// The trap qualifier's contribution to the function field, by spelling.
+inline unsigned getFPTrapFuncBitsForSpelling(StringRef S, bool &Ok) {
+  Ok = true;
+  if (S.empty())
+    return 0;
+  if (S == "s")
+    return 0x400;
+  if (S == "u" || S == "v")
+    return 0x100;
+  if (S == "su" || S == "sv")
+    return 0x500;
+  if (S == "sui" || S == "svi")
+    return 0x700;
+  Ok = false;
+  return 0;
+}
+
 // The spelling of a trap qualifier from its function bits.  The v forms differ
 // from the u forms only in which instruction carries them, so the caller says
 // which family it wants.
