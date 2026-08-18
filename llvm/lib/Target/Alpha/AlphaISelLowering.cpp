@@ -267,6 +267,21 @@ SDValue AlphaTargetLowering::PerformDAGCombine(SDNode *N,
     if (SDValue V = LowerF128Binary(N, DCI))
       return V;
     break;
+  case ISD::FP_EXTEND:
+  case ISD::STRICT_FP_EXTEND:
+  case ISD::FP_ROUND:
+  case ISD::STRICT_FP_ROUND:
+  case ISD::SINT_TO_FP:
+  case ISD::STRICT_SINT_TO_FP:
+  case ISD::UINT_TO_FP:
+  case ISD::STRICT_UINT_TO_FP:
+  case ISD::FP_TO_SINT:
+  case ISD::STRICT_FP_TO_SINT:
+  case ISD::FP_TO_UINT:
+  case ISD::STRICT_FP_TO_UINT:
+    if (SDValue V = LowerF128Convert(N, DCI))
+      return V;
+    break;
   default:
     break;
   }
@@ -965,6 +980,209 @@ SDValue AlphaTargetLowering::LowerF128Binary(SDNode *N,
     return SDValue(N, 0);
   }
   return Result;
+}
+
+SDValue AlphaTargetLowering::LowerF128Convert(SDNode *N,
+                                              DAGCombinerInfo &DCI) const {
+  if (!DCI.isBeforeLegalize())
+    return SDValue();
+
+  bool IsStrict = N->isStrictFPOpcode();
+  SelectionDAG &DAG = DCI.DAG;
+  SDLoc DL(N);
+  MachineFunction &MF = DAG.getMachineFunction();
+  MF.getInfo<AlphaMachineFunctionInfo>()->setUsesGP();
+
+  SDValue InChain = IsStrict ? N->getOperand(0) : DAG.getEntryNode();
+
+  unsigned Opc = N->getOpcode();
+
+  // --- f64 -> f128: _OtsConvertFloatTX(double in $f16) -> $16/$17 ---
+  if (Opc == ISD::FP_EXTEND || Opc == ISD::STRICT_FP_EXTEND) {
+    SDValue Src = IsStrict ? N->getOperand(1) : N->getOperand(0);
+    if (N->getSimpleValueType(0) != MVT::f128 ||
+        Src.getSimpleValueType() != MVT::f64)
+      return SDValue();
+
+    SDValue Pv = DAG.getNode(
+        AlphaISD::LITERAL, DL, MVT::i64,
+        DAG.getTargetExternalSymbol("_OtsConvertFloatTX", MVT::i64));
+    SDValue Glue;
+    SDValue Chain = InChain;
+    Chain = DAG.getCopyToReg(Chain, DL, Alpha::F16, Src, Glue);
+    Glue = Chain.getValue(1);
+    Chain = DAG.getCopyToReg(Chain, DL, Alpha::R27, Pv, Glue);
+    Glue = Chain.getValue(1);
+
+    Chain = emitOtsCall(DAG, DL, Subtarget, Chain, Pv,
+                        {DAG.getRegister(Alpha::F16, MVT::f64),
+                         DAG.getRegister(Alpha::R27, MVT::i64)},
+                        Glue);
+    Glue = Chain.getValue(1);
+
+    SDValue ResLo = DAG.getCopyFromReg(Chain, DL, Alpha::R16, MVT::i64, Glue);
+    Chain = ResLo.getValue(1);
+    Glue = ResLo.getValue(2);
+    SDValue ResHi = DAG.getCopyFromReg(Chain, DL, Alpha::R17, MVT::i64, Glue);
+    Chain = ResHi.getValue(1);
+
+    SDValue Result = joinF128(DAG, DL, MF, Chain, ResLo, ResHi);
+    if (IsStrict) {
+      DCI.CombineTo(N, Result, Result.getValue(1));
+      return SDValue(N, 0);
+    }
+    return Result;
+  }
+
+  // --- f128 -> f64: _OtsConvertFloatXT(al,ah,$16/$17, round $18) -> $f0 ---
+  if (Opc == ISD::FP_ROUND || Opc == ISD::STRICT_FP_ROUND) {
+    SDValue Src = IsStrict ? N->getOperand(1) : N->getOperand(0);
+    if (N->getSimpleValueType(0) != MVT::f64 ||
+        Src.getSimpleValueType() != MVT::f128)
+      return SDValue();
+
+    auto [Lo, Hi] = splitF128(DAG, DL, MF, DAG.getEntryNode(), Src);
+    SDValue Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other,
+                                {InChain, Lo.getValue(1), Hi.getValue(1)});
+
+    SDValue Pv = DAG.getNode(
+        AlphaISD::LITERAL, DL, MVT::i64,
+        DAG.getTargetExternalSymbol("_OtsConvertFloatXT", MVT::i64));
+    SDValue Glue;
+    Chain = DAG.getCopyToReg(Chain, DL, Alpha::R16, Lo, Glue);
+    Glue = Chain.getValue(1);
+    Chain = DAG.getCopyToReg(Chain, DL, Alpha::R17, Hi, Glue);
+    Glue = Chain.getValue(1);
+    // A narrowing conversion rounds, so this one does follow
+    // -mfp-rounding-mode.  gcc additionally sets bit 16 for a FLOAT_TRUNCATE
+    // when the trap mode is the default one, i.e. when neither -mieee nor
+    // -mfp-trap-mode=u asked for trapping arithmetic.
+    unsigned ModeArg = Alpha::getOtsRoundModeArg(getFPRoundMode(Subtarget));
+    if (!Subtarget.hasFeature(Alpha::FeatureIEEE) &&
+        !Subtarget.hasFeature(Alpha::FeatureFPTrapU))
+      ModeArg |= 0x10000;
+    Chain = DAG.getCopyToReg(Chain, DL, Alpha::R18,
+                             DAG.getConstant(ModeArg, DL, MVT::i64), Glue);
+    Glue = Chain.getValue(1);
+    Chain = DAG.getCopyToReg(Chain, DL, Alpha::R27, Pv, Glue);
+    Glue = Chain.getValue(1);
+
+    Chain = emitOtsCall(DAG, DL, Subtarget, Chain, Pv,
+                        {DAG.getRegister(Alpha::R16, MVT::i64),
+                         DAG.getRegister(Alpha::R17, MVT::i64),
+                         DAG.getRegister(Alpha::R18, MVT::i64),
+                         DAG.getRegister(Alpha::R27, MVT::i64)},
+                        Glue);
+    Glue = Chain.getValue(1);
+
+    SDValue Result = DAG.getCopyFromReg(Chain, DL, Alpha::F0, MVT::f64, Glue);
+    Chain = Result.getValue(1);
+
+    if (IsStrict) {
+      DCI.CombineTo(N, Result, Chain);
+      return SDValue(N, 0);
+    }
+    return Result;
+  }
+
+  // --- i64/i32 -> f128: _OtsCvtQX / _OtsCvtQUX(a -> $16) -> $16/$17 ---
+  if (Opc == ISD::SINT_TO_FP || Opc == ISD::UINT_TO_FP ||
+      Opc == ISD::STRICT_SINT_TO_FP || Opc == ISD::STRICT_UINT_TO_FP) {
+    if (N->getSimpleValueType(0) != MVT::f128)
+      return SDValue();
+
+    bool IsUnsigned = (Opc == ISD::UINT_TO_FP || Opc == ISD::STRICT_UINT_TO_FP);
+    SDValue Src = IsStrict ? N->getOperand(1) : N->getOperand(0);
+    // Widen sub-i64 integers to i64 (the OTS routine takes an i64 argument).
+    if (Src.getSimpleValueType() != MVT::i64)
+      Src = DAG.getNode(IsUnsigned ? ISD::ZERO_EXTEND : ISD::SIGN_EXTEND, DL,
+                        MVT::i64, Src);
+
+    const char *Name = IsUnsigned ? "_OtsCvtQUX" : "_OtsCvtQX";
+    SDValue Pv = DAG.getNode(AlphaISD::LITERAL, DL, MVT::i64,
+                             DAG.getTargetExternalSymbol(Name, MVT::i64));
+    SDValue Glue;
+    SDValue Chain = InChain;
+    Chain = DAG.getCopyToReg(Chain, DL, Alpha::R16, Src, Glue);
+    Glue = Chain.getValue(1);
+    Chain = DAG.getCopyToReg(Chain, DL, Alpha::R27, Pv, Glue);
+    Glue = Chain.getValue(1);
+
+    Chain = emitOtsCall(DAG, DL, Subtarget, Chain, Pv,
+                        {DAG.getRegister(Alpha::R16, MVT::i64),
+                         DAG.getRegister(Alpha::R27, MVT::i64)},
+                        Glue);
+    Glue = Chain.getValue(1);
+
+    SDValue ResLo = DAG.getCopyFromReg(Chain, DL, Alpha::R16, MVT::i64, Glue);
+    Chain = ResLo.getValue(1);
+    Glue = ResLo.getValue(2);
+    SDValue ResHi = DAG.getCopyFromReg(Chain, DL, Alpha::R17, MVT::i64, Glue);
+    Chain = ResHi.getValue(1);
+
+    SDValue Result = joinF128(DAG, DL, MF, Chain, ResLo, ResHi);
+    if (IsStrict) {
+      DCI.CombineTo(N, Result, Result.getValue(1));
+      return SDValue(N, 0);
+    }
+    return Result;
+  }
+
+  // --- f128 -> i64/i32: _OtsCvtXQ(al,ah,round -> $16-$18) -> $0 ---
+  if (Opc == ISD::FP_TO_SINT || Opc == ISD::FP_TO_UINT ||
+      Opc == ISD::STRICT_FP_TO_SINT || Opc == ISD::STRICT_FP_TO_UINT) {
+    SDValue Src = IsStrict ? N->getOperand(1) : N->getOperand(0);
+    if (Src.getSimpleValueType() != MVT::f128)
+      return SDValue();
+
+    auto [Lo, Hi] = splitF128(DAG, DL, MF, DAG.getEntryNode(), Src);
+    SDValue Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other,
+                                {InChain, Lo.getValue(1), Hi.getValue(1)});
+
+    SDValue Pv =
+        DAG.getNode(AlphaISD::LITERAL, DL, MVT::i64,
+                    DAG.getTargetExternalSymbol("_OtsCvtXQ", MVT::i64));
+    SDValue Glue;
+    Chain = DAG.getCopyToReg(Chain, DL, Alpha::R16, Lo, Glue);
+    Glue = Chain.getValue(1);
+    Chain = DAG.getCopyToReg(Chain, DL, Alpha::R17, Hi, Glue);
+    Glue = Chain.getValue(1);
+    // C requires a conversion to integer to truncate toward zero, whatever the
+    // ambient rounding mode is, so this is always chopped.  gcc's
+    // alpha_emit_xfloating_cvt passes ALPHA_FPRM_CHOP for a FIX and reads
+    // alpha_fprm only for a FLOAT_TRUNCATE.
+    Chain = DAG.getCopyToReg(
+        Chain, DL, Alpha::R18,
+        DAG.getConstant(Alpha::getOtsRoundModeArg(Alpha::FPRoundChopped), DL,
+                        MVT::i64),
+        Glue);
+    Glue = Chain.getValue(1);
+    Chain = DAG.getCopyToReg(Chain, DL, Alpha::R27, Pv, Glue);
+    Glue = Chain.getValue(1);
+
+    Chain = emitOtsCall(DAG, DL, Subtarget, Chain, Pv,
+                        {DAG.getRegister(Alpha::R16, MVT::i64),
+                         DAG.getRegister(Alpha::R17, MVT::i64),
+                         DAG.getRegister(Alpha::R18, MVT::i64),
+                         DAG.getRegister(Alpha::R27, MVT::i64)},
+                        Glue);
+    Glue = Chain.getValue(1);
+
+    SDValue Result = DAG.getCopyFromReg(Chain, DL, Alpha::R0, MVT::i64, Glue);
+    Chain = Result.getValue(1);
+
+    MVT ResVT = N->getSimpleValueType(0);
+    if (ResVT != MVT::i64)
+      Result = DAG.getNode(ISD::TRUNCATE, DL, ResVT, Result);
+
+    if (IsStrict) {
+      DCI.CombineTo(N, Result, Chain);
+      return SDValue(N, 0);
+    }
+    return Result;
+  }
+
+  return SDValue();
 }
 
 SDValue AlphaTargetLowering::LowerDivRem(SDValue Op, SelectionDAG &DAG) const {
