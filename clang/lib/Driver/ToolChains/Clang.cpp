@@ -2667,33 +2667,42 @@ static void CollectArgsForIntegratedAssembler(Compilation &C,
       default:
         break;
       case llvm::Triple::alpha:
-        // Alpha ISA-level flags passed to the assembler via -Wa,-mevN.
-        // Map them to the feature flags our integrated assembler understands.
-        if (Value == "-mev4" || Value == "-mev5")
-          continue; // base ISA; no additional features
-        if (Value == "-mev56" || Value == "-mpca56") {
-          CmdArgs.push_back("-target-feature");
-          CmdArgs.push_back("+bwx");
-          continue;
-        }
-        if (Value == "-mev6") {
-          CmdArgs.push_back("-target-feature");
-          CmdArgs.push_back("+bwx");
-          CmdArgs.push_back("-target-feature");
-          CmdArgs.push_back("+mvi");
-          CmdArgs.push_back("-target-feature");
-          CmdArgs.push_back("+fix");
-          continue;
-        }
-        if (Value == "-mev67") {
-          CmdArgs.push_back("-target-feature");
-          CmdArgs.push_back("+bwx");
-          CmdArgs.push_back("-target-feature");
-          CmdArgs.push_back("+mvi");
-          CmdArgs.push_back("-target-feature");
-          CmdArgs.push_back("+fix");
-          CmdArgs.push_back("-target-feature");
-          CmdArgs.push_back("+cix");
+        // Alpha ISA-level flags passed to the assembler via -Wa,-m<cpu>.  The
+        // names and what each permits come from GNU as's cpu_types table in
+        // gas/config/tc-alpha.c.  Note that its CIX bit covers both of ours:
+        // it gates ctpop/ctlz/cttz and itoft/ftoit/sqrtt alike, so a name that
+        // grants CIX there grants both +cix and +fix here.  Its MAX bit is our
+        // MVI.  The EV4/EV5/EV6 bits are PALcode-only and have no counterpart.
+        if (StringRef Cpu; Value.consume_front("-m") && (Cpu = Value, true)) {
+          unsigned Bwx = 0, Mvi = 0, Cix = 0;
+          if (Cpu == "ev4" || Cpu == "ev45" || Cpu == "lca45" || Cpu == "ev5" ||
+              Cpu == "21064" || Cpu == "21064a" || Cpu == "21066" ||
+              Cpu == "21068" || Cpu == "21164" || Cpu == "all") {
+            // Base ISA only.
+          } else if (Cpu == "ev56" || Cpu == "21164a") {
+            Bwx = 1;
+          } else if (Cpu == "pca56" || Cpu == "21164pc") {
+            Bwx = Mvi = 1;
+          } else if (Cpu == "ev6" || Cpu == "ev67" || Cpu == "ev68" ||
+                     Cpu == "21264" || Cpu == "21264a" || Cpu == "21264b") {
+            Bwx = Mvi = Cix = 1;
+          } else {
+            break; // Not an ISA name; fall through to the generic handling.
+          }
+          if (Bwx) {
+            CmdArgs.push_back("-target-feature");
+            CmdArgs.push_back("+bwx");
+          }
+          if (Mvi) {
+            CmdArgs.push_back("-target-feature");
+            CmdArgs.push_back("+mvi");
+          }
+          if (Cix) {
+            CmdArgs.push_back("-target-feature");
+            CmdArgs.push_back("+fix");
+            CmdArgs.push_back("-target-feature");
+            CmdArgs.push_back("+cix");
+          }
           continue;
         }
         break;
