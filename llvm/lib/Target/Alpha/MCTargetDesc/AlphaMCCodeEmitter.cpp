@@ -112,6 +112,13 @@ public:
                                  SmallVectorImpl<MCFixup> &Fixups,
                                  const MCSubtargetInfo &STI) const {
     const MCOperand &MO = MI.getOperand(OpNo);
+    // A plain number is a branch-prediction hint written out in full, not a
+    // symbol needing a relocation.  The field counts longwords from the
+    // instruction after the jump, so GNU as takes the byte displacement given
+    // here and divides it by four; returning 0 instead silently threw the hint
+    // away.
+    if (MO.isImm())
+      return (static_cast<uint64_t>(MO.getImm()) >> 2) & 0x3fff;
     if (!MO.isExpr())
       return 0;
     const MCExpr *Target = MO.getExpr();
