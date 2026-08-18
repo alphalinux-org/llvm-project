@@ -21,6 +21,8 @@ AlphaMCAsmInfo::AlphaMCAsmInfo(const Triple &TT, const MCTargetOptions &Options)
   CalleeSaveStackSlotSize = 8;
   IsLittleEndian = true;
   CommentString = "#";
+  // `.align N` aligns to a 2^N boundary, matching GNU as on Alpha.
+  AlignmentIsInBytes = false;
   // A trailing `!name` is a relocation specifier, not an infix `!` operator.
   UseExclaimForSpecifier = true;
   Data64bitsDirective = "\t.quad\t";
