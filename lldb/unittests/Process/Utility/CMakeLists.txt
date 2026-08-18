@@ -17,6 +17,7 @@ set(LLVM_OPTIONAL_SOURCES
 add_lldb_unittest(ProcessUtilityTests
   LinuxProcMapsTest.cpp
   MemoryTagManagerAArch64MTETest.cpp
+  RegisterContextAlphaTest.cpp
   RegisterContextTest.cpp
   CoreFileMemoryRangesTest.cpp
   ${PLATFORM_SOURCES}
