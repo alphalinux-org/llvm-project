@@ -207,9 +207,12 @@ struct FieldOps {
 // zero for that width; no caller of a one-byte field reads them.
 FieldOps getFieldOps(unsigned Bytes);
 
-// The mode argument the OTS X_floating routines take in $18, matching gcc's
-// alpha_compute_xfloating_mode_arg.  Round toward +inf is mode 3 and has no
-// -mfp-rounding-mode spelling, so it cannot be selected here.
+// The mode argument the OTS X_floating routines take, matching gcc's
+// alpha_compute_xfloating_mode_arg.  It goes in the register after the operands
+// -- $18 for a routine taking one X_floating value, $20 for the arithmetic,
+// which takes two -- so the register is named at each call site rather than
+// here.  Round toward +inf is mode 3 and has no -mfp-rounding-mode spelling, so
+// it cannot be selected here.
 inline unsigned getOtsRoundModeArg(unsigned Mode) {
   switch (Mode) {
   case FPRoundChopped:
