@@ -8,11 +8,14 @@
 
 #include "AlphaISelLowering.h"
 #include "Alpha.h"
+#include "AlphaInstrInfo.h"
 #include "AlphaMachineFunctionInfo.h"
 #include "AlphaSubtarget.h"
 #include "AlphaTargetMachine.h"
 #include "llvm/CodeGen/CallingConvLower.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -155,4 +158,41 @@ AlphaTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
     RetOps.push_back(Glue);
 
   return DAG.getNode(AlphaISD::RET_GLUE, DL, MVT::Other, RetOps);
+}
+
+MachineBasicBlock *
+AlphaTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
+                                                 MachineBasicBlock *MBB) const {
+  // MOVi2f/MOVf2i reinterpret the 64 bits of a value by bouncing them through
+  // an 8-byte stack slot, since Alpha has no direct integer/FP register move.
+  MachineFunction &MF = *MBB->getParent();
+  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
+  const DebugLoc &DL = MI.getDebugLoc();
+  int FI =
+      MF.getFrameInfo().CreateStackObject(8, Align(8), /*isSpillSlot=*/false);
+  Register Dst = MI.getOperand(0).getReg();
+  Register Src = MI.getOperand(1).getReg();
+
+  unsigned StoreOpc, LoadOpc;
+  switch (MI.getOpcode()) {
+  default:
+    llvm_unreachable("unexpected custom-inserted instruction");
+  case Alpha::MOVi2f:
+    StoreOpc = Alpha::STQ;
+    LoadOpc = Alpha::LDT;
+    break;
+  case Alpha::MOVf2i:
+    StoreOpc = Alpha::STT;
+    LoadOpc = Alpha::LDQ;
+    break;
+  }
+
+  BuildMI(*MBB, MI, DL, TII.get(StoreOpc))
+      .addReg(Src)
+      .addFrameIndex(FI)
+      .addImm(0);
+  BuildMI(*MBB, MI, DL, TII.get(LoadOpc), Dst).addFrameIndex(FI).addImm(0);
+
+  MI.eraseFromParent();
+  return MBB;
 }

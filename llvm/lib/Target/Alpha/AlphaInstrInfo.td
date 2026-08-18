@@ -228,6 +228,20 @@ def LDAH : MFormD<0x09, (outs GPRC:$Ra), (ins s16imm:$disp, GPRC:$Rb),
 // Materialize a small signed constant with `lda $Rc, imm($31)`.
 def : Pat<(i64 immSExt16:$imm), (LDA immSExt16:$imm, R31)>;
 
+//===----------------------------------------------------------------------===//
+// Integer/floating register moves and conversions.
+//===----------------------------------------------------------------------===//
+
+// Alpha has no direct move between integer and floating-point registers, so the
+// bit pattern is bounced through an 8-byte stack slot.  A custom inserter
+// creates the slot and the stq/ldt (or stt/ldq) pair.
+let usesCustomInserter = 1 in {
+def MOVi2f : AlphaPseudo<(outs FPRC:$dst), (ins GPRC:$src), "# MOVi2f",
+                         [(set f64:$dst, (bitconvert i64:$src))]>;
+def MOVf2i : AlphaPseudo<(outs GPRC:$dst), (ins FPRC:$src), "# MOVf2i",
+                         [(set i64:$dst, (bitconvert f64:$src))]>;
+}
+
 // Zero-extension of the low 1/2/4 bytes via zapnot (the byte mask keeps the
 // low N bytes).  This also lets `and` with these masks avoid materializing a
 // wide constant.
