@@ -30,6 +30,23 @@ enum FPRoundMode {
   FPRoundDynamic
 };
 
+// Each mode's two spellings: the letter that ends a qualifier in assembly, and
+// bits 7:6 of the function field.  The parser and the disassembler read this
+// table backwards, from the letter and from the bits, so that neither can come
+// to disagree with what the printer and the encoder write.
+struct FPRoundInfo {
+  FPRoundMode Mode;
+  StringRef Suffix;  // Empty for the unqualified form, which rounds to nearest.
+  unsigned FuncBits; // Replaces, rather than adds to, the default.
+};
+
+inline constexpr FPRoundInfo FPRoundModes[] = {
+    {FPRoundNormal, "", 0x080},
+    {FPRoundChopped, "c", 0x000},
+    {FPRoundMinus, "m", 0x040},
+    {FPRoundDynamic, "d", 0x0c0},
+};
+
 // The floating-point trap-qualifier letters (without the leading '/') for an
 // instruction's trap class under -mieee / -mieee-with-inexact / -mfp-trap-mode.
 // The class values match TrapClass in AlphaInstrFormats.td.  IEEE selects the
@@ -45,9 +62,11 @@ inline StringRef getFPTrapSuffix(unsigned TrapClass, bool IEEE, bool Inexact,
     return IEEE ? (Inexact ? "svi" : "sv") : (TrapU ? "v" : StringRef());
   case 4: // Integer-to-float: inexact only.
     return (IEEE && Inexact) ? "sui" : StringRef();
-  case 5:
-    return IEEE ? "s"
-                : StringRef(); // S-to-T convert (software completion only).
+  case 5: // S-to-T convert: nothing.  cvtst takes no qualifier of its own --
+          // its /s form is the separately encoded cvtst/s (CVTST_S), which
+          // codegen selects outright under -mieee -- so there is no suffix to
+          // merge into a function field that already carries 0x200 there.
+    return StringRef();
   default:
     return StringRef();
   }
@@ -82,30 +101,35 @@ inline bool fpTakesWrittenRound(unsigned TrapClass) {
   return fpRounds(TrapClass) || TrapClass == 3;
 }
 inline StringRef getFPRoundSuffix(unsigned Mode) {
-  switch (Mode) {
-  case FPRoundChopped:
-    return "c";
-  case FPRoundMinus:
-    return "m";
-  case FPRoundDynamic:
-    return "d";
-  default:
-    return StringRef();
-  }
+  for (const FPRoundInfo &R : FPRoundModes)
+    if (R.Mode == Mode)
+      return R.Suffix;
+  return StringRef();
 }
-// The function-field rounding bits (7:6): normal 0x80, chopped 0, minus 0x40,
-// dynamic 0xc0.  These replace, rather than add to, the instruction's default.
+
 inline unsigned getFPRoundFuncBits(unsigned Mode) {
-  switch (Mode) {
-  case FPRoundChopped:
-    return 0x000;
-  case FPRoundMinus:
-    return 0x040;
-  case FPRoundDynamic:
-    return 0x0c0;
-  default:
-    return 0x080;
-  }
+  for (const FPRoundInfo &R : FPRoundModes)
+    if (R.Mode == Mode)
+      return R.FuncBits;
+  return 0x080;
+}
+
+// The mode a rounding letter names, or ~0u for a letter that names none.  The
+// unqualified form has no letter, so it is never the answer.
+inline unsigned getFPRoundModeForSuffix(StringRef Suffix) {
+  for (const FPRoundInfo &R : FPRoundModes)
+    if (!R.Suffix.empty() && R.Suffix == Suffix)
+      return R.Mode;
+  return ~0u;
+}
+
+// The mode named by bits 7:6 of a function field, all four values of which name
+// one.
+inline unsigned getFPRoundModeForFuncBits(unsigned Bits) {
+  for (const FPRoundInfo &R : FPRoundModes)
+    if (R.FuncBits == Bits)
+      return R.Mode;
+  return FPRoundNormal;
 }
 
 // The qualifier a floating-point instruction carries, held in the MCInst's
@@ -137,6 +161,79 @@ inline unsigned fpQualTrapBits(unsigned Flags) {
 inline FPRoundMode fpQualRoundMode(unsigned Flags) {
   return static_cast<FPRoundMode>((Flags >> FPQualRoundShift) &
                                   FPQualRoundMask);
+}
+
+// The trap qualifier's contribution to the function field, by spelling.
+inline unsigned getFPTrapFuncBitsForSpelling(StringRef S, bool &Ok) {
+  Ok = true;
+  if (S.empty())
+    return 0;
+  if (S == "s")
+    return 0x400;
+  if (S == "u" || S == "v")
+    return 0x100;
+  if (S == "su" || S == "sv")
+    return 0x500;
+  if (S == "sui" || S == "svi")
+    return 0x700;
+  Ok = false;
+  return 0;
+}
+
+// Whether the trap-mode position of a class's function field holds a qualifier
+// at all.  cvtst's does not: the 0x200 it has there is what distinguishes it
+// from cvtts, and it takes no qualifier of its own.
+inline bool fpTrapFieldIsQualifier(unsigned TrapClass) {
+  return (TrapClass >= 1 && TrapClass <= 4) || TrapClass == 6;
+}
+
+// Whether a trap class actually defines this trap-bit and rounding-mode
+// combination.  Alpha's floating-point instructions do not all take the same
+// qualifiers, and the function field has room for spellings that no
+// instruction defines: an arithmetic operate takes all sixteen, a compare
+// takes only the bare form and /su and no rounding letter, an
+// integer-to-floating convert has no U bit without I, and cvtst takes none at
+// all -- its /s form is a separately encoded mnemonic.  This is the same set
+// binutils tabulates per mnemonic in opcodes/alpha-opc.c, which is what GNU as
+// accepts.
+//
+// Getting this wrong is not merely permissive.  cvtst's own function field
+// carries 0x200 in the trap-mode position, so a trap qualifier merged into it
+// lands on an encoding no instruction defines -- and the residual bits of one
+// of those, cvtst/u, coincide with cvtts, so the word reads back as a real
+// instruction converting the other way.
+inline bool fpQualIsLegal(unsigned TrapClass, unsigned TrapBits,
+                          unsigned RoundMode) {
+  if (!fpTakesWrittenRound(TrapClass) && RoundMode != FPRoundNormal)
+    return false;
+  switch (TrapClass) {
+  case 1: // Arithmetic, and the T-to-S convert: all sixteen.
+  case 3: // Floating to integer: the same set, spelled with v.
+    return TrapBits == 0 || TrapBits == 0x100 || TrapBits == 0x500 ||
+           TrapBits == 0x700;
+  case 6: // cvtql: bare, /v or /sv, and no rounding letter -- there is no
+          // inexact form, since a quadword-to-longword truncation cannot be
+          // inexact in the sense the I bit means.
+    return TrapBits == 0 || TrapBits == 0x100 || TrapBits == 0x500;
+  case 2: // Compare: bare or /su, and no rounding letter.
+    return TrapBits == 0 || TrapBits == 0x500;
+  case 4: // Integer to floating: no underflow bit without inexact.
+    return TrapBits == 0 || TrapBits == 0x700;
+  default: // cvtst (class 5) and anything unclassified: none.
+    return TrapBits == 0;
+  }
+}
+
+// The u and v spellings produce the same function bits and differ only in which
+// instructions carry them: v names integer overflow and belongs to the
+// floating-to-integer converts alone, u names floating underflow and belongs to
+// everything else.  Writing one where the other belongs names a qualifier the
+// mnemonic does not have, which GNU as reports as an unknown opcode.
+inline bool fpTrapSpellingMatchesClass(unsigned TrapClass, unsigned TrapBits,
+                                       bool IsIntOverflowSpelling) {
+  if (!(TrapBits & 0x100))
+    return !IsIntOverflowSpelling;
+  return IsIntOverflowSpelling == (TrapClass == 3 || TrapClass == 6);
 }
 
 // The spelling of a trap qualifier from its function bits.  The v forms differ

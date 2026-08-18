@@ -40,6 +40,45 @@
 	ldq $1, x($29) !
 # CHECK: [[#@LINE-1]]:18: error: expected relocation name
 
+## A floating-point qualifier suffix: the '/' has to be followed by one, and
+## only an instruction with a trap/rounding field can carry one at all.
+	addt/ $f1, $f2, $f3
+# CHECK: [[#@LINE-1]]:6: error: expected qualifier after '/'
+	addq/su $1, $2, $3
+# CHECK: [[#@LINE-1]]:2: error: instruction does not take a floating-point qualifier
+
+## Nor a combination its own mnemonic does not define.  The function field has
+## room for spellings no instruction has, and merging one in produces a word
+## that is reserved -- or, for cvtst, one whose residual bits are cvtts, so it
+## reads back as a real instruction converting the other way.  GNU as reports
+## every one of these as an unknown opcode.
+	cvtst/u $f1, $f2
+# CHECK: [[#@LINE-1]]:2: error: invalid floating-point qualifier for this instruction
+	cvtst/su $f1, $f2
+# CHECK: [[#@LINE-1]]:2: error: invalid floating-point qualifier for this instruction
+	cvtst/c $f1, $f2
+# CHECK: [[#@LINE-1]]:2: error: invalid floating-point qualifier for this instruction
+## A compare takes the bare form or /su and nothing else -- no rounding letter,
+## no underflow bit of its own.
+	cmpteq/c $f1, $f2, $f3
+# CHECK: [[#@LINE-1]]:2: error: invalid floating-point qualifier for this instruction
+	cmpteq/u $f1, $f2, $f3
+# CHECK: [[#@LINE-1]]:2: error: invalid floating-point qualifier for this instruction
+	cmpteq/sui $f1, $f2, $f3
+# CHECK: [[#@LINE-1]]:2: error: invalid floating-point qualifier for this instruction
+## An integer-to-floating convert has no underflow bit without inexact.
+	cvtqt/u $f1, $f2
+# CHECK: [[#@LINE-1]]:2: error: invalid floating-point qualifier for this instruction
+	cvtqt/su $f1, $f2
+# CHECK: [[#@LINE-1]]:2: error: invalid floating-point qualifier for this instruction
+## v is the integer-overflow spelling and belongs to the floating-to-integer
+## converts alone; u is everything else's.  They encode the same bits, so only
+## the spelling tells them apart.
+	addt/sv $f1, $f2, $f3
+# CHECK: [[#@LINE-1]]:2: error: invalid floating-point qualifier for this instruction
+	cvttq/su $f1, $f2
+# CHECK: [[#@LINE-1]]:2: error: invalid floating-point qualifier for this instruction
+
 .endif
 
 ## The same fields filled in at layout time by a fixup rather than written
