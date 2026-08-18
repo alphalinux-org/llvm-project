@@ -329,8 +329,16 @@ public:
   bool visitEdge(LinkGraph &G, Block *B, Edge &E) {
     if (E.getKind() != RequestGOTAndTransformToGPRel16)
       return false;
+    // The entry has to hold the target plus the addend, and the edge is then
+    // just the displacement of that entry from gp.  An assembler turns a
+    // reference to a local symbol into a section symbol and an addend, so
+    // !literal routinely names sym+N; leaving the addend on the edge would add
+    // it to the displacement instead, indexing off the GOT slot as though the
+    // slot were the object.  lld keys its entries on the addend for this
+    // reason, and errors when a preemptible symbol needs one.
+    E.setTarget(getEntryForTargetAndAddend(G, E.getTarget(), E.getAddend()));
+    E.setAddend(0);
     E.setKind(GPRel16);
-    E.setTarget(getEntryForTarget(G, E.getTarget()));
     return true;
   }
 
@@ -339,6 +347,24 @@ public:
   }
 
 private:
+  // Entries for a nonzero addend are kept here rather than in TableManager,
+  // whose map is keyed on the target name alone.
+  Symbol &getEntryForTargetAndAddend(LinkGraph &G, Symbol &Target,
+                                     int64_t Addend) {
+    if (Addend == 0)
+      return getEntryForTarget(G, Target);
+    auto Key = std::make_pair(Target.getName(), Addend);
+    auto It = AddendEntries.find(Key);
+    if (It == AddendEntries.end())
+      It = AddendEntries
+               .insert({Key, &createAnonymousPointer(G, getGOTSection(G),
+                                                     &Target, Addend)})
+               .first;
+    return *It->second;
+  }
+
+  DenseMap<std::pair<orc::SymbolStringPtr, int64_t>, Symbol *> AddendEntries;
+
   Section &getGOTSection(LinkGraph &G) {
     if (!GOTSection)
       GOTSection = &G.createSection(getSectionName(),
