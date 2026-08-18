@@ -102,7 +102,14 @@ ABIArgInfo AlphaABIInfo::classifyReturnType(QualType Ty) const {
 ABIArgInfo AlphaABIInfo::classifyArgumentType(QualType Ty) const {
   Ty = useFirstFieldIfTransparentUnion(Ty);
 
-  // long double is passed by an invisible reference to a caller-made copy.
+  // long double is passed by an invisible reference to a caller-made copy,
+  // matching gcc's alpha_pass_by_reference for TFmode and TCmode.  byval is how
+  // that is spelled here: the Alpha calling convention gives such an argument
+  // one register holding the address of the copy, not the 16 bytes themselves,
+  // so the arguments after it are unaffected.  It also tells
+  // IsEligibleForTailCallOptimization to refuse the call, which matters --
+  // the epilogue runs before the jump, leaving the copy below the stack
+  // pointer by the time the callee reads it.
   if (isXFloating(getContext(), Ty))
     return getNaturalAlignIndirect(Ty, getDataLayout().getAllocaAddrSpace(),
                                    /*ByVal=*/true);
@@ -172,6 +179,44 @@ RValue AlphaABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
   Address BaseAddr = Builder.CreateStructGEP(VAListAddr, 0, "ap.base.addr");
   Address OffsetAddr = Builder.CreateStructGEP(VAListAddr, 1, "ap.offset.addr");
   llvm::Value *Base = Builder.CreateLoad(BaseAddr, "ap.base");
+
+  // Take one slot as SlotQTy and advance past it.  A slot is always 8 bytes,
+  // even for a float.
+  auto emitSlot = [&](QualType SlotQTy) -> Address {
+    llvm::Value *Off = Builder.CreateLoad(OffsetAddr, "ap.offset");
+    llvm::Value *Eff = Off;
+    if (SlotQTy->isRealFloatingType()) {
+      llvm::Value *InRegs = Builder.CreateICmpULT(
+          Off, llvm::ConstantInt::get(CGF.Int32Ty, 48), "ap.in.regs");
+      Eff = Builder.CreateSelect(
+          InRegs,
+          Builder.CreateSub(Off, llvm::ConstantInt::get(CGF.Int32Ty, 48)), Off,
+          "ap.eff.offset");
+    }
+    llvm::Value *Cur = Builder.CreateGEP(
+        CGF.Int8Ty, Base, Builder.CreateSExt(Eff, CGF.Int64Ty), "ap.cur");
+    Builder.CreateStore(
+        Builder.CreateAdd(Off, llvm::ConstantInt::get(CGF.Int32Ty, 8),
+                          "ap.next"),
+        OffsetAddr);
+    return Address(Cur, CGF.ConvertTypeForMem(SlotQTy), SlotSize);
+  };
+
+  // A _Complex float or _Complex double is passed as its two parts in two
+  // consecutive floating-point argument registers, so each part is fetched the
+  // way a scalar of the element type would be, bias included.  Reading the
+  // pair as one 16-byte object would take it from the integer save area
+  // instead.  gcc's alpha_gimplify_va_arg_1 recurses on the element type twice
+  // for the same reason.
+  if (!IsIndirect)
+    if (const auto *CT = Ty->getAs<ComplexType>())
+      if (CT->getElementType()->isRealFloatingType()) {
+        QualType ET = CT->getElementType();
+        llvm::Value *Real = Builder.CreateLoad(emitSlot(ET), "ap.real");
+        llvm::Value *Imag = Builder.CreateLoad(emitSlot(ET), "ap.imag");
+        return RValue::getComplex(Real, Imag);
+      }
+
   llvm::Value *Offset = Builder.CreateLoad(OffsetAddr, "ap.offset");
 
   // Bias the address (but not the stored offset) into the floating-point save

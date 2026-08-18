@@ -85,3 +85,40 @@ long double test_long_double(int n, ...) {
   __builtin_va_end(ap);
   return r;
 }
+
+// A _Complex float or _Complex double is passed as its two parts in two
+// consecutive floating-point argument registers, so va_arg has to fetch each
+// part the way a scalar of the element type would be fetched -- including the
+// bias into the floating-point save area 48 bytes below __base.  Reading the
+// pair as one 16-byte object takes it from the integer save area instead, which
+// on alpha faults rather than merely returning the wrong number.  gcc's
+// alpha_gimplify_va_arg_1 recurses on the element type twice for this reason.
+// CHECK-LABEL: define {{.*}}@test_complex
+// CHECK: %ap.offset = load i32, ptr %ap.offset.addr
+// CHECK: %ap.in.regs = icmp ult i32 %ap.offset, 48
+// CHECK: %ap.eff.offset = select i1 %ap.in.regs,
+// CHECK: %ap.real = load double, ptr %ap.cur
+// CHECK: %ap.offset{{[0-9]*}} = load i32, ptr %ap.offset.addr
+// CHECK: %ap.in.regs{{[0-9]*}} = icmp ult i32 %ap.offset{{[0-9]*}}, 48
+// CHECK: %ap.imag = load double, ptr %ap.cur{{[0-9]*}}
+_Complex double test_complex(int n, ...) {
+  __builtin_va_list ap;
+  __builtin_va_start(ap, n);
+  _Complex double r = __builtin_va_arg(ap, _Complex double);
+  __builtin_va_end(ap);
+  return r;
+}
+
+// __int128 is passed as two consecutive slots, like any 16-byte aggregate, so
+// va_arg reads it in place and advances the offset by 16.  Nothing covered it:
+// every other case here is one slot or an aggregate read with memcpy.
+// CHECK-LABEL: define {{.*}}@test_int128
+// CHECK: %ap.offset = load i32, ptr %ap.offset.addr
+// CHECK: %ap.next = add i32 %ap.offset, 16
+__int128 test_int128(int n, ...) {
+  __builtin_va_list ap;
+  __builtin_va_start(ap, n);
+  __int128 r = __builtin_va_arg(ap, __int128);
+  __builtin_va_end(ap);
+  return r;
+}
