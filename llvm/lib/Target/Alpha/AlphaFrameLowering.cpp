@@ -105,12 +105,10 @@ void AlphaFrameLowering::determineCalleeSaves(MachineFunction &MF,
     MF.getInfo<AlphaMachineFunctionInfo>()->setUsesGP();
 }
 
-// Re-establish $29 at the top of every landing pad.  The unwinder jumps
-// straight to the pad, so the ldgp that follows the invoke's jsr is never
-// executed on the unwind path and $29 arrives holding the unwinder's own
-// global pointer; the first thing a pad does is load a personality routine
-// through it.  The reload must come before anything else in the block but
-// after the label the LSDA points at, or the unwinder lands past it.
+// Re-establish $29 at the top of every landing pad; see LDGPself in
+// AlphaInstrInfo.td for why one is needed.  The reload must come before
+// anything else in the block but after the label the LSDA points at, or the
+// unwinder lands past it.
 static void emitEHPadGPReloads(MachineFunction &MF, const AlphaInstrInfo &TII) {
   for (MachineBasicBlock &MBB : MF) {
     if (!MBB.isEHPad())

@@ -40,8 +40,7 @@ uint16_t ELF::convertArchNameToEMachine(StringRef Arch) {
       .Case("rh32", EM_RH32)
       .Case("rce", EM_RCE)
       .Case("arm", EM_ARM)
-      // EM_ALPHA_STD (41) is the standards-assigned value; every real Alpha
-      // object uses EM_ALPHA (0x9026), so plain "alpha" means that one.
+      // Plain "alpha" means the value real objects use; see EM_ALPHA in ELF.h.
       .Case("alpha_std", EM_ALPHA_STD)
       .Case("alpha", EM_ALPHA)
       .Case("sh", EM_SH)

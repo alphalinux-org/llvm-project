@@ -1979,8 +1979,7 @@ def : InstAlias<"negt $src, $dst", (SUBT FPRC:$dst, F31, FPRC:$src)>;
 // __builtin_alpha_umulh reuses the umulh instruction (also the mulhu pattern).
 def : Pat<(int_alpha_umulh i64:$a, i64:$b), (UMULH GPRC:$a, GPRC:$b)>;
 
-// rpcc reads the process cycle counter into Ra (Rb is $31).  It touches no
-// memory, but its result changes over time, so it has a side effect and stays
+// rpcc reads the process cycle counter into Ra (Rb is $31), so it stays
 // outside the side-effect-free block above.
 let hasSideEffects = 1, mayLoad = 0, mayStore = 0 in
 def RPCC : AlphaInst<(outs GPRC:$Ra), (ins), "rpcc $Ra",

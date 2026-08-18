@@ -18,7 +18,7 @@
 #define GPR_OFFSET(idx) ((idx) * 8)
 #define GPR_SIZE (33 * 8)
 // The floating-point note holds $f0 through $f30 and then the control register
-// in the slot for $f31, which reads as zero.
+// in the slot for $f31.
 #define FPR_OFFSET(idx) (GPR_SIZE + (idx) * 8)
 
 // The DWARF numbering (which is also GCC's DEBUGGER_REGNO) gives 0-30 to the

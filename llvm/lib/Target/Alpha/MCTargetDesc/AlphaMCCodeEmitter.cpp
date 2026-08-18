@@ -344,9 +344,7 @@ void AlphaMCCodeEmitter::encodeInstruction(const MCInst &MI,
     // ldgp $29, 0($27): establish the GP from the procedure value.
     return emitLdgp(Alpha::R27, CB, Fixups, STI);
   case Alpha::LDGPself:
-    // br $29, .+4 followed by an ldgp reload from the address it just wrote:
-    // establish the GP at a landing pad, which the unwinder enters with no
-    // register holding anything the reload could be based on.
+    // br $29, .+4 followed by an ldgp reload from the address it just wrote.
     support::endian::write<uint32_t>(CB, INSN_BR_GP, llvm::endianness::little);
     return emitLdgp(Alpha::R29, CB, Fixups, STI);
   case Alpha::JSR:
