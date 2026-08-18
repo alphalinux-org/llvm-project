@@ -19,6 +19,8 @@ AlphaMCAsmInfo::AlphaMCAsmInfo(const Triple &TT, const MCTargetOptions &Options)
   CalleeSaveStackSlotSize = 8;
   IsLittleEndian = true;
   CommentString = "#";
+  // `.align N` aligns to a 2^N boundary, matching GNU as on Alpha.
+  AlignmentIsInBytes = false;
   Data64bitsDirective = "\t.quad\t";
   GlobalDirective = "\t.globl\t";
   UsesELFSectionDirectiveForBSS = true;
