@@ -520,12 +520,22 @@ def BICi : AlphaInst<(outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
 // the read and the write were separate instructions another byte's write could
 // land between them and be lost.  Selected by AlphaDAGToDAGISel::Select and
 // expanded by AlphaInstrInfo::expandPostRAPseudo.
-let mayLoad = 1, mayStore = 1, hasSideEffects = 0, Predicates = [NotBWX],
+let mayLoad = 1, mayStore = 1, hasSideEffects = 0, Predicates = [UnsafeBWStore],
     Constraints = "@earlyclobber $t1,@earlyclobber $t2" in {
 def RMW_STOREI8 : AlphaPseudo<(outs GPRC:$t1, GPRC:$t2),
                               (ins GPRC:$val, GPRC:$addr), "", []>;
 def RMW_STOREI16 : AlphaPseudo<(outs GPRC:$t1, GPRC:$t2),
                                (ins GPRC:$val, GPRC:$addr), "", []>;
+}
+
+// Lock-based byte/word store (-msafe-bwa): the read-modify-write is done with
+// an ldq_l/stq_c loop by a custom inserter.
+let usesCustomInserter = 1, mayLoad = 1, mayStore = 1,
+    Predicates = [SafeBWStore] in {
+def SAFE_STOREI8  : AlphaPseudo<(outs), (ins GPRC:$val, GPRC:$addr), "",
+                                [(truncstorei8 GPRC:$val, ADDRr:$addr)]>;
+def SAFE_STOREI16 : AlphaPseudo<(outs), (ins GPRC:$val, GPRC:$addr), "",
+                                [(truncstorei16 GPRC:$val, ADDRr:$addr)]>;
 }
 
 let mayStore = 1, hasSideEffects = 0 in {
