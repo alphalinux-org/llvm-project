@@ -84,6 +84,17 @@ class FForm<bits<6> opc, bits<11> func, dag outs, dag ins, string asmstr,
   let Inst{4-0} = Rc;
 }
 
+// Memory: Ra (25-21), then a 21-bit base+displacement field encoded by
+// getMemEncoding (Rb << 16 | disp16).
+class MForm<bits<6> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
+    : AlphaInst<outs, ins, asmstr, pattern> {
+  bits<5> Ra;
+  bits<21> addr;
+  let Opcode = opc;
+  let Inst{25-21} = Ra;
+  let Inst{20-0} = addr;
+}
+
 // Memory format with the destination/source in the Ra field and a base register
 // plus displacement written separately (lda/ldah and the relocated variants).
 class MFormD<bits<6> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
