@@ -280,6 +280,11 @@ def CVTTQ : AlphaInst<(outs FPRC:$Fc), (ins FPRC:$Fb), "cvttq/c $Fb, $Fc", []> {
 def LDA : MFormD<0x08, (outs GPRC:$Rc), (ins s16imm:$disp, GPRC:$Rb),
                     "lda $Rc, $disp($Rb)", []>;
 
+// Load effective address, with a base+displacement operand so a frame index can
+// be materialized (and rewritten by eliminateFrameIndex).
+let hasSideEffects = 0 in
+def LEA : MForm<0x08, (outs GPRC:$Rc), (ins memri:$addr), "lda $Rc, $addr", []>;
+
 // Load address high: `ldah $Rc, $disp($Rb)` computes
 // $Rc = $Rb + (sign_ext($disp) << 16).  Paired with lda it materializes a
 // 32-bit signed constant.
