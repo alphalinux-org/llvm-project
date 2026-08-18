@@ -84,7 +84,8 @@ void AlphaDAGToDAGISel::Select(SDNode *Node) {
     EVT MemVT = ST->getMemoryVT();
     bool IsByte = MemVT == MVT::i8;
     if (ST->isTruncatingStore() && (IsByte || MemVT == MVT::i16) &&
-        ST->getAlign() >= MemVT.getStoreSize() && !Subtarget->hasBWX()) {
+        ST->getAlign() >= MemVT.getStoreSize() && !Subtarget->hasBWX() &&
+        !Subtarget->hasSafeBWA()) {
       SDLoc DL(Node);
       MachineSDNode *Store = CurDAG->getMachineNode(
           IsByte ? Alpha::RMW_STOREI8 : Alpha::RMW_STOREI16, DL,
