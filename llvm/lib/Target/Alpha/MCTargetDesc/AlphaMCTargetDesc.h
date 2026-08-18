@@ -169,6 +169,24 @@ class MCTargetOptions;
 // The FPRoundMode selected by the subtarget's -mfp-rounding-mode features.
 unsigned getFPRoundMode(const MCSubtargetInfo &STI);
 
+namespace Alpha {
+// The mode argument the OTS X_floating routines take in $18, matching gcc's
+// alpha_compute_xfloating_mode_arg.  Round toward +inf is mode 3 and has no
+// -mfp-rounding-mode spelling, so it cannot be selected here.
+inline unsigned getOtsRoundModeArg(unsigned Mode) {
+  switch (Mode) {
+  case FPRoundChopped:
+    return 0;
+  case FPRoundMinus:
+    return 1;
+  case FPRoundDynamic:
+    return 4;
+  default:
+    return 2; // FPRoundNormal
+  }
+}
+} // namespace Alpha
+
 MCCodeEmitter *createAlphaMCCodeEmitter(const MCInstrInfo &MCII,
                                         MCContext &Ctx);
 MCAsmBackend *createAlphaAsmBackend(const Target &T, const MCSubtargetInfo &STI,
