@@ -124,6 +124,11 @@ enum NodeType : unsigned {
   // read-modify-write is safe against concurrent access to adjacent bytes.
   SAFE_USTORE,
 
+  // A call to an OTS (Operating System runtime) floating-point routine.  Like
+  // CALL (jsr $26,($27) + ldgp $29,0($26)), but with a standard caller-saved
+  // register mask so the scheduler knows the full clobber set.
+  OTS_CALL,
+
   LAST_MEMORY_OPCODE = SAFE_USTORE,
 };
 } // namespace AlphaISD
@@ -368,6 +373,10 @@ private:
   SDValue LowerVASTART(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerVAARG(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerVACOPY(SDValue Op, SelectionDAG &DAG) const;
+
+  // f128 (Alpha X_floating) lowering: replace f128 ops with OTS libcall
+  // sequences in PerformDAGCombine before type legalization runs.
+  SDValue LowerF128Binary(SDNode *N, DAGCombinerInfo &DCI) const;
 
   const AlphaSubtarget &Subtarget;
 };

@@ -210,6 +210,36 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
 
   setTargetDAGCombine(ISD::MUL);
 
+  // f128 (X_floating) operations are intercepted before type legalization and
+  // replaced with calls to the Alpha OTS runtime (_OtsAddX, _OtsCvtXQ, ...).
+  for (auto Op : {ISD::FADD,
+                  ISD::FSUB,
+                  ISD::FMUL,
+                  ISD::FDIV,
+                  ISD::STRICT_FADD,
+                  ISD::STRICT_FSUB,
+                  ISD::STRICT_FMUL,
+                  ISD::STRICT_FDIV,
+                  ISD::FP_EXTEND,
+                  ISD::FP_ROUND,
+                  ISD::STRICT_FP_EXTEND,
+                  ISD::STRICT_FP_ROUND,
+                  ISD::SINT_TO_FP,
+                  ISD::UINT_TO_FP,
+                  ISD::STRICT_SINT_TO_FP,
+                  ISD::STRICT_UINT_TO_FP,
+                  ISD::FP_TO_SINT,
+                  ISD::FP_TO_UINT,
+                  ISD::STRICT_FP_TO_SINT,
+                  ISD::STRICT_FP_TO_UINT,
+                  ISD::SETCC,
+                  ISD::STRICT_FSETCC,
+                  ISD::STRICT_FSETCCS,
+                  ISD::FNEG,
+                  ISD::FABS,
+                  ISD::FCOPYSIGN})
+    setTargetDAGCombine(Op);
+
   computeRegisterProperties(STI.getRegisterInfo());
 }
 
@@ -238,6 +268,24 @@ static unsigned mulSeqCost(uint64_t V) {
 // instead of the high-latency multiplier.
 SDValue AlphaTargetLowering::PerformDAGCombine(SDNode *N,
                                                DAGCombinerInfo &DCI) const {
+  // Intercept f128 ops before type legalization (SoftenFloat cannot handle the
+  // Alpha OTS ABI: extra round argument, $16/$17 result registers).
+  switch (N->getOpcode()) {
+  case ISD::FADD:
+  case ISD::STRICT_FADD:
+  case ISD::FSUB:
+  case ISD::STRICT_FSUB:
+  case ISD::FMUL:
+  case ISD::STRICT_FMUL:
+  case ISD::FDIV:
+  case ISD::STRICT_FDIV:
+    if (SDValue V = LowerF128Binary(N, DCI))
+      return V;
+    break;
+  default:
+    break;
+  }
+
   if (N->getOpcode() != ISD::MUL || N->getValueType(0) != MVT::i64)
     return SDValue();
   auto *C = dyn_cast<ConstantSDNode>(N->getOperand(1));
@@ -601,8 +649,14 @@ const char *AlphaTargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "AlphaISD::DTPREL_HI";
   case AlphaISD::DTPREL_LO:
     return "AlphaISD::DTPREL_LO";
+  case AlphaISD::LDQ_U:
+    return "AlphaISD::LDQ_U";
+  case AlphaISD::STQ_U:
+    return "AlphaISD::STQ_U";
   case AlphaISD::SAFE_USTORE:
     return "AlphaISD::SAFE_USTORE";
+  case AlphaISD::OTS_CALL:
+    return "AlphaISD::OTS_CALL";
   }
   return nullptr;
 }
@@ -865,6 +919,165 @@ SDValue AlphaTargetLowering::LowerMULHS(SDValue Op, SelectionDAG &DAG) const {
       DAG.getNode(ISD::AND, DL, VT, DAG.getNode(ISD::SRA, DL, VT, B, Sh), A);
   Hi = DAG.getNode(ISD::SUB, DL, VT, Hi, TA);
   return DAG.getNode(ISD::SUB, DL, VT, Hi, TB);
+}
+
+// Spill a f128 value to a 16-byte stack slot and return its {lo, hi} i64
+// halves.  Chain guards the store ordering.
+static std::pair<SDValue, SDValue> splitF128(SelectionDAG &DAG, const SDLoc &DL,
+                                             MachineFunction &MF, SDValue Chain,
+                                             SDValue Val) {
+  int FI = MF.getFrameInfo().CreateStackObject(16, Align(16), false);
+  SDValue Slot = DAG.getFrameIndex(FI, MVT::i64);
+  SDValue Store =
+      DAG.getStore(Chain, DL, Val, Slot,
+                   MachinePointerInfo::getFixedStack(MF, FI), Align(16));
+  SDValue Lo =
+      DAG.getLoad(MVT::i64, DL, Store, Slot,
+                  MachinePointerInfo::getFixedStack(MF, FI), Align(16));
+  SDValue HiPtr = DAG.getNode(ISD::ADD, DL, MVT::i64, Slot,
+                              DAG.getConstant(8, DL, MVT::i64));
+  SDValue Hi =
+      DAG.getLoad(MVT::i64, DL, Store, HiPtr,
+                  MachinePointerInfo::getFixedStack(MF, FI, 8), Align(8));
+  return {Lo, Hi};
+}
+
+// Pack {lo, hi} i64 halves into a 16-byte stack slot and return a f128 load
+// from it.
+static SDValue joinF128(SelectionDAG &DAG, const SDLoc &DL, MachineFunction &MF,
+                        SDValue Chain, SDValue Lo, SDValue Hi) {
+  int FI = MF.getFrameInfo().CreateStackObject(16, Align(16), false);
+  SDValue Slot = DAG.getFrameIndex(FI, MVT::i64);
+  SDValue StoreLo =
+      DAG.getStore(Chain, DL, Lo, Slot,
+                   MachinePointerInfo::getFixedStack(MF, FI), Align(16));
+  SDValue HiPtr = DAG.getNode(ISD::ADD, DL, MVT::i64, Slot,
+                              DAG.getConstant(8, DL, MVT::i64));
+  SDValue StoreHi =
+      DAG.getStore(StoreLo, DL, Hi, HiPtr,
+                   MachinePointerInfo::getFixedStack(MF, FI, 8), Align(8));
+  return DAG.getLoad(MVT::f128, DL, StoreHi, Slot,
+                     MachinePointerInfo::getFixedStack(MF, FI), Align(16));
+}
+
+// Emit an OTS libcall.  Args are already copied into physical registers; this
+// emits OTS_CALL with a full caller-saved register mask.
+static SDValue emitOtsCall(SelectionDAG &DAG, const SDLoc &DL,
+                           const AlphaSubtarget &Subtarget, SDValue Chain,
+                           ArrayRef<SDValue> UseRegs, SDValue Glue) {
+  MachineFunction &MF = DAG.getMachineFunction();
+  const uint32_t *Mask =
+      Subtarget.getRegisterInfo()->getCallPreservedMask(MF, CallingConv::C);
+
+  SmallVector<SDValue, 12> Ops;
+  Ops.push_back(Chain);
+  for (SDValue R : UseRegs)
+    Ops.push_back(R);
+  Ops.push_back(DAG.getRegisterMask(Mask));
+  Ops.push_back(Glue);
+
+  return DAG.getNode(AlphaISD::OTS_CALL, DL, {MVT::Other, MVT::Glue}, Ops);
+}
+
+SDValue AlphaTargetLowering::LowerF128Binary(SDNode *N,
+                                             DAGCombinerInfo &DCI) const {
+  // Only intercept at the pre-legalize phase before SoftenFloat can see f128.
+  if (!DCI.isBeforeLegalize())
+    return SDValue();
+
+  bool IsStrict = N->isStrictFPOpcode();
+  if (N->getValueType(0) != MVT::f128)
+    return SDValue();
+
+  SelectionDAG &DAG = DCI.DAG;
+  SDLoc DL(N);
+  MachineFunction &MF = DAG.getMachineFunction();
+  MF.getInfo<AlphaMachineFunctionInfo>()->setUsesGP();
+
+  SDValue InChain = IsStrict ? N->getOperand(0) : DAG.getEntryNode();
+  SDValue A = IsStrict ? N->getOperand(1) : N->getOperand(0);
+  SDValue B = IsStrict ? N->getOperand(2) : N->getOperand(1);
+
+  const char *Name;
+  switch (N->getOpcode()) {
+  case ISD::FADD:
+  case ISD::STRICT_FADD:
+    Name = "_OtsAddX";
+    break;
+  case ISD::FSUB:
+  case ISD::STRICT_FSUB:
+    Name = "_OtsSubX";
+    break;
+  case ISD::FMUL:
+  case ISD::STRICT_FMUL:
+    Name = "_OtsMulX";
+    break;
+  case ISD::FDIV:
+  case ISD::STRICT_FDIV:
+    Name = "_OtsDivX";
+    break;
+  default:
+    llvm_unreachable("unexpected f128 binary op");
+  }
+
+  auto [ALo, AHi] = splitF128(DAG, DL, MF, DAG.getEntryNode(), A);
+  auto [BLo, BHi] = splitF128(DAG, DL, MF, DAG.getEntryNode(), B);
+
+  // Merge split-load chains with any incoming strict-FP chain.
+  SDValue Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other,
+                              {InChain, ALo.getValue(1), AHi.getValue(1),
+                               BLo.getValue(1), BHi.getValue(1)});
+
+  SDValue Pv = DAG.getNode(AlphaISD::LITERAL, DL, MVT::i64,
+                           DAG.getTargetExternalSymbol(Name, MVT::i64));
+
+  SDValue Glue;
+  Chain = DAG.getCopyToReg(Chain, DL, Alpha::R16, ALo, Glue);
+  Glue = Chain.getValue(1);
+  Chain = DAG.getCopyToReg(Chain, DL, Alpha::R17, AHi, Glue);
+  Glue = Chain.getValue(1);
+  Chain = DAG.getCopyToReg(Chain, DL, Alpha::R18, BLo, Glue);
+  Glue = Chain.getValue(1);
+  Chain = DAG.getCopyToReg(Chain, DL, Alpha::R19, BHi, Glue);
+  Glue = Chain.getValue(1);
+  // _OtsAdd/Sub/Mul/DivX take the rounding mode in $20, and it is the ambient
+  // one: gcc's alpha_emit_xfloating_arith passes
+  // alpha_compute_xfloating_mode_arg (code, alpha_fprm) here, so
+  // -mfp-rounding-mode has to reach f128 arithmetic as well as f128 conversion.
+  // The 0x10000 bit gcc adds is for a narrowing conversion only.
+  Chain = DAG.getCopyToReg(
+      Chain, DL, Alpha::R20,
+      DAG.getConstant(Alpha::getOtsRoundModeArg(getFPRoundMode(Subtarget)), DL,
+                      MVT::i64),
+      Glue);
+  Glue = Chain.getValue(1);
+  Chain = DAG.getCopyToReg(Chain, DL, Alpha::R27, Pv, Glue);
+  Glue = Chain.getValue(1);
+
+  Chain = emitOtsCall(DAG, DL, Subtarget, Chain,
+                      {DAG.getRegister(Alpha::R16, MVT::i64),
+                       DAG.getRegister(Alpha::R17, MVT::i64),
+                       DAG.getRegister(Alpha::R18, MVT::i64),
+                       DAG.getRegister(Alpha::R19, MVT::i64),
+                       DAG.getRegister(Alpha::R20, MVT::i64),
+                       DAG.getRegister(Alpha::R27, MVT::i64)},
+                      Glue);
+  Glue = Chain.getValue(1);
+
+  SDValue ResLo = DAG.getCopyFromReg(Chain, DL, Alpha::R16, MVT::i64, Glue);
+  Chain = ResLo.getValue(1);
+  Glue = ResLo.getValue(2);
+  SDValue ResHi = DAG.getCopyFromReg(Chain, DL, Alpha::R17, MVT::i64, Glue);
+  Chain = ResHi.getValue(1);
+
+  SDValue Result = joinF128(DAG, DL, MF, Chain, ResLo, ResHi);
+
+  if (IsStrict) {
+    // Strict nodes have two results: (value, chain).  Replace both.
+    DCI.CombineTo(N, Result, Result.getValue(1));
+    return SDValue(N, 0);
+  }
+  return Result;
 }
 
 SDValue AlphaTargetLowering::LowerDivRem(SDValue Op, SelectionDAG &DAG) const {

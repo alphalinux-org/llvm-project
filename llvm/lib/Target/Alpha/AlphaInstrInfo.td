@@ -94,6 +94,9 @@ def AlphaCallTlsldm : SDNode<"AlphaISD::CALL_TLSLDM", SDTNone,
 def AlphaDivCall : SDNode<"AlphaISD::DIVCALL", SDTNone,
                           [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
                            SDNPVariadic]>;
+def AlphaOtsCall : SDNode<"AlphaISD::OTS_CALL", SDTNone,
+                          [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
+                           SDNPVariadic]>;
 
 // GP-relative address materialization (small/large-data local symbols such as
 // constant-pool entries): the high 16 bits via ldah !gprelhigh and the low 16
@@ -1110,6 +1113,22 @@ let isCall = 1, Uses = [R24, R25, R27],
     Defs = [R23, R24, R25, R27, R28], isCodeGenOnly = 1 in
 def DIVCALL : MbrForm<0b01, (outs), (ins), "jsr $$23, ($$27)", [(AlphaDivCall)]> {
   let Ra = 23;
+  let Rb = 27;
+}
+
+// OTS floating-point library call: a standard jsr $26,($27) + ldgp reload,
+// used for _OtsAddX/_OtsSubX/_OtsMulX/_OtsDivX and the other X_floating
+// routines.  Arguments are already in $16-$20/$f16 and the callee-saved mask
+// covers everything the standard C ABI requires, so no CALLSEQ is needed.
+// The argument registers are not listed here: the node is variadic and carries
+// the ones a given call actually sets, so naming a fixed set would both repeat
+// those and claim registers the call never wrote.
+// Size is 4 (jsr) + 8 (the ldgp expansion, see emitLdgp).
+let isCall = 1, Defs = [R26, R29], isCodeGenOnly = 1, Size = 12 in
+def OTS_CALL : MbrForm<0b01, (outs), (ins),
+                       "jsr $$26, ($$27)\n\tldgp $$29, 0($$26)",
+                       [(AlphaOtsCall)]> {
+  let Ra = 26;
   let Rb = 27;
 }
 

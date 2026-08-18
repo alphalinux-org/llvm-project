@@ -192,6 +192,7 @@ multiclass AlphaInstRW {
   def : InstRW<[Wr_JSR], (instrs CALLbsr, TCRETURNbr)>;
   def : InstRW<[Wr_IStore, Rd_StData], (instrs SAFE_USTORE)>;
   def : InstRW<[Wr_Misc], (instrs WRUNIQ)>;
+  def : InstRW<[Wr_JSR], (instrs OTS_CALL)>;
 }
 
 //===----------------------------------------------------------------------===//

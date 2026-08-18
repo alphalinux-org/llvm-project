@@ -276,7 +276,8 @@ void AlphaMCCodeEmitter::encodeInstruction(const MCInst &MI,
   case Alpha::LDGP:
     // ldgp $29, 0($27): establish the GP from the procedure value.
     return emitLdgp(Alpha::R27, CB, Fixups, STI);
-  case Alpha::JSR: {
+  case Alpha::JSR:
+  case Alpha::OTS_CALL: {
     // jsr $26, ($27) followed by an ldgp reload from the return address.
     uint32_t Bits = getBinaryCodeForInstr(MI, Fixups, STI);
     support::endian::write(CB, Bits, llvm::endianness::little);
