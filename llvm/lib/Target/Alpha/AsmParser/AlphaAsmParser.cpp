@@ -9,6 +9,8 @@
 #include "MCTargetDesc/AlphaFixupKinds.h"
 #include "MCTargetDesc/AlphaMCTargetDesc.h"
 #include "TargetInfo/AlphaTargetInfo.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/MC/MCContext.h"
@@ -142,6 +144,15 @@ public:
     else if (Kind == Immediate)
       Imm.Val = MCSpecifierExpr::create(Imm.Val, Spec, Ctx);
   }
+  // Same as applySpecifier but uses a caller-supplied expression as the base
+  // instead of the operand's current expression.  Used for !gpdisp!N pairs
+  // where the addend must be the distance from the ldah to the paired lda.
+  void applySpecifierWithExpr(unsigned Spec, const MCExpr *E, MCContext &Ctx) {
+    if (Kind == Memory)
+      Mem.Off = MCSpecifierExpr::create(E, Spec, Ctx);
+    else if (Kind == Immediate)
+      Imm.Val = MCSpecifierExpr::create(E, Spec, Ctx);
+  }
 
   static std::unique_ptr<AlphaOperand> createToken(StringRef Str, SMLoc S) {
     auto Op = std::make_unique<AlphaOperand>(Token);
@@ -184,6 +195,22 @@ class AlphaAsmParser : public MCTargetAsmParser {
   // The symbol named by the most recent `.ent`, whose st_other bits `.prologue`
   // sets.
   MCSymbol *CurEntSym = nullptr;
+
+  // State for paired !gpdisp!N annotations.
+  //
+  // Alpha assembly may write the ldah and lda halves of the GP setup sequence
+  // far apart with other instructions between them:
+  //   ldah $gp, 0($src)  !gpdisp!N   <- first occurrence
+  //   ... intervening instructions ...
+  //   lda  $gp, 0($gp)   !gpdisp!N   <- second occurrence
+  //
+  // The linker requires a single R_ALPHA_GPDISP on the ldah whose r_addend is
+  // the byte distance to the lda.  GpDispLdaLabels maps the sequence number N
+  // to a forward-reference MCSymbol that will be defined at the lda position.
+  // PendingPreInsnLabels holds symbols to define just before the next
+  // instruction is emitted (used to mark the ldah/lda positions).
+  DenseMap<unsigned, MCSymbol *> GpDispLdaLabels;
+  SmallVector<MCSymbol *, 2> PendingPreInsnLabels;
 
   // A floating-point qualifier written on the mnemonic, as MCInst flags, and
   // the mnemonic without it.  Set while parsing and consumed when matching:
@@ -379,8 +406,46 @@ ParseStatus AlphaAsmParser::parseDirective(AsmToken DirectiveID) {
     getParser().eatToEndOfStatement();
     return ParseStatus::Success;
   }
-  if (ID == ".frame" || ID == ".mask" || ID == ".fmask" || ID == ".usepv") {
+  if (ID == ".frame" || ID == ".mask" || ID == ".fmask") {
     getParser().eatToEndOfStatement();
+    return ParseStatus::Success;
+  }
+  // `.usepv sym, std|no` sets the STO_ALPHA_STD_GPLOAD / STO_ALPHA_NOPV bit on
+  // sym so the linker can optimize same-gp calls (R_ALPHA_BRSGP).  Used by
+  // hand-written assembly that defines functions without .ent/.prologue.
+  if (ID == ".usepv") {
+    const unsigned STO_ALPHA_NOPV = 0x80, STO_ALPHA_STD_GPLOAD = 0x88;
+    StringRef SymName;
+    if (getParser().parseIdentifier(SymName))
+      return Error(DirectiveID.getLoc(), "expected symbol name after .usepv");
+    if (getLexer().isNot(AsmToken::Comma))
+      return Error(getLexer().getLoc(), "expected ',' after symbol name");
+    getParser().Lex(); // ,
+    StringRef Mode;
+    if (getParser().parseIdentifier(Mode))
+      return Error(getLexer().getLoc(), "expected 'std' or 'no'");
+    unsigned Other;
+    if (Mode == "std")
+      Other = STO_ALPHA_STD_GPLOAD;
+    else if (Mode == "no")
+      Other = STO_ALPHA_NOPV;
+    else
+      return Error(getLexer().getLoc(), "unknown .usepv mode '" + Mode + "'");
+    MCSymbol *Sym = getContext().getOrCreateSymbol(SymName);
+    auto *SymELF = static_cast<MCSymbolELF *>(Sym);
+    SymELF->setOther((SymELF->getOther() & ~STO_ALPHA_STD_GPLOAD) | Other);
+    getParser().eatToEndOfStatement();
+    return ParseStatus::Success;
+  }
+  // `.gprel32 sym` emits a 32-bit GP-relative value (R_ALPHA_GPREL32).
+  if (ID == ".gprel32") {
+    const MCExpr *Expr;
+    if (getParser().parseExpression(Expr))
+      return ParseStatus::Failure;
+    getParser().eatToEndOfStatement();
+    const MCExpr *GPRel =
+        MCSpecifierExpr::create(Expr, Alpha::fixup_alpha_gprel32, getContext());
+    getStreamer().emitValue(GPRel, 4, DirectiveID.getLoc());
     return ParseStatus::Success;
   }
   return ParseStatus::NoMatch;
@@ -543,6 +608,7 @@ bool AlphaAsmParser::parseInstruction(ParseInstructionInfo &Info,
                         .Case("literal", Alpha::fixup_alpha_literal)
                         .Case("gprelhigh", Alpha::fixup_alpha_gprelhigh)
                         .Case("gprellow", Alpha::fixup_alpha_gprellow)
+                        .Case("gprel", Alpha::fixup_alpha_gprel16)
                         .Case("gpdisp", Alpha::fixup_alpha_gpdisp)
                         .Case("tprelhi", Alpha::fixup_alpha_tprelhi)
                         .Case("tprello", Alpha::fixup_alpha_tprello)
@@ -552,17 +618,50 @@ bool AlphaAsmParser::parseInstruction(ParseInstructionInfo &Info,
                         .Case("dtprelhi", Alpha::fixup_alpha_dtprelhi)
                         .Case("dtprello", Alpha::fixup_alpha_dtprello)
                         .Case("samegp", Alpha::fixup_alpha_brsgp)
+                        .Case("lituse_jsr", Alpha::fixup_alpha_lituse_jsr)
                         .Default(0);
     if (!Spec)
       return Error(getLexer().getLoc(), "unknown relocation name");
     getParser().Lex(); // name
-    // Ignore the optional !seq sequence number used to pair relocations.
+
+    // Parse the optional !seq sequence number used to pair !gpdisp relocations.
+    unsigned GpDispSeq = 0;
     if (getLexer().is(AsmToken::Exclaim)) {
       getParser().Lex(); // !
+      if (getLexer().is(AsmToken::Integer))
+        GpDispSeq = getLexer().getTok().getIntVal();
       getParser().Lex(); // number
     }
-    static_cast<AlphaOperand &>(*Operands.back())
-        .applySpecifier(Spec, getContext());
+
+    if (Spec == Alpha::fixup_alpha_gpdisp && GpDispSeq != 0) {
+      auto It = GpDispLdaLabels.find(GpDispSeq);
+      if (It == GpDispLdaLabels.end()) {
+        // First occurrence: ldah $gp, 0($src) !gpdisp!N
+        // The GPDISP relocation on the ldah must carry r_addend = distance to
+        // the paired lda.  Create a forward symbol for the lda position and a
+        // symbol to be defined at the ldah position (emitted before the ldah in
+        // matchAndEmitInstruction).  The fixup expression (lda_sym - ldah_sym)
+        // resolves to the byte distance after layout.
+        MCSymbol *LdaSym = getContext().createTempSymbol("gpdisp_lda");
+        MCSymbol *LdahSym = getContext().createTempSymbol("gpdisp_ldah");
+        GpDispLdaLabels[GpDispSeq] = LdaSym;
+        PendingPreInsnLabels.push_back(LdahSym);
+        const MCExpr *Diff = MCBinaryExpr::createSub(
+            MCSymbolRefExpr::create(LdaSym, getContext()),
+            MCSymbolRefExpr::create(LdahSym, getContext()), getContext());
+        static_cast<AlphaOperand &>(*Operands.back())
+            .applySpecifierWithExpr(Spec, Diff, getContext());
+      } else {
+        // Second occurrence: lda $gp, 0($gp) !gpdisp!N
+        // Define the forward symbol at this (lda) position and suppress the
+        // relocation -- the linker only needs the one on the ldah.
+        PendingPreInsnLabels.push_back(It->second);
+        GpDispLdaLabels.erase(It);
+      }
+    } else {
+      static_cast<AlphaOperand &>(*Operands.back())
+          .applySpecifier(Spec, getContext());
+    }
   }
 
   if (getLexer().isNot(AsmToken::EndOfStatement))
@@ -642,6 +741,14 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
                                              MCStreamer &Out,
                                              uint64_t &ErrorInfo,
                                              bool MatchingInlineAsm) {
+  // Emit any symbols that were stashed by parseInstruction to be defined just
+  // before this instruction.  Used by !gpdisp!N pair handling to mark the ldah
+  // and lda positions so the GPDISP fixup addend (lda_addr - ldah_addr) can
+  // be resolved at layout time.
+  for (MCSymbol *Sym : PendingPreInsnLabels)
+    Out.emitLabel(Sym);
+  PendingPreInsnLabels.clear();
+
   StringRef Mnemonic = static_cast<AlphaOperand &>(*Operands[0]).getToken();
 
   // ldgp $29, 0($base): expand to ldah/lda with a GPDISP relocation (addend 4)
