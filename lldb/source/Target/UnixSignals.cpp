@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "lldb/Target/UnixSignals.h"
+#include "Plugins/Process/Utility/AlphaLinuxSignals.h"
 #include "Plugins/Process/Utility/FreeBSDSignals.h"
 #include "Plugins/Process/Utility/LinuxSignals.h"
 #include "Plugins/Process/Utility/NetBSDSignals.h"
@@ -31,6 +32,10 @@ lldb::UnixSignalsSP UnixSignals::Create(const ArchSpec &arch) {
   const auto &triple = arch.GetTriple();
   switch (triple.getOS()) {
   case llvm::Triple::Linux:
+    // alpha keeps the OSF/1 signal numbering rather than the one the other
+    // Linux ports share.
+    if (triple.getArch() == llvm::Triple::alpha)
+      return std::make_shared<AlphaLinuxSignals>();
     return std::make_shared<LinuxSignals>();
   case llvm::Triple::FreeBSD:
     return std::make_shared<FreeBSDSignals>();
