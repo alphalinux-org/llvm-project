@@ -18,7 +18,9 @@ class LinuxSignals : public UnixSignals {
 public:
   LinuxSignals();
 
-private:
+protected:
+  /// Protected so a port that renumbers signals can build on this set; see
+  /// AlphaLinuxSignals.
   void Reset() override;
 };
 
