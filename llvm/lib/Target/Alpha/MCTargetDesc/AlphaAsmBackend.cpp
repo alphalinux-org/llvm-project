@@ -125,10 +125,21 @@ public:
   bool writeNopData(raw_ostream &OS, uint64_t Count,
                     const MCSubtargetInfo *STI) const override {
     OS.write_zeros(Count % 4);
-    // nop is `bis $31, $31, $31` (0x47ff041f).
-    for (uint64_t I = 0, E = Count / 4; I != E; ++I)
-      support::endian::write<uint32_t>(OS, 0x47ff041f,
+    // GNU as's alpha_handle_align fills a code-alignment gap with one unop
+    // (`ldq_u $31, 0($30)', 0x2ffe0000) if the number of words is odd, then
+    // repeats an eight-byte nop/unop pair.  The 21064 issues that pair in one
+    // cycle, which a run of unops does not, so the pattern is not cosmetic --
+    // and a uniform run of unops disagrees with GNU as for every odd-word gap.
+    uint64_t Words = Count / 4;
+    if (Words & 1) {
+      support::endian::write<uint32_t>(OS, 0x2ffe0000,
                                        llvm::endianness::little);
+      --Words;
+    }
+    for (uint64_t I = 0; I != Words; I += 2) {
+      support::endian::write<uint32_t>(OS, 0x47ff041f, llvm::endianness::little);
+      support::endian::write<uint32_t>(OS, 0x2ffe0000, llvm::endianness::little);
+    }
     return true;
   }
 
