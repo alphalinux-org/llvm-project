@@ -52,6 +52,10 @@ public:
     LongDoubleWidth = LongDoubleAlign = 128;
     LongDoubleFormat = &llvm::APFloat::IEEEquad();
 
+    // ldl_l/stl_c and ldq_l/stq_c give lock-free 32- and 64-bit atomics.
+    MaxAtomicPromoteWidth = 128;
+    MaxAtomicInlineWidth = 64;
+
     // 16-byte stack alignment (OSF/ELF ABI).
     SuitableAlign = 128;
 
