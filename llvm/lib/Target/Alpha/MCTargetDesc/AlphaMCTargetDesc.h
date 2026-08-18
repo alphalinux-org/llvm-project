@@ -206,6 +206,22 @@ struct FieldOps {
 // address, so the architecture has no extbh/insbh/mskbh and the high forms are
 // zero for that width; no caller of a one-byte field reads them.
 FieldOps getFieldOps(unsigned Bytes);
+
+// The mode argument the OTS X_floating routines take in $18, matching gcc's
+// alpha_compute_xfloating_mode_arg.  Round toward +inf is mode 3 and has no
+// -mfp-rounding-mode spelling, so it cannot be selected here.
+inline unsigned getOtsRoundModeArg(unsigned Mode) {
+  switch (Mode) {
+  case FPRoundChopped:
+    return 0;
+  case FPRoundMinus:
+    return 1;
+  case FPRoundDynamic:
+    return 4;
+  default:
+    return 2; // FPRoundNormal
+  }
+}
 } // namespace Alpha
 
 MCCodeEmitter *createAlphaMCCodeEmitter(const MCInstrInfo &MCII,
