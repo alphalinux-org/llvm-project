@@ -32,13 +32,25 @@ void AlphaInstPrinter::printInst(const MCInst *MI, uint64_t Address,
   // qualifiers into its mnemonic (addt -> addt/su, addt/sud with dynamic
   // rounding, cvttq/c -> cvttq/svc).
   unsigned TrapClass = MII.get(MI->getOpcode()).TSFlags & 0x7;
-  std::string Suffix =
-      Alpha::getFPTrapSuffix(TrapClass, STI.hasFeature(Alpha::FeatureIEEE),
-                             STI.hasFeature(Alpha::FeatureIEEEInexact),
-                             STI.hasFeature(Alpha::FeatureFPTrapU))
-          .str();
+  std::string Suffix;
+  unsigned RM = Alpha::FPRoundNormal;
+  if (Alpha::hasFPQual(MI->getFlags())) {
+    // What was written, or what the bits say.  Printing anything else would
+    // contradict the encoding this instruction already has.
+    Suffix = Alpha::getFPTrapSpelling(Alpha::fpQualTrapBits(MI->getFlags()),
+                                      /*IsIntOverflow=*/TrapClass == 3)
+                 .str();
+    RM = Alpha::fpQualRoundMode(MI->getFlags());
+  } else {
+    Suffix =
+        Alpha::getFPTrapSuffix(TrapClass, STI.hasFeature(Alpha::FeatureIEEE),
+                               STI.hasFeature(Alpha::FeatureIEEEInexact),
+                               STI.hasFeature(Alpha::FeatureFPTrapU))
+            .str();
+    RM = getFPRoundMode(STI);
+  }
   if (Alpha::fpRounds(TrapClass))
-    Suffix += Alpha::getFPRoundSuffix(getFPRoundMode(STI)).str();
+    Suffix += Alpha::getFPRoundSuffix(RM).str();
   if (!Suffix.empty()) {
     std::string Buf;
     raw_string_ostream SS(Buf);

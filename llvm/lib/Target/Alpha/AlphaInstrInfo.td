@@ -690,8 +690,14 @@ def CVTQT_D : FP_r<0x16, 0x0fe, "cvtqt/d", []>;
 // cvttq/c: convert T-floating to quadword with chopped (round-toward-zero)
 // rounding, matching C's fp-to-integer truncation semantics.  Float-to-int
 // takes the sv / svi qualifier.
-let TrapClass = 3 in
+let TrapClass = 3 in {
 def CVTTQ : FP_r<0x16, 0x02f, "cvttq/c", []>;
+// The same conversion rounding to nearest, which hand-written assembly may ask
+// for and GNU as accepts.  Codegen never selects it -- C truncates -- but the
+// assembler has to be able to say what the architecture can encode, and the
+// disassembler to read it back.
+def CVTTQn : FP_r<0x16, 0x0af, "cvttq", []>;
+}
 
 // cvttq/svid: float-to-integer with software completion, overflow, inexact,
 // and dynamic rounding mode.  Used in hand-written asm under -mieee-with-inexact

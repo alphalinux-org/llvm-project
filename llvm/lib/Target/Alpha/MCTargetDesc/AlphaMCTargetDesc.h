@@ -114,6 +114,68 @@ class MCTargetOptions;
 unsigned getFPRoundMode(const MCSubtargetInfo &STI);
 
 namespace Alpha {
+// The qualifier a floating-point instruction carries, held in the MCInst's
+// flags.  An instruction that came from an assembly file or from the
+// disassembler knows its own qualifier -- whatever was written, or whatever the
+// bits say -- and Present marks that.  One built by codegen does not, and the
+// encoder and printer then derive it from the subtarget, which is where the
+// -mieee and -mfp-rounding-mode policy belongs.
+enum : unsigned {
+  FPQualTrapMask = 0x7ff,
+  FPQualRoundShift = 11,
+  FPQualRoundMask = 0x3,
+  FPQualPresent = 1u << 13,
+};
+
+inline unsigned encodeFPQual(unsigned TrapBits, unsigned RoundMode) {
+  return FPQualPresent | (TrapBits & FPQualTrapMask) |
+         ((RoundMode & FPQualRoundMask) << FPQualRoundShift);
+}
+inline bool hasFPQual(unsigned Flags) { return Flags & FPQualPresent; }
+inline unsigned fpQualTrapBits(unsigned Flags) {
+  return Flags & FPQualTrapMask;
+}
+inline unsigned fpQualRoundMode(unsigned Flags) {
+  return (Flags >> FPQualRoundShift) & FPQualRoundMask;
+}
+
+// The trap qualifier's contribution to the function field, by spelling.
+inline unsigned getFPTrapFuncBitsForSpelling(StringRef S, bool &Ok) {
+  Ok = true;
+  if (S.empty())
+    return 0;
+  if (S == "s")
+    return 0x400;
+  if (S == "u" || S == "v")
+    return 0x100;
+  if (S == "su" || S == "sv")
+    return 0x500;
+  if (S == "sui" || S == "svi")
+    return 0x700;
+  Ok = false;
+  return 0;
+}
+
+// The spelling of a trap qualifier from its function bits.  The v forms differ
+// from the u forms only in which instruction carries them, so the caller says
+// which family it wants.
+inline StringRef getFPTrapSpelling(unsigned Bits, bool IsIntOverflow) {
+  switch (Bits) {
+  case 0x400:
+    return "s";
+  case 0x100:
+    return IsIntOverflow ? "v" : "u";
+  case 0x500:
+    return IsIntOverflow ? "sv" : "su";
+  case 0x700:
+    return IsIntOverflow ? "svi" : "sui";
+  default:
+    return StringRef();
+  }
+}
+} // namespace Alpha
+
+namespace Alpha {
 // The mode argument the OTS X_floating routines take in $18, matching gcc's
 // alpha_compute_xfloating_mode_arg.  Round toward +inf is mode 3 and has no
 // -mfp-rounding-mode spelling, so it cannot be selected here.
