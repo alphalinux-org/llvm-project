@@ -66,6 +66,18 @@ void AlphaDAGToDAGISel::Select(SDNode *Node) {
     return;
   }
 
+  // Materialize a frame-index address with lda; the displacement (0) follows
+  // the base so eliminateFrameIndex can rewrite it.
+  if (Node->getOpcode() == ISD::FrameIndex) {
+    SDLoc DL(Node);
+    int FI = cast<FrameIndexSDNode>(Node)->getIndex();
+    SDValue TFI = CurDAG->getTargetFrameIndex(FI, MVT::i64);
+    SDValue Zero = CurDAG->getTargetConstant(0, DL, MVT::i64);
+    ReplaceNode(Node,
+                CurDAG->getMachineNode(Alpha::LEA, DL, MVT::i64, TFI, Zero));
+    return;
+  }
+
   // Materialize a constant that does not fit in the 16-bit `lda` displacement
   // as an ldah/lda pair, when it decomposes into two 16-bit signed halves:
   // V = (Hi << 16) + Lo.  16-bit constants are handled by a pattern; constants
