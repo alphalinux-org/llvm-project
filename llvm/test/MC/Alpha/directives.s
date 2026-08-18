@@ -2,9 +2,8 @@
 # RUN: llvm-objdump -s -j .text %t.o | FileCheck %s
 
 # The ECOFF/OSF procedure-descriptor directives are accepted and ignored; .end
-# in particular must not stop assembly the way the generic .end would.  .word
-# is a 16-bit datum on Alpha rather than the 32-bit one the generic parser
-# assembles.
+# in particular must not stop assembly the way the generic .end would.  .word is
+# a 16-bit datum on Alpha, and .align aligns to a power of two.
 
 	.ent foo
 foo:
@@ -16,8 +15,17 @@ foo:
 	.end foo
 
 	.word 0x1234, 4
+	.align 3
+	.byte 0x99
+	.align 3
+	.byte 0xaa
 
-# The ret is the only thing any of the directives around it contributed, and
-# the two halfwords follow it -- so assembly carried on past .end rather than
-# stopping there, which is what the generic directive would have done.
-# CHECK: 0000 0180fa6b 34120400
+# .word emits two little-endian halfwords after the 4-byte ret, reaching offset
+# 8; the first .align 3 is already at an 8-byte boundary and so pads nothing,
+# which is why a second one follows the byte at offset 8: from offset 9 it has
+# real work to do and pads out to 16.  Checking only the first would say nothing
+# about whether .align pads at all.
+# What matters here is that the second .align pads at all, reaching offset 16;
+# which bytes fill the gap is the padding commit's business, not this one's.
+# CHECK:      0000 0180fa6b 34120400 99
+# CHECK-NEXT: 0010 aa

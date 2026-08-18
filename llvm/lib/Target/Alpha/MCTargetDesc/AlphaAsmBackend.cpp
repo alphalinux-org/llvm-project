@@ -125,9 +125,10 @@ public:
   bool writeNopData(raw_ostream &OS, uint64_t Count,
                     const MCSubtargetInfo *STI) const override {
     OS.write_zeros(Count % 4);
-    // nop is `bis $31, $31, $31` (0x47ff041f).
+    // Pad with unop (`ldq_u $31, 0($30)`, 0x2ffe0000), the canonical Alpha
+    // code-alignment filler that GNU as also uses.
     for (uint64_t I = 0, E = Count / 4; I != E; ++I)
-      support::endian::write<uint32_t>(OS, 0x47ff041f,
+      support::endian::write<uint32_t>(OS, 0x2ffe0000,
                                        llvm::endianness::little);
     return true;
   }
