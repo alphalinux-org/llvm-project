@@ -9,6 +9,7 @@ add_lldb_library(lldbPluginProcessUtility
   HistoryUnwind.cpp
   InferiorCallPOSIX.cpp
   LinuxProcMaps.cpp
+  AlphaLinuxSignals.cpp
   LinuxSignals.cpp
   MemoryTagManagerAArch64MTE.cpp
   NativeProcessSoftwareSingleStep.cpp

@@ -11,8 +11,11 @@
 // mips-linux debugging is not supported and mips uses different numbers for
 // some signals (e.g. SIGBUS) on linux, so we skip the static checks below. The
 // definitions here can be used for debugging non-mips targets on a mips-hosted
-// lldb.
-#if defined(__linux__) && !defined(__mips__)
+// lldb.  alpha renumbers them too, and this table is the generic numbering, so
+// a host build there cannot check it against the host's own <csignal> either.
+// What an alpha *target* gets is AlphaLinuxSignals, which UnixSignals::Create
+// hands out; this is only about building on such a host.
+#if defined(__linux__) && !defined(__mips__) && !defined(__alpha__)
 #include <csignal>
 
 #ifndef SEGV_BNDERR
@@ -64,7 +67,7 @@
 #else
 #define ADD_SIGCODE(signal_name, signal_value, code_name, code_value, ...)     \
   AddSignalCode(signal_value, code_value, __VA_ARGS__)
-#endif /* if defined(__linux__) && !defined(__mips__) */
+#endif /* __linux__ && !__mips__ && !__alpha__ */
 // See siginfo.h in the Linux Kernel, these codes can be sent for any signal.
 #define ADD_LINUX_SIGNAL(signo, name, ...)                                     \
   AddSignal(signo, name, __VA_ARGS__);                                         \

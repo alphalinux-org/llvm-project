@@ -10,6 +10,7 @@
 #include "gtest/gtest.h"
 
 #include "lldb/Target/UnixSignals.h"
+#include "lldb/Utility/ArchSpec.h"
 #include "llvm/Support/FormatVariadic.h"
 
 using namespace lldb;
@@ -229,4 +230,40 @@ TEST(UnixSignalsTest, GetFilteredSignals) {
   auto signal4 = signals.GetFilteredSignals(true, false, true);
   expected = {4};
   EXPECT_EQ_ARRAYS(expected, signal4);
+}
+
+// alpha keeps the OSF/1 signal numbering, so an alpha-linux target must not be
+// handed the generic Linux table.  These are the twelve numbers that differ,
+// from arch/alpha/include/uapi/asm/signal.h, checked against `kill -l' on an
+// alpha system.  SIGSEGV is deliberately included because it is 11 in both --
+// it is what an existing test happened to use, which is why the wrong table
+// went unnoticed.
+TEST(UnixSignalsTest, AlphaLinuxNumbering) {
+  auto signals = UnixSignals::Create(ArchSpec("alpha-unknown-linux-gnu"));
+  auto name_of = [&](int signo) {
+    return std::string(signals->GetSignalAsStringRef(signo));
+  };
+
+  EXPECT_EQ("SIGEMT", name_of(7));
+  EXPECT_EQ("SIGBUS", name_of(10));
+  EXPECT_EQ("SIGSEGV", name_of(11));
+  EXPECT_EQ("SIGSYS", name_of(12));
+  EXPECT_EQ("SIGURG", name_of(16));
+  EXPECT_EQ("SIGSTOP", name_of(17));
+  EXPECT_EQ("SIGTSTP", name_of(18));
+  EXPECT_EQ("SIGCONT", name_of(19));
+  EXPECT_EQ("SIGCHLD", name_of(20));
+  EXPECT_EQ("SIGIO", name_of(23));
+  EXPECT_EQ("SIGINFO", name_of(29));
+  EXPECT_EQ("SIGUSR1", name_of(30));
+  EXPECT_EQ("SIGUSR2", name_of(31));
+
+  // The real-time range is the same as everywhere else: SIGRTMIN is 34.
+  EXPECT_EQ("SIGRTMIN", name_of(34));
+
+  // And the generic table still says what it always did.
+  auto generic = UnixSignals::Create(ArchSpec("x86_64-unknown-linux-gnu"));
+  EXPECT_EQ("SIGBUS", std::string(generic->GetSignalAsStringRef(7)));
+  EXPECT_EQ("SIGUSR1", std::string(generic->GetSignalAsStringRef(10)));
+  EXPECT_EQ("SIGSYS", std::string(generic->GetSignalAsStringRef(31)));
 }
