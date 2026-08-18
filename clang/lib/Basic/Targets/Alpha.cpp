@@ -88,4 +88,12 @@ void AlphaTargetInfo::getTargetDefines(const LangOptions &Opts,
     Builder.defineMacro("_IEEE_FP");
   if (HasIEEEInexact)
     Builder.defineMacro("_IEEE_FP_INEXACT");
+
+  // ldl_l/stl_c and ldq_l/stq_c give native 4- and 8-byte compare-and-swap, and
+  // the sub-word cases are expanded to a masked longword loop, so every size is
+  // lock-free and inlined. GCC defines all four here too.
+  Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_1");
+  Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_2");
+  Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_4");
+  Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_8");
 }
