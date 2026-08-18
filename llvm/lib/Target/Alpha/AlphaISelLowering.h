@@ -377,6 +377,7 @@ private:
   // f128 (Alpha X_floating) lowering: replace f128 ops with OTS libcall
   // sequences in PerformDAGCombine before type legalization runs.
   SDValue LowerF128Binary(SDNode *N, DAGCombinerInfo &DCI) const;
+  SDValue LowerF128Convert(SDNode *N, DAGCombinerInfo &DCI) const;
 
   const AlphaSubtarget &Subtarget;
 };
