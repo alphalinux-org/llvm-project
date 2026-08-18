@@ -319,6 +319,8 @@ public:
     eCore_amd_gpu_gcn_GFX13_GENERIC,
     eCore_amd_gpu_unknown,
 
+    eCore_alpha,
+
     kNumCores,
 
     kCore_invalid,
