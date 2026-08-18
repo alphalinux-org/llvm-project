@@ -140,6 +140,7 @@ add_clang_library(clangCodeGen
   Targets/ARC.cpp
   Targets/ARM.cpp
   Targets/AVR.cpp
+  Targets/Alpha.cpp
   Targets/BPF.cpp
   Targets/CSKY.cpp
   Targets/DirectX.cpp
@@ -153,7 +154,6 @@ add_clang_library(clangCodeGen
   Targets/PPC.cpp
   Targets/RISCV.cpp
   Targets/SPIR.cpp
-  Targets/Alpha.cpp
   Targets/Sparc.cpp
   Targets/SystemZ.cpp
   Targets/TCE.cpp

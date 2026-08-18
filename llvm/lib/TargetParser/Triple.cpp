@@ -46,14 +46,14 @@ StringRef Triple::getArchTypeName(ArchType Kind) {
     return "aarch64_32";
   case aarch64_be:
     return "aarch64_be";
+  case alpha:
+    return "alpha";
   case amdgpu:
     return "amdgpu";
   case amdil64:
     return "amdil64";
   case amdil:
     return "amdil";
-  case alpha:
-    return "alpha";
   case arc:
     return "arc";
   case arm:

@@ -7197,7 +7197,7 @@ def mno_nvs : Flag<["-"], "mno-nvs">, Group<m_hexagon_Features_Group>,
 def mcabac: Flag<["-"], "mcabac">, Group<m_hexagon_Features_Group>,
   HelpText<"Enable CABAC instructions">;
 
-// SPARC feature flags
+// Alpha feature flags
 let Flags = [TargetSpecific] in {
 def mbuild_constants : Flag<["-"], "mbuild-constants">,
   Group<m_alpha_Features_Group>,
@@ -7259,6 +7259,7 @@ foreach i = 0 ... 31 in {
     Group<m_alpha_Features_Group>, Alias<!cast<Option>("ffixed_alpha_"#i)>;
 }
 
+// SPARC feature flags
 def mfpu : Flag<["-"], "mfpu">, Group<m_sparc_Features_Group>;
 def mno_fpu : Flag<["-"], "mno-fpu">, Group<m_sparc_Features_Group>;
 def mfsmuld : Flag<["-"], "mfsmuld">, Group<m_sparc_Features_Group>;

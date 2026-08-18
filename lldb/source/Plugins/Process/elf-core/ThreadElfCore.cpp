@@ -132,11 +132,11 @@ ThreadElfCore::CreateRegisterContextForFrame(StackFrame *frame) {
       switch (arch.GetMachine()) {
       case llvm::Triple::aarch64:
         break;
-      case llvm::Triple::ppc64le:
-        reg_interface = new RegisterInfoPOSIX_ppc64le(arch);
-        break;
       case llvm::Triple::alpha:
         reg_interface = new RegisterContextLinux_alpha(arch);
+        break;
+      case llvm::Triple::ppc64le:
+        reg_interface = new RegisterInfoPOSIX_ppc64le(arch);
         break;
       case llvm::Triple::systemz:
         reg_interface = new RegisterContextLinux_s390x(arch);
@@ -188,6 +188,10 @@ ThreadElfCore::CreateRegisterContextForFrame(StackFrame *frame) {
       m_thread_reg_ctx_sp = RegisterContextCorePOSIX_arm64::Create(
           *this, arch, m_gpregset_data, m_notes);
       break;
+    case llvm::Triple::alpha:
+      m_thread_reg_ctx_sp = std::make_shared<RegisterContextCorePOSIX_alpha>(
+          *this, reg_interface, m_gpregset_data, m_notes);
+      break;
     case llvm::Triple::arm:
       m_thread_reg_ctx_sp = std::make_shared<RegisterContextCorePOSIX_arm>(
           *this, std::make_unique<RegisterInfoPOSIX_arm>(arch), m_gpregset_data,
@@ -212,10 +216,6 @@ ThreadElfCore::CreateRegisterContextForFrame(StackFrame *frame) {
       break;
     case llvm::Triple::ppc64le:
       m_thread_reg_ctx_sp = std::make_shared<RegisterContextCorePOSIX_ppc64le>(
-          *this, reg_interface, m_gpregset_data, m_notes);
-      break;
-    case llvm::Triple::alpha:
-      m_thread_reg_ctx_sp = std::make_shared<RegisterContextCorePOSIX_alpha>(
           *this, reg_interface, m_gpregset_data, m_notes);
       break;
     case llvm::Triple::systemz:

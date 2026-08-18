@@ -2,6 +2,7 @@
 set_property(DIRECTORY PROPERTY LLDB_PLUGIN_KIND ProcessUtility)
 
 add_lldb_library(lldbPluginProcessUtility
+  AlphaLinuxSignals.cpp
   AuxVector.cpp
   FreeBSDSignals.cpp
   GDBRemoteSignals.cpp
@@ -9,7 +10,6 @@ add_lldb_library(lldbPluginProcessUtility
   HistoryUnwind.cpp
   InferiorCallPOSIX.cpp
   LinuxProcMaps.cpp
-  AlphaLinuxSignals.cpp
   LinuxSignals.cpp
   MemoryTagManagerAArch64MTE.cpp
   NativeProcessSoftwareSingleStep.cpp
