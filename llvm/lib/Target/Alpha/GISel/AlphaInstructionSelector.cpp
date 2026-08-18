@@ -220,6 +220,15 @@ bool AlphaInstructionSelector::selectLoadStore(MachineInstr &I,
       I.getParent()->getParent()->getSubtarget<AlphaSubtarget>();
   bool IsFP = RBI.getRegBank(ValReg, MRI, TRI)->getID() == Alpha::FPRRegBankID;
 
+  // Which narrow store to use without BWX.  The plain read-modify-write updates
+  // one field of a quadword in place and is not atomic against another thread
+  // writing a different field of the same quadword; -msafe-bwa asks for the
+  // lock-based form instead.  RMW_STOREI8/16 carry Predicates = [UnsafeBWStore],
+  // which is exactly this condition, so selecting one without checking it emits
+  // an instruction whose own predicate says it must not appear.  The
+  // SelectionDAG path asks the same question in AlphaISelDAGToDAG.
+  bool UseSafeBWStore = STI.hasSafeBWA();
+
   unsigned Opc;
   switch (Size) {
   case 64:
@@ -239,6 +248,8 @@ bool AlphaInstructionSelector::selectLoadStore(MachineInstr &I,
                    : (Size == 8 ? Alpha::STB : Alpha::STW);
     else if (IsLoad)
       Opc = Alpha::LDQ_U; // Followed by the extract below.
+    else if (UseSafeBWStore)
+      Opc = Size == 8 ? Alpha::SAFE_STOREI8 : Alpha::SAFE_STOREI16;
     else
       Opc = Size == 8 ? Alpha::RMW_STOREI8 : Alpha::RMW_STOREI16;
     break;
@@ -247,9 +258,9 @@ bool AlphaInstructionSelector::selectLoadStore(MachineInstr &I,
   }
 
   // Without BWX a narrow access has no instruction of its own: a load reads
-  // the quadword holding the datum and extracts it, and a store is the
-  // read-modify-write pseudo, which needs two scratch registers and cannot
-  // take a displacement.
+  // the quadword holding the datum and extracts it, and a store is one of the
+  // two read-modify-write pseudos, both of which need scratch registers or a
+  // custom inserter and cannot take a displacement.
   if (!STI.hasBWX() && Size < 32) {
     if (IsLoad) {
       Register Quad = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
@@ -267,6 +278,28 @@ bool AlphaInstructionSelector::selectLoadStore(MachineInstr &I,
       constrainSelectedInstRegOperands(*Ext, TII, TRI, RBI);
       return true;
     }
+    MachineFunction &MF = *I.getParent()->getParent();
+    // Both forms read and write the whole quadword holding the field, so the
+    // memory operand has to say so: carrying the original one- or two-byte
+    // reference understates the footprint to anything that asks later whether
+    // this store can alias another.  The SelectionDAG path widens it the same
+    // way.
+    auto Flags = (**I.memoperands_begin()).getFlags() |
+                 MachineMemOperand::MOLoad | MachineMemOperand::MOStore;
+    MachineMemOperand *Wide =
+        MF.getMachineMemOperand(MachinePointerInfo(), Flags, 8, Align(8));
+
+    if (UseSafeBWStore) {
+      MachineInstrBuilder St =
+          BuildMI(*I.getParent(), I, I.getDebugLoc(), TII.get(Opc))
+              .addUse(ValReg)
+              .addUse(AddrReg);
+      St.setMemRefs({Wide});
+      I.eraseFromParent();
+      constrainSelectedInstRegOperands(*St, TII, TRI, RBI);
+      return true;
+    }
+
     Register T1 = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
     Register T2 = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
     MachineInstrBuilder St =
@@ -275,7 +308,7 @@ bool AlphaInstructionSelector::selectLoadStore(MachineInstr &I,
             .addDef(T2, RegState::Dead)
             .addUse(ValReg)
             .addUse(AddrReg);
-    St.setMemRefs(I.memoperands());
+    St.setMemRefs({Wide});
     I.eraseFromParent();
     constrainSelectedInstRegOperands(*St, TII, TRI, RBI);
     return true;
