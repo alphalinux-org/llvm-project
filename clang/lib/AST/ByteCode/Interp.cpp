@@ -40,8 +40,10 @@ using namespace clang::interp;
 // We disable it on MSVC generally since it doesn't seem to be able
 // to handle the way we use tailcalls.
 // PPC can't tail-call external calls, which is a problem for InterpNext.
+// Alpha reaches an external call through the GOT and has to restore gp
+// afterwards, so it cannot turn one into a sibling call either.
 #if defined(_MSC_VER) || defined(__powerpc__) || !defined(MUSTTAIL) ||         \
-    defined(__i386__) || defined(__sparc__)
+    defined(__i386__) || defined(__sparc__) || defined(__alpha__)
 #undef MUSTTAIL
 #define MUSTTAIL
 #define USE_TAILCALLS 0
