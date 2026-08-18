@@ -545,23 +545,39 @@ def BICi : OFormL<0x11, 0x08, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
 // the read and the write were separate instructions another byte's write could
 // land between them and be lost.  Selected by AlphaDAGToDAGISel::Select and
 // expanded by AlphaInstrInfo::expandPostRAPseudo.
-let mayLoad = 1, mayStore = 1, hasSideEffects = 0, Predicates = [NotBWX],
-    Constraints = "@earlyclobber $t1,@earlyclobber $t2" in {
+// Size is the expansion's, five instructions, not the one word a pseudo
+// defaults to: determineCalleeSaves adds these up before expandPostRAPseudo
+// runs, to decide whether the function is close enough to the 21-bit branch
+// range to need a global pointer for relaxation.  Counting each of these as one
+// word understates a function full of them by a factor of five, which can leave
+// a relaxed branch reaching for a $29 the prologue never established.
+let mayLoad = 1, mayStore = 1, hasSideEffects = 0, Predicates = [UnsafeBWStore],
+    Size = 20, Constraints = "@earlyclobber $t1,@earlyclobber $t2" in {
 def RMW_STOREI8 : AlphaPseudo<(outs GPRC:$t1, GPRC:$t2),
                               (ins GPRC:$val, GPRC:$addr), "", []>;
 def RMW_STOREI16 : AlphaPseudo<(outs GPRC:$t1, GPRC:$t2),
                                (ins GPRC:$val, GPRC:$addr), "", []>;
 }
 
+// Lock-based byte/word store (-msafe-bwa): the read-modify-write is done with
+// an ldq_l/stq_c loop by a custom inserter.
+let usesCustomInserter = 1, mayLoad = 1, mayStore = 1,
+    Predicates = [SafeBWStore] in {
+def SAFE_STOREI8  : AlphaPseudo<(outs), (ins GPRC:$val, GPRC:$addr), "",
+                                [(truncstorei8 GPRC:$val, ADDRr:$addr)]>;
+def SAFE_STOREI16 : AlphaPseudo<(outs), (ins GPRC:$val, GPRC:$addr), "",
+                                [(truncstorei16 GPRC:$val, ADDRr:$addr)]>;
+}
+
 let mayStore = 1, hasSideEffects = 0 in {
-def STL : AlphaInst<(outs), (ins GPRC:$Ra, memri:$addr), "stl $Ra, $addr",
-                    [(truncstorei32 i64:$Ra, ADDRri:$addr)]> { let Opcode = 0x2c; }
-def STQ : AlphaInst<(outs), (ins GPRC:$Ra, memri:$addr), "stq $Ra, $addr",
-                    [(store i64:$Ra, ADDRri:$addr)]> { let Opcode = 0x2d; }
-def STT : AlphaInst<(outs), (ins FPRC:$Ra, memri:$addr), "stt $Ra, $addr",
-                    [(store f64:$Ra, ADDRri:$addr)]> { let Opcode = 0x27; }
-def STS : AlphaInst<(outs), (ins FPRC:$Ra, memri:$addr), "sts $Ra, $addr",
-                    [(store f32:$Ra, ADDRri:$addr)]> { let Opcode = 0x26; }
+def STL : MForm<0x2c, (outs), (ins GPRC:$Ra, memri:$addr), "stl $Ra, $addr",
+                [(truncstorei32 i64:$Ra, ADDRri:$addr)]>;
+def STQ : MForm<0x2d, (outs), (ins GPRC:$Ra, memri:$addr), "stq $Ra, $addr",
+                [(store i64:$Ra, ADDRri:$addr)]>;
+def STT : MForm<0x27, (outs), (ins FPRC:$Ra, memri:$addr), "stt $Ra, $addr",
+                [(store f64:$Ra, ADDRri:$addr)]>;
+def STS : MForm<0x26, (outs), (ins FPRC:$Ra, memri:$addr), "sts $Ra, $addr",
+                [(store f32:$Ra, ADDRri:$addr)]>;
 }
 
 // Naturally aligned integer loads and stores are atomic; stronger orderings get
@@ -663,6 +679,13 @@ let Size = 28,
 def ATOMIC_CAS_LOOP : AlphaPseudo<(outs GPRC:$dst, GPRC:$t0, GPRC:$t1),
                                   (ins GPRC:$addr, GPRC:$cmp, GPRC:$new,
                                        i64imm:$is32), "", []>;
+
+// bic and insert, then ldq_l, mask, merge, stq_c and beq.
+let Size = 28,
+    Constraints = "@earlyclobber $t0,@earlyclobber $t1,@earlyclobber $t2" in
+def SAFE_STORE_LOOP : AlphaPseudo<(outs GPRC:$t0, GPRC:$t1, GPRC:$t2),
+                                  (ins GPRC:$val, GPRC:$addr, i64imm:$isword),
+                                  "", []>;
 }
 
 // Subroutine return: `ret $31, ($26), 1`.
