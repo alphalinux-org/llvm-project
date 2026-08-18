@@ -80,3 +80,24 @@ body:             |
     $r0 = COPY %3(s64)
     RET implicit $r0
 ...
+---
+name:            brindirect
+legalized:       false
+tracksRegLiveness: true
+body:             |
+  ; An indirectbr's target is a blockaddress, which is unsupported, so the
+  ; branch itself is too: the selector has no case, no GINodeEquiv and no brind
+  ; pattern for G_BRINDIRECT, and calling it legal would reach the selector and
+  ; fail there instead of falling back cleanly.
+  bb.0:
+    liveins: $r16
+    ; CHECK-LABEL: name: brindirect
+    ; CHECK: failedISel: true
+    ; CHECK: G_BRINDIRECT
+    successors: %bb.1
+    %0:_(p0) = COPY $r16
+    G_BRINDIRECT %0(p0)
+
+  bb.1:
+    RET
+...
