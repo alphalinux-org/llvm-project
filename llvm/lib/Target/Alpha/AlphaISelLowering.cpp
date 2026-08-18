@@ -281,6 +281,21 @@ SDValue AlphaTargetLowering::PerformDAGCombine(SDNode *N,
     if (SDValue V = LowerF128Binary(N, DCI))
       return V;
     break;
+  case ISD::FP_EXTEND:
+  case ISD::STRICT_FP_EXTEND:
+  case ISD::FP_ROUND:
+  case ISD::STRICT_FP_ROUND:
+  case ISD::SINT_TO_FP:
+  case ISD::STRICT_SINT_TO_FP:
+  case ISD::UINT_TO_FP:
+  case ISD::STRICT_UINT_TO_FP:
+  case ISD::FP_TO_SINT:
+  case ISD::STRICT_FP_TO_SINT:
+  case ISD::FP_TO_UINT:
+  case ISD::STRICT_FP_TO_UINT:
+    if (SDValue V = LowerF128Convert(N, DCI))
+      return V;
+    break;
   default:
     break;
   }
@@ -1013,6 +1028,264 @@ SDValue AlphaTargetLowering::LowerF128Binary(SDNode *N,
     return SDValue(N, 0);
   }
   return Result;
+}
+
+SDValue AlphaTargetLowering::LowerF128Convert(SDNode *N,
+                                              DAGCombinerInfo &DCI) const {
+  if (!DCI.isBeforeLegalize())
+    return SDValue();
+
+  bool IsStrict = N->isStrictFPOpcode();
+  SelectionDAG &DAG = DCI.DAG;
+  SDLoc DL(N);
+  MachineFunction &MF = DAG.getMachineFunction();
+  MF.getInfo<AlphaMachineFunctionInfo>()->setUsesGP();
+
+  SDValue InChain = IsStrict ? N->getOperand(0) : DAG.getEntryNode();
+
+  unsigned Opc = N->getOpcode();
+
+  // --- f32/f64 -> f128: _OtsConvertFloatTX(double in $f16) -> $16/$17 ---
+  if (Opc == ISD::FP_EXTEND || Opc == ISD::STRICT_FP_EXTEND) {
+    SDValue Src = IsStrict ? N->getOperand(1) : N->getOperand(0);
+    EVT SrcVT = Src.getValueType();
+    if (N->getValueType(0) != MVT::f128 ||
+        (SrcVT != MVT::f64 && SrcVT != MVT::f32 && SrcVT != MVT::f16))
+      return SDValue();
+
+    // f16 -> f32 -> f64 -> f128, and f32 -> f64 is exact (no rounding), so use
+    // non-strict extends even inside a constrained operation; then fall through
+    // to the f64 -> f128 OTS call.  Widening here rather than leaving an
+    // f16 -> f128 extend matters: legalizing that one would build an
+    // f32 -> f128 extend of its own, too late for this interception to see.
+    if (SrcVT == MVT::f16) {
+      Src = DAG.getNode(ISD::FP_EXTEND, DL, MVT::f32, Src);
+      SrcVT = MVT::f32;
+    }
+    if (SrcVT == MVT::f32)
+      Src = DAG.getNode(ISD::FP_EXTEND, DL, MVT::f64, Src);
+
+    SDValue Pv = DAG.getNode(
+        AlphaISD::LITERAL, DL, MVT::i64,
+        DAG.getTargetExternalSymbol("_OtsConvertFloatTX", MVT::i64));
+    SDValue Glue;
+    SDValue Chain = InChain;
+    Chain = DAG.getCopyToReg(Chain, DL, Alpha::F16, Src, Glue);
+    Glue = Chain.getValue(1);
+    Chain = DAG.getCopyToReg(Chain, DL, Alpha::R27, Pv, Glue);
+    Glue = Chain.getValue(1);
+
+    Chain = emitOtsCall(DAG, DL, Subtarget, Chain,
+                        {DAG.getRegister(Alpha::F16, MVT::f64),
+                         DAG.getRegister(Alpha::R27, MVT::i64)},
+                        Glue);
+    Glue = Chain.getValue(1);
+
+    SDValue ResLo = DAG.getCopyFromReg(Chain, DL, Alpha::R16, MVT::i64, Glue);
+    Chain = ResLo.getValue(1);
+    Glue = ResLo.getValue(2);
+    SDValue ResHi = DAG.getCopyFromReg(Chain, DL, Alpha::R17, MVT::i64, Glue);
+    Chain = ResHi.getValue(1);
+
+    SDValue Result = joinF128(DAG, DL, MF, Chain, ResLo, ResHi);
+    if (IsStrict) {
+      DCI.CombineTo(N, Result, Result.getValue(1));
+      return SDValue(N, 0);
+    }
+    return Result;
+  }
+
+  // --- f128 -> f64/f32: _OtsConvertFloatXT(al,ah,$16/$17, round $18) -> $f0
+  // --- For f32, a second hardware f64->f32 truncation follows (matching GCC's
+  // code-gen, which also goes through double for the fp128->float path).
+  if (Opc == ISD::FP_ROUND || Opc == ISD::STRICT_FP_ROUND) {
+    SDValue Src = IsStrict ? N->getOperand(1) : N->getOperand(0);
+    EVT DstVT = N->getValueType(0);
+    if ((DstVT != MVT::f64 && DstVT != MVT::f32) ||
+        Src.getValueType() != MVT::f128)
+      return SDValue();
+
+    auto [Lo, Hi] = splitF128(DAG, DL, MF, DAG.getEntryNode(), Src);
+    SDValue Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other,
+                                {InChain, Lo.getValue(1), Hi.getValue(1)});
+
+    SDValue Pv = DAG.getNode(
+        AlphaISD::LITERAL, DL, MVT::i64,
+        DAG.getTargetExternalSymbol("_OtsConvertFloatXT", MVT::i64));
+    SDValue Glue;
+    Chain = DAG.getCopyToReg(Chain, DL, Alpha::R16, Lo, Glue);
+    Glue = Chain.getValue(1);
+    Chain = DAG.getCopyToReg(Chain, DL, Alpha::R17, Hi, Glue);
+    Glue = Chain.getValue(1);
+    // A narrowing conversion rounds, so this one does follow
+    // -mfp-rounding-mode.  gcc additionally sets bit 16 for a FLOAT_TRUNCATE
+    // when the trap mode is the default one, i.e. when neither -mieee nor
+    // -mfp-trap-mode=u asked for trapping arithmetic.
+    unsigned ModeArg = Alpha::getOtsRoundModeArg(getFPRoundMode(Subtarget));
+    if (!Subtarget.hasFeature(Alpha::FeatureIEEE) &&
+        !Subtarget.hasFeature(Alpha::FeatureFPTrapU))
+      ModeArg |= 0x10000;
+    Chain = DAG.getCopyToReg(Chain, DL, Alpha::R18,
+                             DAG.getConstant(ModeArg, DL, MVT::i64), Glue);
+    Glue = Chain.getValue(1);
+    Chain = DAG.getCopyToReg(Chain, DL, Alpha::R27, Pv, Glue);
+    Glue = Chain.getValue(1);
+
+    Chain = emitOtsCall(DAG, DL, Subtarget, Chain,
+                        {DAG.getRegister(Alpha::R16, MVT::i64),
+                         DAG.getRegister(Alpha::R17, MVT::i64),
+                         DAG.getRegister(Alpha::R18, MVT::i64),
+                         DAG.getRegister(Alpha::R27, MVT::i64)},
+                        Glue);
+    Glue = Chain.getValue(1);
+
+    SDValue Result = DAG.getCopyFromReg(Chain, DL, Alpha::F0, MVT::f64, Glue);
+    Chain = Result.getValue(1);
+
+    // f128 -> f32: narrow the intermediate double to float with cvtts.
+    //
+    // This rounds twice, and the two roundings can disagree with a single one:
+    // a value that lands on an f64 midpoint rounds again from there.  It is
+    // done anyway because the OTS runtime has no X-to-S routine to go directly
+    // -- _OtsConvertFloatXT is the only conversion out of X_floating -- so
+    // there is nothing else to call, and gcc emits the same pair.
+    if (DstVT == MVT::f32) {
+      if (IsStrict) {
+        // The narrowing half rounds and can raise inexact or overflow, so on
+        // the strict path it has to stay chained: an unchained FP_ROUND could
+        // be moved across a rounding-mode change or a flag read.
+        Result = DAG.getNode(
+            ISD::STRICT_FP_ROUND, DL, DAG.getVTList(MVT::f32, MVT::Other),
+            {Chain, Result, DAG.getIntPtrConstant(0, DL, /*isTarget=*/true)});
+        Chain = Result.getValue(1);
+      } else {
+        Result = DAG.getNode(ISD::FP_ROUND, DL, MVT::f32, Result,
+                             DAG.getIntPtrConstant(0, DL, /*isTarget=*/true));
+      }
+    }
+
+    if (IsStrict) {
+      DCI.CombineTo(N, Result, Chain);
+      return SDValue(N, 0);
+    }
+    return Result;
+  }
+
+  // --- i64/i32 -> f128: _OtsCvtQX / _OtsCvtQUX(a -> $16) -> $16/$17 ---
+  if (Opc == ISD::SINT_TO_FP || Opc == ISD::UINT_TO_FP ||
+      Opc == ISD::STRICT_SINT_TO_FP || Opc == ISD::STRICT_UINT_TO_FP) {
+    if (N->getValueType(0) != MVT::f128)
+      return SDValue();
+
+    bool IsUnsigned = (Opc == ISD::UINT_TO_FP || Opc == ISD::STRICT_UINT_TO_FP);
+    SDValue Src = IsStrict ? N->getOperand(1) : N->getOperand(0);
+    // _OtsCvtQ[U]X takes a single i64 argument, so anything wider (i128, or an
+    // extended type such as i65) has to go the generic route instead.
+    EVT SrcVT = Src.getValueType();
+    if (!SrcVT.isSimple() || SrcVT.getSizeInBits() > 64)
+      return SDValue();
+    // Widen sub-i64 integers to i64 (the OTS routine takes an i64 argument).
+    if (SrcVT != MVT::i64)
+      Src = DAG.getNode(IsUnsigned ? ISD::ZERO_EXTEND : ISD::SIGN_EXTEND, DL,
+                        MVT::i64, Src);
+
+    const char *Name = IsUnsigned ? "_OtsCvtQUX" : "_OtsCvtQX";
+    SDValue Pv = DAG.getNode(AlphaISD::LITERAL, DL, MVT::i64,
+                             DAG.getTargetExternalSymbol(Name, MVT::i64));
+    SDValue Glue;
+    SDValue Chain = InChain;
+    Chain = DAG.getCopyToReg(Chain, DL, Alpha::R16, Src, Glue);
+    Glue = Chain.getValue(1);
+    Chain = DAG.getCopyToReg(Chain, DL, Alpha::R27, Pv, Glue);
+    Glue = Chain.getValue(1);
+
+    Chain = emitOtsCall(DAG, DL, Subtarget, Chain,
+                        {DAG.getRegister(Alpha::R16, MVT::i64),
+                         DAG.getRegister(Alpha::R27, MVT::i64)},
+                        Glue);
+    Glue = Chain.getValue(1);
+
+    SDValue ResLo = DAG.getCopyFromReg(Chain, DL, Alpha::R16, MVT::i64, Glue);
+    Chain = ResLo.getValue(1);
+    Glue = ResLo.getValue(2);
+    SDValue ResHi = DAG.getCopyFromReg(Chain, DL, Alpha::R17, MVT::i64, Glue);
+    Chain = ResHi.getValue(1);
+
+    SDValue Result = joinF128(DAG, DL, MF, Chain, ResLo, ResHi);
+    if (IsStrict) {
+      DCI.CombineTo(N, Result, Result.getValue(1));
+      return SDValue(N, 0);
+    }
+    return Result;
+  }
+
+  // --- f128 -> i64/i32: _OtsCvtXQ(al,ah,round -> $16-$18) -> $0 ---
+  // The unsigned conversion goes to the same signed routine, so a value at or
+  // above 2^63 does not convert correctly.  That is what the platform does:
+  // OTS ships no unsigned X_floating-to-quadword routine, and gcc's
+  // alpha_emit_xfloating_cvt opens with `if (code == UNSIGNED_FIX) code = FIX;'
+  // (gcc/config/alpha/alpha.cc), so alpha_lookup_xfloating_lib_func is never
+  // asked for one.  Synthesising a two-step conversion here would disagree with
+  // every other compiler on the target.
+  if (Opc == ISD::FP_TO_SINT || Opc == ISD::FP_TO_UINT ||
+      Opc == ISD::STRICT_FP_TO_SINT || Opc == ISD::STRICT_FP_TO_UINT) {
+    SDValue Src = IsStrict ? N->getOperand(1) : N->getOperand(0);
+    if (Src.getValueType() != MVT::f128)
+      return SDValue();
+
+    // _OtsCvtXQ returns a single i64, so a wider or extended result type has to
+    // go the generic route instead.
+    EVT ResEVT = N->getValueType(0);
+    if (!ResEVT.isSimple() || ResEVT.getSizeInBits() > 64)
+      return SDValue();
+
+    auto [Lo, Hi] = splitF128(DAG, DL, MF, DAG.getEntryNode(), Src);
+    SDValue Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other,
+                                {InChain, Lo.getValue(1), Hi.getValue(1)});
+
+    SDValue Pv =
+        DAG.getNode(AlphaISD::LITERAL, DL, MVT::i64,
+                    DAG.getTargetExternalSymbol("_OtsCvtXQ", MVT::i64));
+    SDValue Glue;
+    Chain = DAG.getCopyToReg(Chain, DL, Alpha::R16, Lo, Glue);
+    Glue = Chain.getValue(1);
+    Chain = DAG.getCopyToReg(Chain, DL, Alpha::R17, Hi, Glue);
+    Glue = Chain.getValue(1);
+    // C requires a conversion to integer to truncate toward zero, whatever the
+    // ambient rounding mode is, so this is always chopped.  gcc's
+    // alpha_emit_xfloating_cvt passes ALPHA_FPRM_CHOP for a FIX and reads
+    // alpha_fprm only for a FLOAT_TRUNCATE.
+    Chain = DAG.getCopyToReg(
+        Chain, DL, Alpha::R18,
+        DAG.getConstant(Alpha::getOtsRoundModeArg(Alpha::FPRoundChopped), DL,
+                        MVT::i64),
+        Glue);
+    Glue = Chain.getValue(1);
+    Chain = DAG.getCopyToReg(Chain, DL, Alpha::R27, Pv, Glue);
+    Glue = Chain.getValue(1);
+
+    Chain = emitOtsCall(DAG, DL, Subtarget, Chain,
+                        {DAG.getRegister(Alpha::R16, MVT::i64),
+                         DAG.getRegister(Alpha::R17, MVT::i64),
+                         DAG.getRegister(Alpha::R18, MVT::i64),
+                         DAG.getRegister(Alpha::R27, MVT::i64)},
+                        Glue);
+    Glue = Chain.getValue(1);
+
+    SDValue Result = DAG.getCopyFromReg(Chain, DL, Alpha::R0, MVT::i64, Glue);
+    Chain = Result.getValue(1);
+
+    if (ResEVT != MVT::i64)
+      Result = DAG.getNode(ISD::TRUNCATE, DL, ResEVT, Result);
+
+    if (IsStrict) {
+      DCI.CombineTo(N, Result, Chain);
+      return SDValue(N, 0);
+    }
+    return Result;
+  }
+
+  return SDValue();
 }
 
 SDValue AlphaTargetLowering::LowerDivRem(SDValue Op, SelectionDAG &DAG) const {
