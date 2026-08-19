@@ -225,6 +225,8 @@ uint16_t ELF::convertTripleArchTypeToEMachine(Triple::ArchType ArchType) {
   case Triple::bpfel:
   case Triple::bpfeb:
     return EM_BPF;
+  case Triple::alpha:
+    return EM_ALPHA;
   case Triple::csky:
     return EM_CSKY;
   case Triple::hexagon:
