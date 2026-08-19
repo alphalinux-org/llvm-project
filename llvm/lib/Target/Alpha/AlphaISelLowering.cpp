@@ -86,6 +86,11 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   for (auto Op : {ISD::CTPOP, ISD::CTLZ, ISD::CTTZ})
     setOperationAction(Op, MVT::i64, STI.hasCIX() ? Legal : Expand);
 
+  // The FIX extension (ev6) provides square-root instructions; without it,
+  // fsqrt becomes a libcall.
+  for (auto VT : {MVT::f32, MVT::f64})
+    setOperationAction(ISD::FSQRT, VT, STI.hasFIX() ? Legal : Expand);
+
   // Only the ordered floating-point comparisons have direct instructions; the
   // rest are expanded into combinations of them.  SETNE belongs here too: the
   // NaN-agnostic codes otherwise map straight onto cmpteq/cmptlt/cmptle, but
