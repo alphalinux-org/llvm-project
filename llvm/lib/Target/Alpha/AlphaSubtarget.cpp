@@ -8,6 +8,7 @@
 
 #include "AlphaSubtarget.h"
 #include "AlphaTargetMachine.h"
+#include "GISel/AlphaRegisterBankInfo.h"
 
 #define DEBUG_TYPE "alpha-subtarget"
 
@@ -34,4 +35,10 @@ AlphaSubtarget::AlphaSubtarget(const Triple &TT, StringRef CPU,
       ReserveRegister(TM.getMCRegisterInfo().getNumRegs()),
       InstrInfo(initializeSubtargetDependencies(CPU, TuneCPU, FS)),
       TLInfo(static_cast<const AlphaTargetMachine &>(TM), *this),
-      FrameLowering(*this) {}
+      FrameLowering(*this) {
+  RegBankInfo.reset(new AlphaRegisterBankInfo());
+}
+
+const RegisterBankInfo *AlphaSubtarget::getRegBankInfo() const {
+  return RegBankInfo.get();
+}

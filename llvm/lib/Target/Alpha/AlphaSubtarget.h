@@ -18,6 +18,7 @@
 #include "AlphaInstrInfo.h"
 #include "MCTargetDesc/AlphaMCTargetDesc.h"
 #include "llvm/ADT/BitVector.h"
+#include "llvm/CodeGen/RegisterBankInfo.h"
 #include "llvm/CodeGen/SelectionDAGTargetInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include <memory>
@@ -42,6 +43,9 @@ class AlphaSubtarget : public AlphaGenSubtargetInfo {
 #include "AlphaGenSubtargetInfo.inc"
 
   AlphaInstrInfo InstrInfo;
+
+  // GlobalISel related APIs.
+  mutable std::unique_ptr<RegisterBankInfo> RegBankInfo;
   AlphaTargetLowering TLInfo;
   AlphaFrameLowering FrameLowering;
   AlphaSelectionDAGInfo TSInfo;
@@ -70,6 +74,8 @@ public:
   const SelectionDAGTargetInfo *getSelectionDAGInfo() const override {
     return &TSInfo;
   }
+
+  const RegisterBankInfo *getRegBankInfo() const override;
 
   bool hasBWX() const { return HasBWX; }
   bool hasIEEE() const { return HasIEEE; }
