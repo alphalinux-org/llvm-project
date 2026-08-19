@@ -1930,6 +1930,23 @@ def BLBC : BForm<0x38, (outs), (ins GPRC:$Ra, brtarget:$target),
 def BLBS : BForm<0x3c, (outs), (ins GPRC:$Ra, brtarget:$target),
                  "blbs $Ra, $target", []>;
 }
+// The floating-point branches test $Fa against zero.  The code generator
+// materializes a compare result and tests it in an integer register, so these
+// exist for hand-written assembly; a two-instruction cmpt/fb pair is a common
+// idiom there, as is counting a loop down in the float unit to keep the
+// integer unit free.
+let isBranch = 1, isTerminator = 1 in {
+class FBForm<bits<6> opc, string mnem>
+    : BForm<opc, (outs), (ins FPRC:$Ra, brtarget:$target),
+            mnem # " $Ra, $target", []>;
+def FBEQ : FBForm<0x31, "fbeq">;
+def FBLT : FBForm<0x32, "fblt">;
+def FBLE : FBForm<0x33, "fble">;
+def FBNE : FBForm<0x35, "fbne">;
+def FBGE : FBForm<0x36, "fbge">;
+def FBGT : FBForm<0x37, "fbgt">;
+}
+
 def : Pat<(AlphaBrNE GPRC:$Ra, bb:$target), (BNE GPRC:$Ra, bb:$target)>;
 // A low-bit test folds the mask into blbs/blbc (branch on low bit set/clear).
 def : Pat<(AlphaBrNE (and GPRC:$Ra, 1), bb:$target),

@@ -199,6 +199,8 @@ multiclass AlphaInstRW {
   def : InstRW<[Wr_JSR], (instrs OTS_CALL)>;
   def : InstRW<[Wr_IALU, Wr_IALU], (instrs LDGPself)>;
   def : InstRW<[Wr_FAdd], (instrs CVTQT_D, CVTST_S, CVTTQ_SVID)>;
+  // An FP branch tests an FP register, which changes nothing here.
+  def : InstRW<[Wr_Br], (instrs FBEQ, FBNE, FBLT, FBLE, FBGT, FBGE)>;
 }
 
 //===----------------------------------------------------------------------===//
