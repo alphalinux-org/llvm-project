@@ -14,6 +14,7 @@
 #define LLVM_CLANG_LIB_BASIC_TARGETS_ALPHA_H
 
 #include "clang/Basic/TargetInfo.h"
+#include "llvm/ADT/StringSwitch.h"
 #include "llvm/TargetParser/Triple.h"
 
 namespace clang {
@@ -21,6 +22,14 @@ namespace targets {
 
 class LLVM_LIBRARY_VISIBILITY AlphaTargetInfo : public TargetInfo {
   static const char *const GCCRegNames[];
+
+  // Optional instruction-set extensions, selected by -mcpu or -m<ext> flags.
+  bool HasBWX = false; // Byte/word memory access.
+  bool HasCIX = false; // Count instructions.
+  bool HasMVI = false; // Motion video instructions.
+  bool HasFIX = false; // Float/int register moves and conversions.
+
+  std::string CPU = "generic"; // Selected processor (-mcpu).
 
 public:
   AlphaTargetInfo(const llvm::Triple &Triple, const TargetOptions &)
@@ -60,8 +69,57 @@ public:
     return TargetInfo::AlphaABIBuiltinVaList;
   }
 
+  // Turn the selected processor into the instruction set extensions it
+  // implements, matching the ProcessorModel definitions in Alpha.td and the
+  // sets GCC's -mcpu= implies.
+  bool
+  initFeatureMap(llvm::StringMap<bool> &Features, DiagnosticsEngine &Diags,
+                 StringRef CPU,
+                 const std::vector<std::string> &FeaturesVec) const override {
+    bool BWX = false, MVI = false, FIX = false, CIX = false;
+    if (CPU == "ev56") {
+      BWX = true;
+    } else if (CPU == "pca56") {
+      BWX = MVI = true;
+    } else if (CPU == "ev6") {
+      BWX = MVI = FIX = true;
+    } else if (CPU == "ev67") {
+      BWX = MVI = FIX = CIX = true;
+    }
+    if (BWX)
+      Features["bwx"] = true;
+    if (MVI)
+      Features["mvi"] = true;
+    if (FIX)
+      Features["fix"] = true;
+    if (CIX)
+      Features["cix"] = true;
+    return TargetInfo::initFeatureMap(Features, Diags, CPU, FeaturesVec);
+  }
+
+  bool handleTargetFeatures(std::vector<std::string> &Features,
+                            DiagnosticsEngine &Diags) override {
+    for (const std::string &Feature : Features) {
+      if (Feature == "+bwx")
+        HasBWX = true;
+      else if (Feature == "+cix")
+        HasCIX = true;
+      else if (Feature == "+mvi")
+        HasMVI = true;
+      else if (Feature == "+fix")
+        HasFIX = true;
+    }
+    return true;
+  }
+
   bool hasFeature(StringRef Feature) const override {
-    return Feature == "alpha";
+    return llvm::StringSwitch<bool>(Feature)
+        .Case("alpha", true)
+        .Case("bwx", HasBWX)
+        .Case("cix", HasCIX)
+        .Case("mvi", HasMVI)
+        .Case("fix", HasFIX)
+        .Default(false);
   }
 
   ArrayRef<const char *> getGCCRegNames() const override;
@@ -84,6 +142,11 @@ public:
   bool isValidCPUName(StringRef Name) const override {
     return Name == "generic" || Name == "ev4" || Name == "ev5" ||
            Name == "ev56" || Name == "ev6" || Name == "ev67";
+  }
+
+  bool setCPU(StringRef Name) override {
+    CPU = Name.str();
+    return isValidCPUName(Name);
   }
 };
 
