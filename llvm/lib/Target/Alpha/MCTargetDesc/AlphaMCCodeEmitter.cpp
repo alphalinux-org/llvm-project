@@ -182,9 +182,21 @@ AlphaMCCodeEmitter::getBranchTargetEncoding(const MCInst &MI, unsigned OpNo,
   if (MO.isImm())
     return static_cast<unsigned>(MO.getImm());
   assert(MO.isExpr() && "expected an expression for a branch target");
-  Fixups.push_back(MCFixup::create(0, MO.getExpr(),
-                                   MCFixupKind(Alpha::fixup_alpha_braddr),
-                                   /*PCRel=*/true));
+  // A `!samegp` suffix requests a BRSGP relocation instead of the usual BRADDR.
+  // It is the only suffix a branch displacement takes; taking whichever one was
+  // written as the fixup kind put it on the branch, so `br $31, foo !literal'
+  // assembled to a branch carrying R_ALPHA_LITERAL.
+  Alpha::Fixups Kind = Alpha::fixup_alpha_braddr;
+  if (auto *SE = dyn_cast<MCSpecifierExpr>(MO.getExpr())) {
+    if (SE->getSpecifier() != Alpha::fixup_alpha_brsgp) {
+      Ctx.reportError(MO.getExpr()->getLoc(),
+                      "unsupported relocation specifier on a branch target");
+      return 0;
+    }
+    Kind = Alpha::fixup_alpha_brsgp;
+  }
+  Fixups.push_back(
+      MCFixup::create(0, MO.getExpr(), MCFixupKind(Kind), /*PCRel=*/true));
   return 0;
 }
 

@@ -53,6 +53,8 @@ protected:
       return IsPCRel ? ELF::R_ALPHA_SREL64 : ELF::R_ALPHA_REFQUAD;
     case Alpha::fixup_alpha_braddr:
       return ELF::R_ALPHA_BRADDR;
+    case Alpha::fixup_alpha_brsgp:
+      return ELF::R_ALPHA_BRSGP;
     case Alpha::fixup_alpha_literal:
       return ELF::R_ALPHA_LITERAL;
     case Alpha::fixup_alpha_gprelhigh:
@@ -101,6 +103,11 @@ protected:
     case ELF::R_ALPHA_DTPRELHI:
     case ELF::R_ALPHA_DTPRELLO:
     case ELF::R_ALPHA_HINT:
+    // The linker checks st_other of the target symbol to apply STO_ALPHA_NOPV
+    // / STO_ALPHA_STD_GPLOAD semantics for !samegp optimization.  Using a
+    // section-relative reloc would lose the symbol identity and make the
+    // linker emit "!samegp reloc against symbol without .prologue".
+    case ELF::R_ALPHA_BRSGP:
       return true;
     default:
       return false;
