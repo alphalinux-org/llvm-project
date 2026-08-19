@@ -160,6 +160,12 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   setOperationAction(ISD::ROTL, MVT::i64, Expand);
   setOperationAction(ISD::ROTR, MVT::i64, Expand);
 
+  // i128 shifts arrive as *_PARTS nodes; there is no instruction that shifts a
+  // register pair, so expand them into the generic shift/select sequence.
+  setOperationAction(ISD::SHL_PARTS, MVT::i64, Expand);
+  setOperationAction(ISD::SRA_PARTS, MVT::i64, Expand);
+  setOperationAction(ISD::SRL_PARTS, MVT::i64, Expand);
+
   // umulh provides the high half of an unsigned 64x64 multiply; the signed high
   // multiply is expanded in terms of it.
   setOperationAction(ISD::MULHU, MVT::i64, Legal);
