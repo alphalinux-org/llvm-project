@@ -228,6 +228,46 @@ public:
 
 bool AlphaAsmParser::matchRegister(StringRef Name, MCRegister &Reg) {
   Reg = MatchRegisterName(Name);
+  if (Reg)
+    return false;
+  // The ABI register aliases (used throughout hand-written kernel assembly) are
+  // not produced by the generated matcher, so map them here.
+  Reg = StringSwitch<MCRegister>(Name)
+            .Case("$v0", Alpha::R0)
+            .Case("$t0", Alpha::R1)
+            .Case("$t1", Alpha::R2)
+            .Case("$t2", Alpha::R3)
+            .Case("$t3", Alpha::R4)
+            .Case("$t4", Alpha::R5)
+            .Case("$t5", Alpha::R6)
+            .Case("$t6", Alpha::R7)
+            .Case("$t7", Alpha::R8)
+            .Case("$s0", Alpha::R9)
+            .Case("$s1", Alpha::R10)
+            .Case("$s2", Alpha::R11)
+            .Case("$s3", Alpha::R12)
+            .Case("$s4", Alpha::R13)
+            .Case("$s5", Alpha::R14)
+            .Case("$fp", Alpha::R15)
+            .Case("$s6", Alpha::R15)
+            .Case("$a0", Alpha::R16)
+            .Case("$a1", Alpha::R17)
+            .Case("$a2", Alpha::R18)
+            .Case("$a3", Alpha::R19)
+            .Case("$a4", Alpha::R20)
+            .Case("$a5", Alpha::R21)
+            .Case("$t8", Alpha::R22)
+            .Case("$t9", Alpha::R23)
+            .Case("$t10", Alpha::R24)
+            .Case("$t11", Alpha::R25)
+            .Case("$ra", Alpha::R26)
+            .Case("$pv", Alpha::R27)
+            .Case("$t12", Alpha::R27)
+            .Case("$at", Alpha::R28)
+            .Case("$gp", Alpha::R29)
+            .Case("$sp", Alpha::R30)
+            .Case("$zero", Alpha::R31)
+            .Default(MCRegister());
   return Reg == MCRegister();
 }
 
