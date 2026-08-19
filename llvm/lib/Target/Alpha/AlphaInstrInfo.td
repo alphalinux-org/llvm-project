@@ -308,58 +308,54 @@ def DIVT : FP_rr<0x0a3, "divt", f64, fdiv>;
 class CMPT_rr<bits<11> func, string mnem>
     : FForm<0x16, func, (outs FPRC:$Rc), (ins FPRC:$Ra, FPRC:$Rb),
             mnem # " $Ra, $Rb, $Rc", []>;
-def CMPTEQ : CMPT_rr<0x0a5,"cmpteq">;
-def CMPTLT : CMPT_rr<0x0a6,"cmptlt">;
-def CMPTLE : CMPT_rr<0x0a7,"cmptle">;
+def CMPTEQ : CMPT_rr<0x0a5, "cmpteq">;
+def CMPTLT : CMPT_rr<0x0a6, "cmptlt">;
+def CMPTLE : CMPT_rr<0x0a7, "cmptle">;
 
 // Floating-point conditional move: `fcmovne $Fa, $Fb, $Fc` sets $Fc = $Fb when
 // $Fa != 0.0.  With $Fc preset to the false value this implements an FP select.
-let Constraints = "$Ffalse = $Fc" in
-def FCMOVNE : AlphaInst<(outs FPRC:$Fc),
-                        (ins FPRC:$Ffalse, FPRC:$Fa, FPRC:$Fb),
-                        "fcmovne $Fa, $Fb, $Fc", []> {
-  let Opcode = 0x17;
-}
+let Constraints = "$Ffalse = $Rc" in
+def FCMOVNE : FForm<0x17, 0x02b, (outs FPRC:$Rc),
+                    (ins FPRC:$Ffalse, FPRC:$Ra, FPRC:$Rb),
+                    "fcmovne $Ra, $Rb, $Rc", []>;
 
-// Precision conversions between S_floating (f32) and T_floating (f64).  Both
-// stay in floating-point registers.
-def CVTST : AlphaInst<(outs FPRC:$Fc), (ins FPRC:$Fb), "cvtst $Fb, $Fc",
-                      [(set f64:$Fc, (fpextend f32:$Fb))]> {
-  let Opcode = 0x16;
+// Unary floating-point operate: single source $Rb (with Fa = $f31), result $Rc.
+class FP_r<bits<6> opc, bits<11> func, string mnem, list<dag> pat>
+    : FForm<opc, func, (outs FPRC:$Rc), (ins FPRC:$Rb), mnem # " $Rb, $Rc", pat> {
+  let Ra = 31;
 }
-def CVTTS : AlphaInst<(outs FPRC:$Fc), (ins FPRC:$Fb), "cvtts $Fb, $Fc",
-                      [(set f32:$Fc, (fpround f64:$Fb))]> {
-  let Opcode = 0x16;
+// Precision conversions between S_floating (f32) and T_floating (f64).
+def CVTST : FP_r<0x16, 0x2ac, "cvtst", [(set f64:$Rc, (fpextend f32:$Rb))]>;
+def CVTTS : FP_r<0x16, 0x0ac, "cvtts", [(set f32:$Rc, (fpround f64:$Rb))]>;
+
+// Square root, from the FIX extension (ev6).
+let Predicates = [HasFIX], hasSideEffects = 0 in {
+def SQRTS : FP_r<0x14, 0x08b, "sqrts", [(set f32:$Rc, (fsqrt f32:$Rb))]>;
+def SQRTT : FP_r<0x14, 0x0ab, "sqrtt", [(set f64:$Rc, (fsqrt f64:$Rb))]>;
 }
 
 // Integer/floating conversions on values held in floating-point registers.
-def CVTQT : AlphaInst<(outs FPRC:$Fc), (ins FPRC:$Fb), "cvtqt $Fb, $Fc", []> {
-  let Opcode = 0x16;
-}
-def CVTQS : AlphaInst<(outs FPRC:$Fc), (ins FPRC:$Fb), "cvtqs $Fb, $Fc", []> {
-  let Opcode = 0x16;
-}
+def CVTQT : FP_r<0x16, 0x0be, "cvtqt", []>;
+def CVTQS : FP_r<0x16, 0x0bc, "cvtqs", []>;
 // cvttq/c: convert T-floating to quadword with chopped (round-toward-zero)
 // rounding, matching C's fp-to-integer truncation semantics.
-def CVTTQ : AlphaInst<(outs FPRC:$Fc), (ins FPRC:$Fb), "cvttq/c $Fb, $Fc", []> {
-  let Opcode = 0x16;
-}
+def CVTTQ : FP_r<0x16, 0x02f, "cvttq/c", []>;
 
 // Load address: `lda $Rc, $disp($Rb)` computes $Rc = $Rb + sign_ext($disp).
 // With $Rb = $31 (zero) this materializes a 16-bit signed constant.
 def LDA : MFormD<0x08, (outs GPRC:$Ra), (ins s16imm:$disp, GPRC:$Rb),
-                    "lda $Ra, $disp($Rb)", []>;
+                 "lda $Ra, $disp($Rb)", []>;
 
 // Load effective address, with a base+displacement operand so a frame index can
 // be materialized (and rewritten by eliminateFrameIndex).
 let hasSideEffects = 0 in
-def LEA : MForm<0x08, (outs GPRC:$Rc), (ins memri:$addr), "lda $Rc, $addr", []>;
+def LEA : MForm<0x08, (outs GPRC:$Ra), (ins memri:$addr), "lda $Ra, $addr", []>;
 
 // Load address high: `ldah $Rc, $disp($Rb)` computes
 // $Rc = $Rb + (sign_ext($disp) << 16).  Paired with lda it materializes a
 // 32-bit signed constant.
 def LDAH : MFormD<0x09, (outs GPRC:$Ra), (ins s16imm:$disp, GPRC:$Rb),
-                     "ldah $Ra, $disp($Rb)", []>;
+                  "ldah $Ra, $disp($Rb)", []>;
 
 } // hasSideEffects = 0, mayLoad = 0, mayStore = 0
 
