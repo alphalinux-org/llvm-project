@@ -1881,3 +1881,82 @@ def : Pat<(int_alpha_ctpop i64:$x), (CTPOP GPRC:$x)>;
 def : Pat<(int_alpha_ctlz i64:$x),  (CTLZ GPRC:$x)>;
 def : Pat<(int_alpha_cttz i64:$x),  (CTTZ GPRC:$x)>;
 }
+
+//===----------------------------------------------------------------------===//
+// Additional operand forms accepted by the assembler (GNU as compatibility).
+//
+// These parse the syntaxes the kernel's hand-written assembly uses.  They carry
+// no codegen patterns; the codegen forms above stay isCodeGenOnly where a
+// spelling differs.
+//===----------------------------------------------------------------------===//
+
+let hasSideEffects = 0 in {
+
+// Byte/word/long/quad extract, insert and mask, plus zap and cmpbge, with a
+// literal position (the register forms are defined above; the byte/word low
+// ext forms and zapnot already carry their own literal form).
+class BLit<bits<6> opc, bits<7> func, string mnem>
+    : OFormL<opc, func, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
+             mnem # " $Ra, $lit, $Rc", []>;
+def CMPBGEi : BLit<0x10, 0x0f, "cmpbge">;
+def ZAPi    : BLit<0x12, 0x30, "zap">;
+def EXTQLi  : BLit<0x12, 0x36, "extql">;
+def EXTWHi  : BLit<0x12, 0x5a, "extwh">;
+def EXTLHi  : BLit<0x12, 0x6a, "extlh">;
+def EXTQHi  : BLit<0x12, 0x7a, "extqh">;
+def INSBLi  : BLit<0x12, 0x0b, "insbl">;
+def INSWLi  : BLit<0x12, 0x1b, "inswl">;
+def INSLLi  : BLit<0x12, 0x2b, "insll">;
+def INSQLi  : BLit<0x12, 0x3b, "insql">;
+def INSWHi  : BLit<0x12, 0x57, "inswh">;
+def INSLHi  : BLit<0x12, 0x67, "inslh">;
+def INSQHi  : BLit<0x12, 0x77, "insqh">;
+def MSKBLi  : BLit<0x12, 0x02, "mskbl">;
+def MSKWLi  : BLit<0x12, 0x12, "mskwl">;
+def MSKLLi  : BLit<0x12, 0x22, "mskll">;
+def MSKQLi  : BLit<0x12, 0x32, "mskql">;
+def MSKWHi  : BLit<0x12, 0x52, "mskwh">;
+def MSKLHi  : BLit<0x12, 0x62, "msklh">;
+def MSKQHi  : BLit<0x12, 0x72, "mskqh">;
+
+// Conditional moves with a literal true-value, cmovXX $Ra, $lit, $Rc.
+def CMOVEQi  : BLit<0x11, 0x24, "cmoveq">;
+def CMOVNEi  : BLit<0x11, 0x26, "cmovne">;
+def CMOVLTi  : BLit<0x11, 0x44, "cmovlt">;
+def CMOVGEi  : BLit<0x11, 0x46, "cmovge">;
+def CMOVLEi  : BLit<0x11, 0x64, "cmovle">;
+def CMOVGTi  : BLit<0x11, 0x66, "cmovgt">;
+def CMOVLBSi : BLit<0x11, 0x14, "cmovlbs">;
+def CMOVLBCi : BLit<0x11, 0x16, "cmovlbc">;
+// The literal forms of the operate instructions that have no pattern of their
+// own, and of the ones whose pattern only ever sees a register.  An operate
+// instruction takes a literal wherever it takes $Rb, so leaving these out left
+// words the assembler could not write and the disassembler could not read.
+def ORNOTi  : BLit<0x11, 0x28, "ornot">;
+def EQVi    : BLit<0x11, 0x48, "eqv">;
+def UMULHi  : BLit<0x13, 0x30, "umulh">;
+let Predicates = [HasMVI] in {
+def MINSB8i : BLit<0x1c, 0x38, "minsb8">;
+def MINSW4i : BLit<0x1c, 0x39, "minsw4">;
+def MINUB8i : BLit<0x1c, 0x3a, "minub8">;
+def MINUW4i : BLit<0x1c, 0x3b, "minuw4">;
+def MAXUB8i : BLit<0x1c, 0x3c, "maxub8">;
+def MAXUW4i : BLit<0x1c, 0x3d, "maxuw4">;
+def MAXSB8i : BLit<0x1c, 0x3e, "maxsb8">;
+def MAXSW4i : BLit<0x1c, 0x3f, "maxsw4">;
+}
+
+// amask with a literal mask, amask $lit, $Rc ($Ra is the zero register).
+def AMASKi : OFormL<0x11, 0x61, (outs GPRC:$Rc), (ins u8imm:$lit),
+                    "amask $lit, $Rc", []> {
+  let Ra = 31;
+}
+} // hasSideEffects = 0
+
+// andnot: an alias of bic (and with the complement of the second operand).
+def : InstAlias<"andnot $Ra, $Rb, $Rc", (BIC GPRC:$Rc, GPRC:$Ra, GPRC:$Rb)>;
+def : InstAlias<"andnot $Ra, $lit, $Rc", (BICi GPRC:$Rc, GPRC:$Ra, u8imm:$lit)>;
+
+// xornot: the same for eqv (exclusive or with the complement).
+def : InstAlias<"xornot $Ra, $Rb, $Rc", (EQV GPRC:$Rc, GPRC:$Ra, GPRC:$Rb)>;
+def : InstAlias<"xornot $Ra, $lit, $Rc", (EQVi GPRC:$Rc, GPRC:$Ra, u8imm:$lit)>;

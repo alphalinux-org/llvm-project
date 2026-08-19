@@ -82,7 +82,7 @@ multiclass AlphaInstRW {
       ADDL, ADDQ, ADDQi, SUBQ, SUBQi, S4ADDQ, S8ADDQ, S4SUBQ, S8SUBQ,
       LDA, LDAH, LEA, AMASK, IMPLVER, SEXTB, SEXTW)>;
   def : InstRW<[Wr_ILog], (instrs
-      AND, ANDi, BIC, BICi, BIS, BISi, ORNOT, XOR, XORi, EQV)>;
+      AND, ANDi, BIC, BICi, BIS, BISi, ORNOT, ORNOTi, XOR, XORi, EQV, EQVi)>;
   def : InstRW<[Wr_ICmp], (instrs
       CMPEQ, CMPLE, CMPLT, CMPULE, CMPULT, CMPBGE)>;
   // The condition operand ($Ra, the second source) can be forwarded early.
@@ -97,6 +97,7 @@ multiclass AlphaInstRW {
   def : InstRW<[Wr_IMul, Rd_IMulOp, Rd_IMulOp], (instrs MULQ)>;
   def : InstRW<[Wr_IMul, Rd_IMulOp], (instrs MULQi)>;
   def : InstRW<[Wr_IMulH, Rd_IMulOp, Rd_IMulOp], (instrs UMULH)>;
+  def : InstRW<[Wr_IMulH, Rd_IMulOp], (instrs UMULHi)>;
   // Split by arity so the source operands can carry Rd_IMVIOp, which the EV6
   // uses to model the cluster crossing from the multiplier.
   def : InstRW<[Wr_IMVI, Rd_IMVIOp], (instrs
@@ -104,6 +105,9 @@ multiclass AlphaInstRW {
   def : InstRW<[Wr_IMVI, Rd_IMVIOp, Rd_IMVIOp], (instrs
       PERR,
       MINSB8, MINSW4, MINUB8, MINUW4, MAXSB8, MAXSW4, MAXUB8, MAXUW4)>;
+  def : InstRW<[Wr_IMVI, Rd_IMVIOp], (instrs
+      MINSB8i, MINSW4i, MINUB8i, MINUW4i, MAXSB8i, MAXSW4i, MAXUB8i,
+      MAXUW4i)>;
   def : InstRW<[Wr_ILoad], (instrs
       LDQ, LDL, LDBU, LDWU, LDQ_U, LDL_L, LDQ_L,
       LDQd, LDQg, LDQl, LDQt, LDQtp, LDLd, LDLg, LDLt)>;
@@ -170,6 +174,15 @@ multiclass AlphaInstRW {
   def : InstRW<[Wr_JSR], (instrs BSR)>;
   def : InstRW<[Wr_ICmp], (instrs CMPEQi, CMPLEi, CMPLTi, CMPULEi, CMPULTi)>;
   def : InstRW<[Wr_Misc], (instrs CALL_PAL)>;
+  def : InstRW<[Wr_IALU], (instrs AMASKi)>;
+  def : InstRW<[Wr_ICmp], (instrs CMPBGEi)>;
+  def : InstRW<[Wr_ICmov, ReadDefault, Rd_ITest], (instrs
+      CMOVEQi, CMOVNEi, CMOVLTi, CMOVGTi, CMOVGEi, CMOVLEi, CMOVLBCi,
+      CMOVLBSi)>;
+  def : InstRW<[Wr_IShift], (instrs
+      ZAPi, EXTQLi, EXTWHi, EXTLHi, EXTQHi, INSBLi, INSWLi, INSLLi, INSQLi,
+      INSWHi, INSLHi, INSQHi, MSKBLi, MSKWLi, MSKLLi, MSKQLi, MSKWHi, MSKLHi,
+      MSKQHi)>;
 }
 
 //===----------------------------------------------------------------------===//
