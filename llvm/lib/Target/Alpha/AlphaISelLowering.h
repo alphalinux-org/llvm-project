@@ -365,6 +365,11 @@ public:
     return CI->isTailCall();
   }
 
+  // True if a call to GV is known to run on this function's global pointer, so
+  // that a tail jump to it returns to our caller with $29 still holding the
+  // caller's gp.  The GlobalISel call lowering asks the same question.
+  bool calleeSharesGP(const GlobalValue &GV) const;
+
   // True if a call in tail position could be selected as a tail jump.  This
   // answers for the IR call site, before instruction selection makes the real
   // decision in isEligibleForTailCallOptimization, so that CoroSplit can tell
@@ -383,11 +388,6 @@ private:
       CallingConv::ID CallerCC, CallingConv::ID CalleeCC, bool IsVarArg,
       unsigned NumStackBytes, const SmallVectorImpl<ISD::OutputArg> &Outs,
       SDValue Callee) const;
-
-  // True if a call to GV is known to run on this function's global pointer, so
-  // that a tail jump to it returns to our caller with $29 still holding the
-  // caller's gp.
-  bool calleeSharesGP(const GlobalValue &GV) const;
 
   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerGlobalTLSAddress(SDValue Op, SelectionDAG &DAG) const;

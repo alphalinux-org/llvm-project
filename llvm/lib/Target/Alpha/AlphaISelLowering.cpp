@@ -1814,7 +1814,7 @@ SDValue AlphaTargetLowering::LowerDivRem(SDValue Op, SelectionDAG &DAG) const {
 
 // Whether a relocation may name a global's definition directly, rather than
 // going through the GOT entry that stands in for it.
-static bool isDirectlyNameable(const GlobalValue &GV) {
+bool llvm::isAlphaDirectlyNameable(const GlobalValue &GV) {
   // A preemptible symbol's address is whatever the dynamic linker picks.
   if (!GV.isDSOLocal())
     return false;
@@ -1834,8 +1834,8 @@ static bool isDirectlyNameable(const GlobalValue &GV) {
 // covering a signed 32-bit displacement, which reaches anywhere in the data
 // segment, so the only question is whether the linker will let this reference
 // see the definition's own address.  This mirrors gcc's local_symbolic_operand.
-static bool isGprelAddressable(const GlobalValue &GV) {
-  if (!isDirectlyNameable(GV))
+bool llvm::isAlphaGprelAddressable(const GlobalValue &GV) {
+  if (!isAlphaDirectlyNameable(GV))
     return false;
   // dso_local is not enough on its own.  Under -fno-pic clang marks every
   // symbol dso_local, including a plain `extern` declaration of something that
@@ -1884,11 +1884,8 @@ SDValue AlphaTargetLowering::LowerGlobalAddress(SDValue Op,
   // picks, so it is reached through the GOT -- gcc does exactly this, emitting
   // `.sbss' placement together with an `!literal' load for a
   // default-visibility global built -fPIC -msmall-data.
-  if (isGprelAddressable(*N->getGlobal())) {
-    SDValue GP = DAG.getRegister(Alpha::R29, MVT::i64);
-    SDValue Hi = DAG.getNode(AlphaISD::GPREL_HI, DL, MVT::i64, TGA, GP);
-    return DAG.getNode(AlphaISD::GPREL_LO, DL, MVT::i64, TGA, Hi);
-  }
+  if (isAlphaGprelAddressable(*N->getGlobal()))
+    return getGPRelAddress(DAG, DL, TGA);
   return DAG.getNode(AlphaISD::LITERAL, DL, MVT::i64, TGA);
 }
 
@@ -2236,7 +2233,7 @@ bool AlphaTargetLowering::calleeSharesGP(const GlobalValue &GV) const {
   // construction.  -msmall-data is the promise that the module needs only one
   // gp at all; gcc's decl_has_samegp takes it as sufficient too.
   if (Subtarget.hasSmallData() ||
-      (Subtarget.hasSmallText() && isDirectlyNameable(GV)))
+      (Subtarget.hasSmallText() && isAlphaDirectlyNameable(GV)))
     return true;
   // Otherwise only a definition in this module is known to sit in our gp
   // region: the linker may give another translation unit's, even one linked
@@ -2326,7 +2323,7 @@ SDValue AlphaTargetLowering::LowerCall(CallLoweringInfo &CLI,
     // resolver's answer is used rather than the resolver itself, and an
     // undefined weak symbol has no address to branch to at all.
     BsrCall =
-        Subtarget.hasSmallText() && isDirectlyNameable(*G->getGlobal());
+        Subtarget.hasSmallText() && isAlphaDirectlyNameable(*G->getGlobal());
   } else if (auto *E = dyn_cast<ExternalSymbolSDNode>(Callee)) {
     // A runtime-library callee has no GlobalValue to ask about preemption, so
     // take the GOT: memcpy and friends are commonly the shared libc's.
