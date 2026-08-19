@@ -21,11 +21,22 @@
 # CHECK-NEXT: R_ALPHA_HINT callee
 	jsr $26, ($27), callee
 
+## A tail call spells the same thing with a jmp.
+# CHECK-NEXT: jmp $31, ($27), 0
+# CHECK-NEXT: R_ALPHA_LITUSE *ABS*+0x3
+# CHECK-NEXT: R_ALPHA_HINT callee
+# CHECK-NEXT: jmp $31, ($27), 0
+# CHECK-NEXT: R_ALPHA_HINT callee
+	jmp $31, ($27), callee	!lituse_jsr!1
+	jmp $31, ($27), callee
+
 ## A plain number is a hint value, not a symbol, and needs no relocation.
 # CHECK-NEXT: jsr $26, ($27)
+# CHECK-NEXT: jmp $31, ($27), 0
 # CHECK-NEXT: jsr $26, ($27)
 # CHECK-NEXT: ret
 	jsr $26, ($27), 0
+	jmp $31, ($27), 0
 	jsr $26, ($27)
 	ret
 

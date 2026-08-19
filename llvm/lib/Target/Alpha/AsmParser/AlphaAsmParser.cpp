@@ -842,17 +842,6 @@ void AlphaAsmParser::emitLoadImm(MCRegister Rc, int64_t V, SMLoc L,
     emitConst32(Rc, Lo32, Rc, L, Out);
 }
 
-// A parsed operand that is exactly the constant `V`.  The full spellings of
-// ret and jmp below carry fields the bare encodings do not, so each is taken
-// only where what it says is what the encoding holds.
-static bool isConstImm(MCParsedAsmOperand &Op, int64_t V) {
-  auto &AOp = static_cast<AlphaOperand &>(Op);
-  if (!AOp.isImm())
-    return false;
-  const auto *CE = dyn_cast<MCConstantExpr>(AOp.getImm());
-  return CE && CE->getValue() == V;
-}
-
 bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
                                              OperandVector &Operands,
                                              MCStreamer &Out,
@@ -944,21 +933,6 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     Call.addOperand(MCOperand::createReg(Alpha::R27));
     Call.setLoc(IDLoc);
     Out.emitInstruction(Call, getSTI());
-    return false;
-  }
-
-  // jmp $31, ($Rb), 0: an indirect jump through $Rb.  JMP holds neither the
-  // link register nor the hint, so only the spelling whose fields the encoding
-  // can hold is taken here.
-  if (Mnemonic == "jmp" && Operands.size() == 4 && Operands[1]->isReg() &&
-      Operands[2]->isMem() && isConstImm(*Operands[3], 0) &&
-      static_cast<AlphaOperand &>(*Operands[1]).getReg() == Alpha::R31) {
-    MCInst Inst;
-    Inst.setOpcode(Alpha::JMP);
-    Inst.addOperand(MCOperand::createReg(
-        static_cast<AlphaOperand &>(*Operands[2]).getMemBase()));
-    Inst.setLoc(IDLoc);
-    Out.emitInstruction(Inst, getSTI());
     return false;
   }
 
