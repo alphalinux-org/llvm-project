@@ -94,13 +94,15 @@ protected:
   }
 
   bool needsRelocateWithSymbol(const MCValue &, unsigned Type) const override {
-    // The GP-relative and TLS relocations reference the symbol itself.  The GOT
-    // literal is left section-relative for a local symbol so the linker can
-    // pair it with a lituse_jsr and relax the call; an external symbol keeps
-    // its name because it has no local section to fold into.
+    // The TLS relocations reference the symbol itself.  The GOT literal is left
+    // section-relative for a local symbol so the linker can pair it with a
+    // lituse_jsr and relax the call; an external symbol keeps its name because
+    // it has no local section to fold into.  A GP-relative relocation computes
+    // sym + addend - GP, which a section symbol and an addend give just as
+    // well, so those do not pin the symbol: pinning them dragged every jump
+    // table's block labels and every constant-pool entry into the symbol table,
+    // where a symbolizer picked one of them over the function containing it.
     switch (Type) {
-    case ELF::R_ALPHA_GPRELHIGH:
-    case ELF::R_ALPHA_GPRELLOW:
     case ELF::R_ALPHA_TPRELHI:
     case ELF::R_ALPHA_TPRELLO:
     case ELF::R_ALPHA_GOTTPREL:
