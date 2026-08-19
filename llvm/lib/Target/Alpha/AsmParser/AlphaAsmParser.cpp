@@ -398,6 +398,31 @@ ParseStatus AlphaAsmParser::parseDirective(AsmToken DirectiveID) {
     getParser().eatToEndOfStatement();
     return ParseStatus::Success;
   }
+  // `.gprel32 sym` emits a 32-bit GP-relative value (R_ALPHA_GPREL32).
+  if (ID == ".gprel32") {
+    const MCExpr *Expr;
+    if (getParser().parseExpression(Expr))
+      return ParseStatus::Failure;
+    getParser().eatToEndOfStatement();
+    // There is no `!gprel32' suffix to print: the `!' grammar attaches a
+    // relocation specifier to an instruction operand, never to a data
+    // directive.  So assembly output echoes the directive itself, the way
+    // AlphaAsmPrinter::emitJumpTableEntry writes a jump-table entry; emitting
+    // the value would print a bare `.long', which reassembles to
+    // R_ALPHA_REFLONG and turns a GP-relative table into an absolute one.
+    if (getStreamer().hasRawTextSupport()) {
+      SmallString<128> Str;
+      raw_svector_ostream OS(Str);
+      OS << "\t.gprel32\t";
+      getContext().getAsmInfo().printExpr(OS, *Expr);
+      getStreamer().emitRawText(OS.str());
+      return ParseStatus::Success;
+    }
+    const MCExpr *GPRel =
+        MCSpecifierExpr::create(Expr, Alpha::fixup_alpha_gprel32, getContext());
+    getStreamer().emitValue(GPRel, 4, DirectiveID.getLoc());
+    return ParseStatus::Success;
+  }
   return ParseStatus::NoMatch;
 }
 
