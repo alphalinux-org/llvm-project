@@ -66,7 +66,8 @@ def AlphaCallDirect : SDNode<"AlphaISD::CALL_DIRECT", SDT_AlphaCallDirect,
 
 // A direct call to a dso-local callee: the jsr carries only lituse_jsr, no
 // hint, so the linker may relax it to a bsr.
-def AlphaCallDirectLocal : SDNode<"AlphaISD::CALL_DIRECT_LOCAL", SDTNone,
+def AlphaCallDirectLocal : SDNode<"AlphaISD::CALL_DIRECT_LOCAL",
+                                  SDT_AlphaCallDirect,
                                   [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
                                    SDNPVariadic]>;
 
@@ -75,16 +76,26 @@ def AlphaCallBsr : SDNode<"AlphaISD::CALL_BSR", SDT_AlphaCallDirect,
                           [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
                            SDNPVariadic]>;
 
-// The -msmall-text form of a tail call: a br straight to the callee.
+// The direct forms of a tail call: with the callee symbol, so the jmp can carry
+// the hint and lituse_jsr relocations; without, for a dso-local callee, which
+// takes only the lituse; and the -msmall-text form, a br straight to the
+// callee.
+def AlphaTCReturnDirect : SDNode<"AlphaISD::TC_RETURN_DIRECT",
+                                 SDT_AlphaCallDirect,
+                                 [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
+def AlphaTCReturnDirectLocal : SDNode<"AlphaISD::TC_RETURN_DIRECT_LOCAL",
+                                      SDT_AlphaCallDirect,
+                                      [SDNPHasChain, SDNPOptInGlue,
+                                       SDNPVariadic]>;
 def AlphaTCReturnBr : SDNode<"AlphaISD::TC_RETURN_BR", SDT_AlphaCallDirect,
                              [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 
 // Calls to __tls_get_addr in the general- and local-dynamic sequences.  The jsr
 // carries a lituse_tlsgd or lituse_tlsldm relocation so the linker can relax.
-def AlphaCallTlsgd : SDNode<"AlphaISD::CALL_TLSGD", SDTNone,
+def AlphaCallTlsgd : SDNode<"AlphaISD::CALL_TLSGD", SDT_AlphaCallDirect,
                             [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
                              SDNPVariadic]>;
-def AlphaCallTlsldm : SDNode<"AlphaISD::CALL_TLSLDM", SDTNone,
+def AlphaCallTlsldm : SDNode<"AlphaISD::CALL_TLSLDM", SDT_AlphaCallDirect,
                              [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
                               SDNPVariadic]>;
 
@@ -1108,55 +1119,43 @@ def JSR : MbrForm<0b01, (outs), (ins), "jsr $$26, ($$27)\n\tldgp $$29, 0($$26)",
   let Rb = 27;
 }
 
-// The call target of a direct jsr, carried only to attach relocations: the
-// 14-bit hint field is filled from it (R_ALPHA_HINT) and a lituse_jsr
-// relocation is emitted alongside.
-def calltarget : Operand<i64> {
-  let EncoderMethod = "getHintEncoding";
-}
+// The callee of a direct call.  It names the GOT slot the procedure value is
+// loaded from and, for a callee the linker cannot relax the call to, fills the
+// 14-bit branch-prediction hint (R_ALPHA_HINT).
+def calltarget : Operand<i64>;
 
-// A direct call: same as JSR but tagged with the callee symbol.
-let isCall = 1, Uses = [R27], Defs = [R26, R29], isCodeGenOnly = 1,
-    Size = 12 in
-def JSRd : MbrForm<0b01, (outs), (ins calltarget:$sym),
-                   "jsr $$26, ($$27)\n\tldgp $$29, 0($$26)", []> {
-  bits<14> sym;
-  let Ra = 26;
-  let Rb = 27;
-  let hint = sym;
+// A direct call.  The procedure value is loaded here rather than wherever the
+// address happened to be materialized: a linker may only delete the load if
+// every use of it is a call it has just turned into a branch, so each call
+// needs its own, exactly as gcc emits them.
+// Size is 4 (ldq) + 4 (jsr) + 8 (the ldgp expansion, see emitLdgp).
+let isCall = 1, Uses = [R29], Defs = [R26, R27, R29], isCodeGenOnly = 1,
+    isPseudo = 1, Size = 16 in {
+def JSRd : AlphaInst<(outs), (ins calltarget:$sym),
+                   "ldq $$27, $sym($$29)\t\t!literal\n\tjsr $$26, ($$27)"
+                   "\n\tldgp $$29, 0($$26)", []>;
+
+// A dso-local direct call, which takes only the lituse_jsr relocation: a hint
+// would pin the jsr and stop the linker relaxing it.
+def JSRdl : AlphaInst<(outs), (ins calltarget:$sym),
+                    "ldq $$27, $sym($$29)\t\t!literal\n\tjsr $$26, ($$27)"
+                    "\n\tldgp $$29, 0($$26)", []>;
+
+// The call to __tls_get_addr in a general- or local-dynamic sequence, whose
+// jsr carries a lituse_tlsgd or lituse_tlsldm instead.
+def JSRtlsgd : AlphaInst<(outs), (ins calltarget:$sym),
+                         "ldq $$27, $sym($$29)\t\t!literal"
+                         "\n\tjsr $$26, ($$27)\n\tldgp $$29, 0($$26)", []>;
+def JSRtlsldm : AlphaInst<(outs), (ins calltarget:$sym),
+                          "ldq $$27, $sym($$29)\t\t!literal"
+                          "\n\tjsr $$26, ($$27)\n\tldgp $$29, 0($$26)", []>;
 }
 def : Pat<(AlphaCallDirect tglobaladdr:$sym), (JSRd tglobaladdr:$sym)>;
 def : Pat<(AlphaCallDirect texternalsym:$sym), (JSRd texternalsym:$sym)>;
-
-// A dso-local direct call: only the lituse_jsr relocation, emitted in the code
-// emitter; no callee operand is needed since lituse references the text section.
-let isCall = 1, Uses = [R27], Defs = [R26, R29], isCodeGenOnly = 1,
-    Size = 12 in
-def JSRdl : MbrForm<0b01, (outs), (ins),
-                    "jsr $$26, ($$27)\n\tldgp $$29, 0($$26)",
-                    [(AlphaCallDirectLocal)]> {
-  let Ra = 26;
-  let Rb = 27;
-}
-
-// The jsr to __tls_get_addr in a general- or local-dynamic sequence.  Encoded
-// like JSR, but the code emitter attaches a lituse_tlsgd or lituse_tlsldm
-// relocation so the linker can relax the sequence.
-let isCall = 1, Uses = [R27], Defs = [R26, R29], isCodeGenOnly = 1,
-    Size = 12 in {
-def JSRtlsgd : MbrForm<0b01, (outs), (ins),
-                       "jsr $$26, ($$27)\n\tldgp $$29, 0($$26)",
-                       [(AlphaCallTlsgd)]> {
-  let Ra = 26;
-  let Rb = 27;
-}
-def JSRtlsldm : MbrForm<0b01, (outs), (ins),
-                        "jsr $$26, ($$27)\n\tldgp $$29, 0($$26)",
-                        [(AlphaCallTlsldm)]> {
-  let Ra = 26;
-  let Rb = 27;
-}
-}
+def : Pat<(AlphaCallDirectLocal tglobaladdr:$sym), (JSRdl tglobaladdr:$sym)>;
+def : Pat<(AlphaCallDirectLocal texternalsym:$sym), (JSRdl texternalsym:$sym)>;
+def : Pat<(AlphaCallTlsgd texternalsym:$sym), (JSRtlsgd texternalsym:$sym)>;
+def : Pat<(AlphaCallTlsldm texternalsym:$sym), (JSRtlsldm texternalsym:$sym)>;
 
 // A bare jsr word (no ldgp reload); the assembler emits it for `jsr $Ra, ($Rb)`
 // and the disassembler decodes jsr words to it.
@@ -1178,6 +1177,15 @@ def jsrtarget : Operand<i64> {
 let isCall = 1, isAsmParserOnly = 1 in
 def JSRt : MbrForm<0b01, (outs), (ins GPRC:$Ra, parenGPR:$Rb, jsrtarget:$sym),
                    "jsr $Ra, $Rb, $sym", []> {
+  bits<14> sym;
+  let hint = sym;
+}
+
+// jmp $Ra, ($Rb), target: the tail-call spelling of the same thing.
+let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1,
+    isAsmParserOnly = 1 in
+def JMPt : MbrForm<0b00, (outs), (ins GPRC:$Ra, parenGPR:$Rb, jsrtarget:$sym),
+                   "jmp $Ra, $Rb, $sym", []> {
   bits<14> sym;
   let hint = sym;
 }
@@ -1951,12 +1959,34 @@ def : Pat<(brind GPRC:$r), (JMP GPRC:$r)>;
 // Tail call: jump to the procedure value in $27 without saving a return
 // address, so the callee returns straight to our caller.  The epilogue, which
 // tears down the frame and restores $26, is inserted before this terminator.
-let isCall = 1, isTerminator = 1, isReturn = 1, isBarrier = 1, Uses = [R27] in
+let isCall = 1, isTerminator = 1, isReturn = 1, isBarrier = 1, Uses = [R27],
+    isCodeGenOnly = 1 in
 def TCRETURN : MbrForm<0b00, (outs), (ins), "jmp $$31, ($$27), 0",
                        [(AlphaTCReturn)]> {
   let Ra = 31;
   let Rb = 27;
 }
+
+// The direct tail calls, which load their own procedure value for the same
+// reason a direct call does.  TCRETURNd is tagged with the callee symbol for
+// the hint as well; TCRETURNdl takes only the lituse_jsr, which leaves the
+// linker free to relax the pair into a br.
+let isCall = 1, isTerminator = 1, isReturn = 1, isBarrier = 1, Uses = [R29],
+    Defs = [R27], isCodeGenOnly = 1, isPseudo = 1, Size = 8 in {
+def TCRETURNd : AlphaInst<(outs), (ins calltarget:$sym),
+                        "ldq $$27, $sym($$29)\t\t!literal"
+                        "\n\tjmp $$31, ($$27), 0", []>;
+def TCRETURNdl : AlphaInst<(outs), (ins calltarget:$sym),
+                         "ldq $$27, $sym($$29)\t\t!literal"
+                         "\n\tjmp $$31, ($$27), 0", []>;
+}
+def : Pat<(AlphaTCReturnDirect tglobaladdr:$sym), (TCRETURNd tglobaladdr:$sym)>;
+def : Pat<(AlphaTCReturnDirect texternalsym:$sym),
+          (TCRETURNd texternalsym:$sym)>;
+def : Pat<(AlphaTCReturnDirectLocal tglobaladdr:$sym),
+          (TCRETURNdl tglobaladdr:$sym)>;
+def : Pat<(AlphaTCReturnDirectLocal texternalsym:$sym),
+          (TCRETURNdl texternalsym:$sym)>;
 
 // A direct tail call under -msmall-text: the callee is in range, so no procedure
 // value is loaded and the jump is a plain PC-relative br.  br writes its return

@@ -1,4 +1,15 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu -mcpu=ev6 < %s | FileCheck %s
+; RUN: llc -mtriple=alpha-unknown-linux-gnu -mcpu=ev6 -filetype=obj < %s \
+; RUN:   | llvm-readobj -r - | FileCheck --check-prefix=RELOC %s
+
+; A direct tail call carries the same relocations a direct call does, so the
+; linker can relax the GOT load and the jump into a single br: a lituse_jsr
+; (addend 3) marking the jump as the literal's use, preceded by nothing and
+; followed by a hint only when the callee is not dso-local.  An indirect tail
+; call has neither.
+; RELOC:      R_ALPHA_LITERAL callee
+; RELOC-NEXT: R_ALPHA_LITUSE - 0x3
+; RELOC-NEXT: R_ALPHA_HINT callee
 
 declare i64 @callee(i64)
 declare i64 @callee2(i64, i64)
