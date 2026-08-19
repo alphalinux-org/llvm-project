@@ -47,6 +47,17 @@
 	addq/su $1, $2, $3
 # CHECK: [[#@LINE-1]]:2: error: instruction does not take a floating-point qualifier
 
+## .usepv takes a symbol and one of two modes, and says so for each way of
+## getting it wrong.
+	.usepv
+# CHECK: [[#@LINE-1]]:2: error: expected symbol name after .usepv
+	.usepv foo
+# CHECK: [[#@LINE-1]]:12: error: expected ',' after symbol name
+	.usepv foo, bogus
+# CHECK: [[#@LINE-1]]:19: error: unknown .usepv mode 'bogus'
+	.usepv foo, 42
+# CHECK: [[#@LINE-1]]:14: error: expected 'std' or 'no'
+
 .endif
 
 ## The same fields filled in at layout time by a fixup rather than written
