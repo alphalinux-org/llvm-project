@@ -103,6 +103,19 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   for (auto VT : {MVT::f32, MVT::f64})
     setOperationAction(ISD::FSQRT, VT, STI.hasFIX() ? Legal : Expand);
 
+  // Alpha has no instructions for these; expand them (to libcalls such as sin,
+  // pow, floor, fmod and fma, or to compare/select sequences for min/max).
+  for (auto VT : {MVT::f32, MVT::f64})
+    for (auto Op :
+         {ISD::FSIN,       ISD::FCOS,    ISD::FSINCOS,    ISD::FTAN,
+          ISD::FPOW,       ISD::FPOWI,   ISD::FEXP,       ISD::FEXP2,
+          ISD::FEXP10,     ISD::FLOG,    ISD::FLOG2,      ISD::FLOG10,
+          ISD::FFLOOR,     ISD::FCEIL,   ISD::FTRUNC,     ISD::FRINT,
+          ISD::FNEARBYINT, ISD::FROUND,  ISD::FROUNDEVEN, ISD::FMA,
+          ISD::FREM,       ISD::FMINNUM, ISD::FMAXNUM,    ISD::FMINIMUM,
+          ISD::FMAXIMUM})
+      setOperationAction(Op, VT, Expand);
+
   // Only the ordered floating-point comparisons have direct instructions; the
   // rest are expanded into combinations of them.  SETNE belongs here too: the
   // NaN-agnostic codes otherwise map straight onto cmpteq/cmptlt/cmptle, but
