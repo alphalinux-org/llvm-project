@@ -14,12 +14,6 @@
 namespace llvm {
 
 class AlphaMachineFunctionInfo : public MachineFunctionInfo {
-  /// Frame index of the 8-byte slot an integer/floating move bounces through
-  /// without the FIX extension.  One slot serves every such move in the
-  /// function: each is a store followed immediately by its own load, so no two
-  /// are ever live at once.  -1 until the first one needs it.
-  int BitcastSlotIndex = -1;
-
   /// Whether the function establishes and uses the global pointer ($gp),
   /// which requires an ldgp in the prologue.
   bool UsesGP = false;
@@ -35,12 +29,20 @@ class AlphaMachineFunctionInfo : public MachineFunctionInfo {
   /// only when the function needs a frame pointer.  -1 if none.
   int FramePointerSaveIndex = -1;
 
+  /// The virtual register holding the incoming hidden result pointer of a
+  /// function returning in memory, which is returned again in $0.  0 if the
+  /// function has no such argument.
+  Register SRetReturnReg;
+
+  /// Frame index of the 8-byte slot an integer/floating move bounces through
+  /// without the FIX extension.  One slot serves every such move in the
+  /// function: each is a store followed immediately by its own load, so no two
+  /// are ever live at once.  -1 until the first one needs it.
+  int BitcastSlotIndex = -1;
+
 public:
   AlphaMachineFunctionInfo() = default;
   AlphaMachineFunctionInfo(const Function &F, const TargetSubtargetInfo *STI) {}
-
-  int getBitcastSlotIndex() const { return BitcastSlotIndex; }
-  void setBitcastSlotIndex(int FI) { BitcastSlotIndex = FI; }
 
   bool usesGP() const { return UsesGP; }
   void setUsesGP(bool U = true) { UsesGP = U; }
@@ -53,6 +55,12 @@ public:
 
   int getFramePointerSaveIndex() const { return FramePointerSaveIndex; }
   void setFramePointerSaveIndex(int FI) { FramePointerSaveIndex = FI; }
+
+  Register getSRetReturnReg() const { return SRetReturnReg; }
+  void setSRetReturnReg(Register R) { SRetReturnReg = R; }
+
+  int getBitcastSlotIndex() const { return BitcastSlotIndex; }
+  void setBitcastSlotIndex(int FI) { BitcastSlotIndex = FI; }
 };
 
 } // end namespace llvm

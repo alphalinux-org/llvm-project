@@ -320,6 +320,15 @@ public:
                       const SmallVectorImpl<SDValue> &OutVals, const SDLoc &DL,
                       SelectionDAG &DAG) const override;
 
+  // Anything that does not fit the single return register comes back in memory
+  // through a hidden pointer, as it does under GCC (alpha_return_in_memory
+  // returns true for every value wider than a word).  Returning false here is
+  // what makes the caller allocate the buffer and pass it in $16.
+  bool CanLowerReturn(CallingConv::ID CallConv, MachineFunction &MF,
+                      bool IsVarArg,
+                      const SmallVectorImpl<ISD::OutputArg> &Outs,
+                      LLVMContext &Context, const Type *RetTy) const override;
+
   MachineBasicBlock *
   EmitInstrWithCustomInserter(MachineInstr &MI,
                               MachineBasicBlock *MBB) const override;

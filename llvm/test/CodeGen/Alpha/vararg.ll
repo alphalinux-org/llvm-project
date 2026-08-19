@@ -81,3 +81,22 @@ define float @float_arg(i32 %n, ...) {
   %v = va_arg ptr %ap, float
   ret float %v
 }
+
+; X_floating is passed as a pair of quadwords in the integer registers, so its
+; va_arg reads two slots from the integer half of the save area -- not the
+; floating half -- and moves the offset on by two.  The result is returned
+; indirectly through $16, which pushes the named argument to slot 1 and the
+; first variadic argument to slot 2, at base + 16 == $30+80.
+; CHECK-LABEL: fp128_arg:
+; CHECK-DAG:   stq $18, 80($30)
+; CHECK-DAG:   stq $19, 88($30)
+; CHECK-DAG:   ldq {{\$[0-9]+}}, 80($30)
+; CHECK-DAG:   ldq {{\$[0-9]+}}, 88($30)
+; CHECK-DAG:   lda [[OFF2:\$[0-9]+]], 32($31)
+; CHECK-DAG:   stl [[OFF2]], 8($30)
+define fp128 @fp128_arg(i32 %n, ...) {
+  %ap = alloca [2 x i64], align 8
+  call void @llvm.va_start(ptr %ap)
+  %v = va_arg ptr %ap, fp128
+  ret fp128 %v
+}
