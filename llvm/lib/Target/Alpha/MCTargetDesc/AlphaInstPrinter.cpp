@@ -8,9 +8,12 @@
 
 #include "AlphaInstPrinter.h"
 #include "AlphaFixupKinds.h"
+#include "AlphaMCTargetDesc.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
+#include "llvm/MC/MCInstrInfo.h"
+#include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -25,6 +28,48 @@ using namespace llvm;
 void AlphaInstPrinter::printInst(const MCInst *MI, uint64_t Address,
                                  StringRef Annot, const MCSubtargetInfo &STI,
                                  raw_ostream &O) {
+  // Splice a floating-point instruction's trap-mode and rounding-mode
+  // qualifiers into its mnemonic (addt -> addt/su, addt/sud with dynamic
+  // rounding, cvttq/c -> cvttq/svc).
+  unsigned TrapClass = MII.get(MI->getOpcode()).TSFlags & Alpha::TrapClassMask;
+  std::string Suffix;
+  unsigned RM = Alpha::FPRoundNormal;
+  if (Alpha::hasFPQual(MI->getFlags())) {
+    // What was written, or what the bits say.  Printing anything else would
+    // contradict the encoding this instruction already has.
+    Suffix = Alpha::getFPTrapSpelling(Alpha::fpQualTrapBits(MI->getFlags()),
+                                      /*IsIntOverflow=*/TrapClass == 3)
+                 .str();
+    RM = Alpha::fpQualRoundMode(MI->getFlags());
+  } else {
+    Suffix =
+        Alpha::getFPTrapSuffix(TrapClass, STI.hasFeature(Alpha::FeatureIEEE),
+                               STI.hasFeature(Alpha::FeatureIEEEInexact),
+                               STI.hasFeature(Alpha::FeatureFPTrapU))
+            .str();
+    // Only a class that takes the ambient rounding mode gets it; float-to-
+    // integer keeps whatever its own encoding says.
+    RM = Alpha::fpRounds(TrapClass) ? getFPRoundMode(STI) : Alpha::FPRoundNormal;
+  }
+  if (Alpha::fpTakesWrittenRound(TrapClass))
+    Suffix += Alpha::getFPRoundSuffix(RM).str();
+  if (!Suffix.empty()) {
+    std::string Buf;
+    raw_string_ostream SS(Buf);
+    printInstruction(MI, Address, SS);
+    // The printed form is "\t<mnemonic> <operands>"; find the mnemonic (after
+    // the leading whitespace) and the separator before the operands.
+    size_t Start = Buf.find_first_not_of(" \t");
+    size_t End = Buf.find_first_of(" \t", Start);
+    size_t Slash = Buf.find('/', Start);
+    if (Slash != std::string::npos && (End == std::string::npos || Slash < End))
+      Buf.insert(Slash + 1, Suffix); // Merge before a rounding qualifier.
+    else
+      Buf.insert(End == std::string::npos ? Buf.size() : End, "/" + Suffix);
+    O << Buf;
+    printAnnotation(O, Annot);
+    return;
+  }
   printInstruction(MI, Address, O);
   printAnnotation(O, Annot);
 }
