@@ -7199,6 +7199,18 @@ def mbuild_constants : Flag<["-"], "mbuild-constants">,
            "from the constant pool (Alpha)">;
 def mno_build_constants : Flag<["-"], "mno-build-constants">,
   Group<m_alpha_Features_Group>;
+def mbwx : Flag<["-"], "mbwx">, Group<m_alpha_Features_Group>,
+  HelpText<"Enable byte/word memory instructions (Alpha BWX)">;
+def mno_bwx : Flag<["-"], "mno-bwx">, Group<m_alpha_Features_Group>;
+def mcix : Flag<["-"], "mcix">, Group<m_alpha_Features_Group>,
+  HelpText<"Enable count instructions (Alpha CIX)">;
+def mno_cix : Flag<["-"], "mno-cix">, Group<m_alpha_Features_Group>;
+def mmax : Flag<["-"], "mmax">, Group<m_alpha_Features_Group>,
+  HelpText<"Enable multimedia instructions (Alpha MVI)">;
+def mno_max : Flag<["-"], "mno-max">, Group<m_alpha_Features_Group>;
+def mfix : Flag<["-"], "mfix">, Group<m_alpha_Features_Group>,
+  HelpText<"Enable float/int conversion instructions (Alpha FIX)">;
+def mno_fix : Flag<["-"], "mno-fix">, Group<m_alpha_Features_Group>;
 
 // SPARC feature flags
 def mfpu : Flag<["-"], "mfpu">, Group<m_sparc_Features_Group>;
