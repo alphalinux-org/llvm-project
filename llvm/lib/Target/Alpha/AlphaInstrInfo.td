@@ -82,11 +82,16 @@ def immUExt8 : ImmLeaf<i64, [{ return isUInt<8>(Imm); }]>;
 
 // A memory address: base register plus 16-bit signed displacement, printed as
 // `disp($base)`.
+def MemAsmOperand : AsmOperandClass {
+  let Name = "Mem";
+  let ParserMethod = "parseMemOperand";
+}
 def memri : Operand<i64> {
   let MIOperandInfo = (ops GPRC, s16imm);
   let PrintMethod = "printMemOperand";
   let EncoderMethod = "getMemEncoding";
   let DecoderMethod = "decodeMemri";
+  let ParserMatchClass = MemAsmOperand;
 }
 
 // Symbol operands whose 16-bit displacement is filled by a relocation.  The
@@ -373,21 +378,23 @@ def CVTQS : FP_r<0x16, 0x0bc, "cvtqs", []>;
 def CVTTQ : FP_r<0x16, 0x02f, "cvttq/c", []>;
 
 // Load address: `lda $Rc, $disp($Rb)` computes $Rc = $Rb + sign_ext($disp).
-// With $Rb = $31 (zero) this materializes a 16-bit signed constant.
+// With $Rb = $31 (zero) this materializes a 16-bit signed constant.  The
+// split-operand form is used by codegen; LEA/LDAHm below carry the single
+// memory operand that the assembler and disassembler parse and print.
+let isCodeGenOnly = 1 in {
 def LDA : MFormD<0x08, (outs GPRC:$Ra), (ins s16imm:$disp, GPRC:$Rb),
                  "lda $Ra, $disp($Rb)", []>;
-
-// Load effective address, with a base+displacement operand so a frame index can
-// be materialized (and rewritten by eliminateFrameIndex).
-let hasSideEffects = 0 in
-let isCodeGenOnly = 1 in
-def LEA : MForm<0x08, (outs GPRC:$Ra), (ins memri:$addr), "lda $Ra, $addr", []>;
-
-// Load address high: `ldah $Rc, $disp($Rb)` computes
-// $Rc = $Rb + (sign_ext($disp) << 16).  Paired with lda it materializes a
-// 32-bit signed constant.
 def LDAH : MFormD<0x09, (outs GPRC:$Ra), (ins s16imm:$disp, GPRC:$Rb),
                   "ldah $Ra, $disp($Rb)", []>;
+}
+
+// lda/ldah with a base+displacement memory operand.  LEA also materializes a
+// frame index (rewritten by eliminateFrameIndex).
+let hasSideEffects = 0 in {
+def LEA : MForm<0x08, (outs GPRC:$Ra), (ins memri:$addr), "lda $Ra, $addr", []>;
+def LDAHm : MForm<0x09, (outs GPRC:$Ra), (ins memri:$addr), "ldah $Ra, $addr",
+                  []>;
+}
 
 } // hasSideEffects = 0, mayLoad = 0, mayStore = 0
 
@@ -641,7 +648,7 @@ def : Pat<(i64 (extloadi16 ADDRri:$addr)), (LDWU memri:$addr)>;
 // word at the position given by the low address bits, zero-extended.
 // ldq_u/stq_u take a base register with an implicit zero displacement; the CPU
 // ignores the low three address bits.
-let mayLoad = 1, hasSideEffects = 0 in
+let mayLoad = 1, hasSideEffects = 0, isCodeGenOnly = 1 in
 def LDQ_U : MFormZ<0x0b, (outs GPRC:$Ra), (ins GPRC:$base),
                    "ldq_u $Ra, 0($base)", []>;
 let hasSideEffects = 0 in {
@@ -672,7 +679,7 @@ def MSKBL : OForm<0x12, 0x02, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
 def MSKWL : OForm<0x12, 0x12, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
                   "mskwl $Ra, $Rb, $Rc", []>;
 }
-let mayStore = 1, hasSideEffects = 0 in
+let mayStore = 1, hasSideEffects = 0, isCodeGenOnly = 1 in
 def STQ_U : MFormZ<0x0f, (outs), (ins GPRC:$Ra, GPRC:$base),
                    "stq_u $Ra, 0($base)", []>;
 // bic with an 8-bit literal, used to align an address down to a quadword.
@@ -894,13 +901,14 @@ def SAFE_STORE_LOOP : AlphaPseudo<(outs GPRC:$t0, GPRC:$t1, GPRC:$t2),
                                   "", []>;
 }
 
-// Subroutine return: `ret $31, ($26), 1`.
+// Subroutine return: the canonical form `ret $31, ($26), 1` is printed as the
+// bare `ret` (matching gas), which also lets the assembler parse it.
 // $26 is not listed as a use: the epilogue reloads it as a frame-destroy
 // instruction (so it survives), and leaving it off keeps the return address,
 // which is only materialized in the encoding, from reading as undefined
 // before the epilogue is inserted (mirrors RISCV's PseudoRET).
 let isReturn = 1, isTerminator = 1, isBarrier = 1 in
-def RET : MbrForm<0b10, (outs), (ins), "ret $$31, ($$26), 1", [(AlphaRet)]> {
+def RET : MbrForm<0b10, (outs), (ins), "ret", [(AlphaRet)]> {
   let Ra = 31;
   let Rb = 26;
   let hint = 1;  // return-prediction hint
@@ -930,6 +938,6 @@ def BNE : BForm<0x3d, (outs), (ins GPRC:$Ra, brtarget:$target),
 
 // Indirect branch through a register (used for jump tables).
 let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1,
-    Ra = 31 in
+    Ra = 31, isCodeGenOnly = 1 in
 def JMP : MbrForm<0b00, (outs), (ins GPRC:$Rb), "jmp $$31, ($Rb), 0",
                   [(brind GPRC:$Rb)]>;
