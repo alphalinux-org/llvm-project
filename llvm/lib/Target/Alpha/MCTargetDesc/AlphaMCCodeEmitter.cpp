@@ -18,6 +18,7 @@
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
+#include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/EndianStream.h"
 #include "llvm/Support/MathExtras.h"
@@ -266,6 +267,29 @@ void AlphaMCCodeEmitter::encodeInstruction(const MCInst &MI,
     break;
   }
   uint32_t Bits = getBinaryCodeForInstr(MI, Fixups, STI);
+  // Set a floating-point instruction's trap-mode and rounding-mode qualifiers
+  // in its function field.  An instruction that came from an assembly file or
+  // from the disassembler carries its own -- whatever was written, or whatever
+  // the bits said -- and that is used as is.  Only one built by codegen has
+  // none, and only then do -mieee and -mfp-rounding-mode decide: applying them
+  // to what someone wrote would assemble `addt' as `addt/su'.
+  if (unsigned TrapClass = MCII.get(MI.getOpcode()).TSFlags & Alpha::TrapClassMask) {
+    unsigned TrapBits, RM;
+    if (Alpha::hasFPQual(MI.getFlags())) {
+      TrapBits = Alpha::fpQualTrapBits(MI.getFlags());
+      RM = Alpha::fpQualRoundMode(MI.getFlags());
+    } else {
+      TrapBits = Alpha::getFPTrapFuncBits(
+          Alpha::getFPTrapSuffix(TrapClass, STI.hasFeature(Alpha::FeatureIEEE),
+                                 STI.hasFeature(Alpha::FeatureIEEEInexact),
+                                 STI.hasFeature(Alpha::FeatureFPTrapU)));
+      RM = Alpha::fpRounds(TrapClass) ? getFPRoundMode(STI)
+                                      : Alpha::FPRoundNormal;
+    }
+    Bits |= TrapBits << 5;
+    if (Alpha::fpTakesWrittenRound(TrapClass) && RM != Alpha::FPRoundNormal)
+      Bits = (Bits & ~(0xc0u << 5)) | (Alpha::getFPRoundFuncBits(RM) << 5);
+  }
   support::endian::write(CB, Bits, llvm::endianness::little);
 }
 

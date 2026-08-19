@@ -332,9 +332,8 @@ bool AlphaExpandAtomicPseudo::expandSubwordRMW(
   Register Val = MI.getOperand(6).getReg();
   unsigned Opc = MI.getOperand(7).getImm();
   bool IsWord = MI.getOperand(8).getImm() != 0;
-  unsigned ExtOpc = IsWord ? Alpha::EXTWL : Alpha::EXTBL;
-  unsigned MskOpc = IsWord ? Alpha::MSKWL : Alpha::MSKBL;
-  unsigned InsOpc = IsWord ? Alpha::INSWL : Alpha::INSBL;
+  Alpha::FieldOps Ops = Alpha::getFieldOps(IsWord ? 2 : 1);
+  unsigned ExtOpc = Ops.ExtL, MskOpc = Ops.MskL, InsOpc = Ops.InsL;
 
   BuildMI(MBB, MI, DL, TII->get(Alpha::BICi), Aligned).addReg(Addr).addImm(7);
   // An exchange writes the operand back whatever the load returns, so
@@ -404,9 +403,8 @@ bool AlphaExpandAtomicPseudo::expandSubwordCmpXchg(
   Register Cmp = MI.getOperand(6).getReg();
   Register New = MI.getOperand(7).getReg();
   bool IsWord = MI.getOperand(8).getImm() != 0;
-  unsigned ExtOpc = IsWord ? Alpha::EXTWL : Alpha::EXTBL;
-  unsigned MskOpc = IsWord ? Alpha::MSKWL : Alpha::MSKBL;
-  unsigned InsOpc = IsWord ? Alpha::INSWL : Alpha::INSBL;
+  Alpha::FieldOps Ops = Alpha::getFieldOps(IsWord ? 2 : 1);
+  unsigned ExtOpc = Ops.ExtL, MskOpc = Ops.MskL, InsOpc = Ops.InsL;
   unsigned ZapMask = IsWord ? 0x3 : 0x1;
 
   BuildMI(MBB, MI, DL, TII->get(Alpha::BICi), Aligned).addReg(Addr).addImm(7);
@@ -463,8 +461,8 @@ bool AlphaExpandAtomicPseudo::expandSafeStore(
   Register Val = MI.getOperand(3).getReg();
   Register Addr = MI.getOperand(4).getReg();
   bool IsWord = MI.getOperand(5).getImm() != 0;
-  unsigned MskOpc = IsWord ? Alpha::MSKWL : Alpha::MSKBL;
-  unsigned InsOpc = IsWord ? Alpha::INSWL : Alpha::INSBL;
+  Alpha::FieldOps Ops = Alpha::getFieldOps(IsWord ? 2 : 1);
+  unsigned MskOpc = Ops.MskL, InsOpc = Ops.InsL;
 
   BuildMI(MBB, MI, DL, TII->get(Alpha::BICi), Aligned).addReg(Addr).addImm(7);
   BuildMI(MBB, MI, DL, TII->get(InsOpc), Ins).addReg(Val).addReg(Addr);

@@ -327,27 +327,9 @@ bool AlphaInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     Register Addr = MI.getOperand(5).getReg();
     int64_t Bytes = MI.getOperand(6).getImm();
 
-    unsigned InsL, InsH, MskL, MskH;
-    switch (Bytes) {
-    case 2:
-      InsL = Alpha::INSWL;
-      InsH = Alpha::INSWH;
-      MskL = Alpha::MSKWL;
-      MskH = Alpha::MSKWH;
-      break;
-    case 4:
-      InsL = Alpha::INSLL;
-      InsH = Alpha::INSLH;
-      MskL = Alpha::MSKLL;
-      MskH = Alpha::MSKLH;
-      break;
-    default:
-      InsL = Alpha::INSQL;
-      InsH = Alpha::INSQH;
-      MskL = Alpha::MSKQL;
-      MskH = Alpha::MSKQH;
-      break;
-    }
+    Alpha::FieldOps Ops = Alpha::getFieldOps(Bytes);
+    unsigned InsL = Ops.InsL, InsH = Ops.InsH;
+    unsigned MskL = Ops.MskL, MskH = Ops.MskH;
 
     MachineInstrBuilder First = BuildMI(MBB, MI, DL, get(Alpha::LDA), HiAddr)
                                     .addImm(Bytes - 1)

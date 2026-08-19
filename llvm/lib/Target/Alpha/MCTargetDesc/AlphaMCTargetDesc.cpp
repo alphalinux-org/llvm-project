@@ -28,6 +28,76 @@
 
 using namespace llvm;
 
+Alpha::FPRoundMode llvm::getFPRoundMode(const MCSubtargetInfo &STI) {
+  if (STI.hasFeature(Alpha::FeatureFPRoundChopped))
+    return Alpha::FPRoundChopped;
+  if (STI.hasFeature(Alpha::FeatureFPRoundMinus))
+    return Alpha::FPRoundMinus;
+  if (STI.hasFeature(Alpha::FeatureFPRoundDynamic))
+    return Alpha::FPRoundDynamic;
+  return Alpha::FPRoundNormal;
+}
+
+// V32 = (Hi << 16) + Lo with Lo sign-extended, so Hi lies in [-0x8000,
+// 0x8000].  The +0x8000 case does not fit ldah's signed field and is emitted as
+// two ldah of 0x4000.  A value of zero still emits `lda 0`: the sequence is
+// required to write its destination, and every caller that cannot reach zero
+// says so for itself.
+void Alpha::buildConstant32Steps(int32_t V32,
+                                 SmallVectorImpl<ConstantStep> &Steps) {
+  int64_t Lo = static_cast<int16_t>(V32);
+  int64_t Hi = (static_cast<int64_t>(V32) - Lo) >> 16;
+  if (Hi != 0) {
+    if (isInt<16>(Hi)) {
+      Steps.push_back({Alpha::LDAH, Hi});
+    } else {
+      Steps.push_back({Alpha::LDAH, Hi / 2});
+      Steps.push_back({Alpha::LDAH, Hi / 2});
+    }
+  }
+  if (Lo != 0 || Hi == 0)
+    Steps.push_back({Alpha::LDA, Lo});
+}
+
+void Alpha::buildConstantSteps(int64_t V,
+                               SmallVectorImpl<ConstantStep> &Steps) {
+  if (isInt<32>(V)) {
+    buildConstant32Steps(static_cast<int32_t>(V), Steps);
+    return;
+  }
+  // V = (Hi32 << 32) + Lo32: build the adjusted high half, shift it up, then
+  // add the low half; the sign of Lo32 is already accounted for in Hi32.  The
+  // subtraction is done unsigned because V - Lo32 overflows a signed 64-bit
+  // value for a V near INT64_MAX whose low half is negative, and the wrapped
+  // result is the one wanted.
+  uint64_t UV = static_cast<uint64_t>(V);
+  int32_t Lo32 = static_cast<int32_t>(UV);
+  int32_t Hi32 =
+      static_cast<int32_t>((UV - static_cast<uint64_t>(int64_t(Lo32))) >> 32);
+  buildConstant32Steps(Hi32, Steps);
+  Steps.push_back({Alpha::SLLi, 32});
+  if (Lo32 != 0)
+    buildConstant32Steps(Lo32, Steps);
+}
+
+// See the comment on FieldOps in AlphaMCTargetDesc.h.
+Alpha::FieldOps Alpha::getFieldOps(unsigned Bytes) {
+  switch (Bytes) {
+  case 1:
+    return {Alpha::EXTBL, 0, Alpha::INSBL, 0, Alpha::MSKBL, 0};
+  case 2:
+    return {Alpha::EXTWL, Alpha::EXTWH, Alpha::INSWL,
+            Alpha::INSWH, Alpha::MSKWL, Alpha::MSKWH};
+  case 4:
+    return {Alpha::EXTLL, Alpha::EXTLH, Alpha::INSLL,
+            Alpha::INSLH, Alpha::MSKLL, Alpha::MSKLH};
+  case 8:
+    return {Alpha::EXTQL, Alpha::EXTQH, Alpha::INSQL,
+            Alpha::INSQH, Alpha::MSKQL, Alpha::MSKQH};
+  }
+  llvm_unreachable("no field instructions for this width");
+}
+
 static MCAsmInfo *createAlphaMCAsmInfo(const MCRegisterInfo &MRI,
                                        const Triple &TT,
                                        const MCTargetOptions &Options) {
