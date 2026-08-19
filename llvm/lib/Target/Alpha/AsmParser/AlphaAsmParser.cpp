@@ -804,6 +804,80 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     }
   }
 
+  // lda $Rc, disp($Rb) where disp is a symbol (whose address comes from the
+  // GOT) or a constant too wide for the 16-bit field: load or materialize disp
+  // into $Rc, then add the base.  The base must survive the add, so $Rc cannot
+  // be the base -- which under `.set noat` (no scratch) GNU as also cannot
+  // handle.
+  if (Mnemonic == "lda" && Operands.size() == 3 && Operands[1]->isReg() &&
+      Operands[2]->isMem()) {
+    const MCExpr *Off = static_cast<AlphaOperand &>(*Operands[2]).getMemOff();
+    auto *CE = dyn_cast<MCConstantExpr>(Off);
+    // A bare symbol reference is a GOT address; a wide constant is
+    // materialized. A symbol difference, a relocation specifier, or a small
+    // constant is an ordinary lda, left to the matcher.
+    //
+    // `sym+N' is the GOT address plus a constant.  GNU as accepts it, and it
+    // has to be taken apart here: the literal relocation names the symbol, so
+    // leaving the addend in the expression would either drop it or ask for a
+    // GOT entry for sym+N that the linker will not make.
+    const MCExpr *Sub = Off;
+    int64_t Addend = 0;
+    if (const auto *BE = dyn_cast<MCBinaryExpr>(Off)) {
+      const auto *RHS = dyn_cast<MCConstantExpr>(BE->getRHS());
+      if (RHS && isa<MCSymbolRefExpr>(BE->getLHS()) &&
+          (BE->getOpcode() == MCBinaryExpr::Add ||
+           BE->getOpcode() == MCBinaryExpr::Sub)) {
+        Sub = BE->getLHS();
+        Addend = BE->getOpcode() == MCBinaryExpr::Add ? RHS->getValue()
+                                                      : -RHS->getValue();
+      }
+    }
+    bool BigConst = CE && !isInt<16>(CE->getValue());
+    bool Sym = isa<MCSymbolRefExpr>(Sub);
+    if (BigConst || Sym) {
+      MCRegister Rc = static_cast<AlphaOperand &>(*Operands[1]).getReg();
+      MCRegister Rb = static_cast<AlphaOperand &>(*Operands[2]).getMemBase();
+      if (Rc == Rb)
+        return Error(IDLoc, "lda of this displacement needs a scratch register "
+                            "distinct from the base");
+      if (BigConst) {
+        emitLoadImm(Rc, CE->getValue(), IDLoc, Out);
+      } else {
+        MCInst Ptr; // ldq $Rc, symbol($gp) !literal
+        Ptr.setOpcode(Alpha::LDQl);
+        Ptr.addOperand(MCOperand::createReg(Rc));
+        Ptr.addOperand(MCOperand::createExpr(Sub));
+        Ptr.setLoc(IDLoc);
+        Out.emitInstruction(Ptr, getSTI());
+        if (Addend) {
+          if (!isInt<16>(Addend))
+            return Error(IDLoc, "lda addend does not fit a 16-bit "
+                                "displacement");
+          MCInst Off2; // lda $Rc, Addend($Rc)
+          Off2.setOpcode(Alpha::LDA);
+          Off2.addOperand(MCOperand::createReg(Rc));
+          Off2.addOperand(MCOperand::createImm(Addend));
+          Off2.addOperand(MCOperand::createReg(Rc));
+          Off2.setLoc(IDLoc);
+          Out.emitInstruction(Off2, getSTI());
+        }
+      }
+      // $31 reads as zero, so adding it changes nothing; GNU as leaves the add
+      // out rather than emitting a no-op.
+      if (Rb != Alpha::R31) {
+        MCInst Add; // addq $Rc, $Rb, $Rc
+        Add.setOpcode(Alpha::ADDQ);
+        Add.addOperand(MCOperand::createReg(Rc));
+        Add.addOperand(MCOperand::createReg(Rc));
+        Add.addOperand(MCOperand::createReg(Rb));
+        Add.setLoc(IDLoc);
+        Out.emitInstruction(Add, getSTI());
+      }
+      return false;
+    }
+  }
+
   // ldi/ldiq $Rc, imm: load an immediate constant, materializing it in code.
   if ((Mnemonic == "ldi" || Mnemonic == "ldiq") && Operands.size() == 3 &&
       Operands[1]->isReg() && Operands[2]->isImm()) {
