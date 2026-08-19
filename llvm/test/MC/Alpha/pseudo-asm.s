@@ -23,9 +23,12 @@
 # DISASM: mt_fpcr $f0
         mt_fpcr $f0
 
-# The full canonical forms of ret and jmp assemble to the bare words.
-# CHECK: ret                             # encoding: [0x01,0x80,0xfa,0x6b]
+# The full canonical forms of ret and jmp assemble to the same words; ret keeps
+# its return-address register (here the usual $26).
+# CHECK: ret ($26)                       # encoding: [0x01,0x80,0xfa,0x6b]
         ret     $31, ($26), 1
+# CHECK: ret ($1)                        # encoding: [0x01,0x80,0xe1,0x6b]
+        ret     $31, ($1), 1
 # CHECK: jmp $31, ($27), 0               # encoding: [0x00,0x00,0xfb,0x6b]
         jmp     $31, ($27), 0
 

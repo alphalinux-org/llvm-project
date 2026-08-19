@@ -486,7 +486,8 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   }
 
   // jsr $Ra, ($Rb): emit the bare jsr word.
-  if (Mnemonic == "jsr" && Operands.size() == 3) {
+  if (Mnemonic == "jsr" && Operands.size() == 3 && Operands[1]->isReg() &&
+      Operands[2]->isMem()) {
     MCInst Inst;
     Inst.setOpcode(Alpha::JSRr);
     Inst.addOperand(MCOperand::createReg(
@@ -498,18 +499,21 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     return false;
   }
 
-  // ret $31, ($26), 1: the canonical return, written in full in hand assembly.
-  // Our ret prints and encodes exactly this form, so emit the bare word.
-  if (Mnemonic == "ret" && Operands.size() == 4) {
+  // ret $Ra, ($Rb), hint: the return written in full in hand assembly.  The
+  // return target register $Rb is what matters (it is not always $26); Ra=$31
+  // and hint=1 as our ret encodes, so route it through the RETb form.
+  if (Mnemonic == "ret" && Operands.size() == 4 && Operands[2]->isMem()) {
     MCInst Inst;
-    Inst.setOpcode(Alpha::RET);
+    Inst.setOpcode(Alpha::RETb);
+    Inst.addOperand(MCOperand::createReg(
+        static_cast<AlphaOperand &>(*Operands[2]).getMemBase()));
     Inst.setLoc(IDLoc);
     Out.emitInstruction(Inst, getSTI());
     return false;
   }
 
   // jmp $31, ($Rb), 0: an indirect jump through $Rb (the hint is advisory).
-  if (Mnemonic == "jmp" && Operands.size() == 4) {
+  if (Mnemonic == "jmp" && Operands.size() == 4 && Operands[2]->isMem()) {
     MCInst Inst;
     Inst.setOpcode(Alpha::JMP);
     Inst.addOperand(MCOperand::createReg(
