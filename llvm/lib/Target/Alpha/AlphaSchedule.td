@@ -153,6 +153,7 @@ multiclass AlphaInstRW {
   // any scheduler sees it; give it the cheapest operate class.
   def : InstRW<[Wr_IALU], (instrs COPY)>;
   def : InstRW<[Wr_JSR], (instrs JSRtlsgd, JSRtlsldm)>;
+  def : InstRW<[Wr_FAdd], (instrs FPEXTST)>;
 }
 
 //===----------------------------------------------------------------------===//
