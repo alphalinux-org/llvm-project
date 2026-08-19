@@ -49,3 +49,14 @@ define { double, double } @two_doubles(double %a, double %b) {
   %r1 = insertvalue { double, double } %r0, double %b, 1
   ret { double, double } %r1
 }
+
+; A 128-bit integer is returned in memory, as it is under GCC: the caller passes
+; the buffer in $16, the callee fills it in and hands the pointer back in $0.
+; CHECK-LABEL: wide:
+; CHECK-DAG:   bis $31, $16, $0
+; CHECK-DAG:   stq $17, 0($0)
+; CHECK-DAG:   stq $18, 8($0)
+; CHECK:       ret
+define i128 @wide(i128 %x) {
+  ret i128 %x
+}
