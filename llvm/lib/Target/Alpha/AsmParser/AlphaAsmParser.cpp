@@ -69,6 +69,10 @@ public:
     const auto *CE = dyn_cast<MCConstantExpr>(Imm.Val);
     return CE && isUInt<26>(CE->getValue());
   }
+  // A register written in parentheses, `($reg)`, as jsr/jmp/ret/wh64 use: the
+  // parser produces a memory operand (base with a zero displacement) that these
+  // instructions consume as a plain base register.
+  bool isParenReg() const { return Kind == Memory; }
 
   StringRef getToken() const {
     assert(Kind == Token);
@@ -130,6 +134,10 @@ public:
     assert(N == 2);
     Inst.addOperand(MCOperand::createReg(Mem.Base));
     addExpr(Inst, Mem.Off);
+  }
+  void addParenRegOperands(MCInst &Inst, unsigned N) const {
+    assert(N == 1);
+    Inst.addOperand(MCOperand::createReg(Mem.Base));
   }
 
   // Wrap the displacement/immediate in a relocation-specifier expression from a
