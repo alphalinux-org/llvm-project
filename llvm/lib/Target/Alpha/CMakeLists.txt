@@ -11,6 +11,7 @@ tablegen(LLVM AlphaGenDisassemblerTables.inc -gen-disassembler)
 tablegen(LLVM AlphaGenAsmMatcher.inc -gen-asm-matcher)
 tablegen(LLVM AlphaGenRegisterInfo.inc -gen-register-info)
 tablegen(LLVM AlphaGenSubtargetInfo.inc -gen-subtarget)
+tablegen(LLVM AlphaGenGlobalISel.inc -gen-global-isel)
 tablegen(LLVM AlphaGenRegisterBank.inc -gen-register-bank)
 
 add_public_tablegen_target(AlphaCommonTableGen)
@@ -28,6 +29,7 @@ add_llvm_target(AlphaCodeGen
   AlphaTargetObjectFile.cpp
   AlphaTrapBarriers.cpp
   GISel/AlphaCallLowering.cpp
+  GISel/AlphaInstructionSelector.cpp
   GISel/AlphaLegalizerInfo.cpp
   GISel/AlphaRegisterBankInfo.cpp
 
