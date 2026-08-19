@@ -19,23 +19,29 @@
 
 namespace llvm {
 
+class AlphaTargetMachine;
+class FunctionPass;
+
+class AlphaRegisterBankInfo;
+class AlphaSubtarget;
 class GlobalValue;
+class InstructionSelector;
+class PassRegistry;
 
 /// Whether a global's address can be computed from the global pointer instead
 /// of being loaded from the GOT.
 bool isAlphaGprelAddressable(const GlobalValue &GV);
 
-class AlphaTargetMachine;
-class FunctionPass;
-class PassRegistry;
-
+FunctionPass *createAlphaTrapBarriers();
+void initializeAlphaTrapBarriersPass(PassRegistry &);
 FunctionPass *createAlphaExpandAtomicPseudo();
 void initializeAlphaExpandAtomicPseudoPass(PassRegistry &);
 FunctionPass *createAlphaVerifyInvariants();
 void initializeAlphaVerifyInvariantsPass(PassRegistry &);
-
-FunctionPass *createAlphaTrapBarriers();
-void initializeAlphaTrapBarriersPass(PassRegistry &);
+InstructionSelector *
+createAlphaInstructionSelector(const AlphaTargetMachine &TM,
+                               const AlphaSubtarget &STI,
+                               const AlphaRegisterBankInfo &RBI);
 FunctionPass *createAlphaISelDag(AlphaTargetMachine &TM,
                                  CodeGenOptLevel OptLevel);
 
