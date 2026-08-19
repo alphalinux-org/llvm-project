@@ -22,6 +22,9 @@ enum Fixups {
   // The high/low 16-bit GP-relative displacements (R_ALPHA_GPRELHIGH/LOW).
   fixup_alpha_gprelhigh,
   fixup_alpha_gprellow,
+  // A 16-bit GP-relative displacement in a load/store offset (R_ALPHA_GPREL16),
+  // from a `!gprel` suffix.
+  fixup_alpha_gprel16,
   // The ldah of an ldgp pair (R_ALPHA_GPDISP); its addend is the byte distance
   // to the matching lda.
   fixup_alpha_gpdisp,
@@ -48,6 +51,8 @@ enum Fixups {
   // A 21-bit PC-relative branch to a routine sharing the caller's global
   // pointer (R_ALPHA_BRSGP), from a `!samegp` suffix.
   fixup_alpha_brsgp,
+  // A 32-bit GP-relative value (R_ALPHA_GPREL32), from a `.gprel32` directive.
+  fixup_alpha_gprel32,
 
   fixup_alpha_invalid,
   NumTargetFixupKinds = fixup_alpha_invalid - FirstTargetFixupKind
@@ -63,6 +68,8 @@ inline StringRef getSpecifierName(unsigned Kind) {
     return "gprelhigh";
   case fixup_alpha_gprellow:
     return "gprellow";
+  case fixup_alpha_gprel16:
+    return "gprel";
   case fixup_alpha_gpdisp:
     return "gpdisp";
   case fixup_alpha_tprelhi:
