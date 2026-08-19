@@ -174,7 +174,7 @@ multiclass AlphaInstRW {
   def : InstRW<[Wr_JSR], (instrs BSR)>;
   def : InstRW<[Wr_ICmp], (instrs CMPEQi, CMPLEi, CMPLTi, CMPULEi, CMPULTi)>;
   def : InstRW<[Wr_Misc], (instrs CALL_PAL)>;
-  def : InstRW<[Wr_IALU], (instrs AMASKi)>;
+  def : InstRW<[Wr_IALU], (instrs AMASKi, LDAi, LDAHi)>;
   def : InstRW<[Wr_ICmp], (instrs CMPBGEi)>;
   def : InstRW<[Wr_ICmov, ReadDefault, Rd_ITest], (instrs
       CMOVEQi, CMOVNEi, CMOVLTi, CMOVGTi, CMOVGEi, CMOVLEi, CMOVLBCi,
@@ -183,6 +183,8 @@ multiclass AlphaInstRW {
       ZAPi, EXTQLi, EXTWHi, EXTLHi, EXTQHi, INSBLi, INSWLi, INSLLi, INSQLi,
       INSWHi, INSLHi, INSQHi, MSKBLi, MSKWLi, MSKLLi, MSKQLi, MSKWHi, MSKLHi,
       MSKQHi)>;
+  def : InstRW<[Wr_ILoad], (instrs LDQ_Um)>;
+  def : InstRW<[Wr_IStore, Rd_StData], (instrs STQ_Um)>;
 }
 
 //===----------------------------------------------------------------------===//
