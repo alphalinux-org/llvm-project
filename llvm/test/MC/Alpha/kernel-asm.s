@@ -51,6 +51,12 @@
 # CHECK: bsr $23, foo
 	bsr $23, foo
 
+# The ABI register aliases resolve ($sp is $30, $ra is $26).
+# CHECK: stq $9, 0($30)                    # encoding: [0x00,0x00,0x3e,0xb5]
+	stq $9, 0($sp)
+# CHECK: ldq $26, 8($30)                   # encoding: [0x08,0x00,0x5e,0xa7]
+	ldq $ra, 8($sp)
+
 # ret/jmp through a register written in parentheses.
 # CHECK: ret ($26)                         # encoding: [0x01,0x80,0xfa,0x6b]
 	ret ($26)
