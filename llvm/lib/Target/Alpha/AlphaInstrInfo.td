@@ -1338,7 +1338,7 @@ def : Pat<(truncstorei16 (i64 0), ADDRri:$addr), (STW R31, memri:$addr)>;
 // word at the position given by the low address bits, zero-extended.
 // ldq_u/stq_u take a base register with an implicit zero displacement; the CPU
 // ignores the low three address bits.
-let mayLoad = 1, hasSideEffects = 0 in
+let mayLoad = 1, hasSideEffects = 0, isCodeGenOnly = 1 in
 def LDQ_U : MFormZ<0x0b, (outs GPRC:$Ra), (ins memzGPR:$base),
                    "ldq_u $Ra, $base", [(set i64:$Ra, (AlphaLdqU i64:$base))]>;
 let hasSideEffects = 0 in {
@@ -1396,7 +1396,7 @@ def : Pat<(and GPRC:$x, (not (shl (i64 0xffffffff), (shl GPRC:$n, (i64 3))))),
           (MSKLL GPRC:$x, GPRC:$n)>;
 }
 
-let mayStore = 1, hasSideEffects = 0 in
+let mayStore = 1, hasSideEffects = 0, isCodeGenOnly = 1 in
 def STQ_U : MFormZ<0x0f, (outs), (ins GPRC:$Ra, memzGPR:$base),
                    "stq_u $Ra, $base", [(AlphaStqU i64:$Ra, i64:$base)]>;
 // bic with an 8-bit literal, used to align an address down to a quadword.
@@ -1876,8 +1876,29 @@ def AMASKi : OFormL<0x11, 0x61, (outs GPRC:$Rc), (ins u8imm:$lit),
                     "amask $lit, $Rc", []> {
   let Ra = 31;
 }
+
+// ldq_u/stq_u with the memory operand the assembler writes, disp($base).
+let mayLoad = 1 in
+def LDQ_Um : MForm<0x0b, (outs GPRC:$Ra), (ins memri:$addr),
+                   "ldq_u $Ra, $addr", []>;
+let mayStore = 1 in
+def STQ_Um : MForm<0x0f, (outs), (ins GPRC:$Ra, memri:$addr),
+                   "stq_u $Ra, $addr", []>;
+
+// lda/ldah with a bare displacement (implicit $31 base): materialize a signed
+// 16-bit constant, e.g. `lda $0, 128`.
+let isAsmParserOnly = 1 in {
+def LDAi  : MFormD<0x08, (outs GPRC:$Ra), (ins s16imm:$disp), "lda $Ra, $disp",
+                   []> { let Rb = 31; }
+def LDAHi : MFormD<0x09, (outs GPRC:$Ra), (ins s16imm:$disp), "ldah $Ra, $disp",
+                   []> { let Rb = 31; }
+}
 } // hasSideEffects = 0
 
 // andnot: an alias of bic (and with the complement of the second operand).
 def : InstAlias<"andnot $Ra, $Rb, $Rc", (BIC GPRC:$Rc, GPRC:$Ra, GPRC:$Rb)>;
 def : InstAlias<"andnot $Ra, $lit, $Rc", (BICi GPRC:$Rc, GPRC:$Ra, u8imm:$lit)>;
+
+// ldiq: load an immediate quadword.  GNU as implements the general 64-bit case
+// as a multi-instruction macro; the common small case is a single lda.
+def : InstAlias<"ldiq $Rc, $imm", (LDAi GPRC:$Rc, s16imm:$imm)>;
