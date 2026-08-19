@@ -17,6 +17,12 @@
 	jsr $26, $27
 # CHECK: [[#@LINE-1]]:2: error: invalid operand for instruction
 
+## A displacement is not part of the jsr form either: the bare-jsr path takes
+## `($Rb)` only, and a memory operand with an offset would silently drop it.
+## GNU as rejects this as `inappropriate arguments for opcode 'jsr'`.
+	jsr $26, 8($27)
+# CHECK: [[#@LINE-1]]:2: error: invalid operand for instruction
+
 ## The 16-bit signed displacement of a memory-format instruction.
 	ldq $1, 40000($30)
 # CHECK: [[#@LINE-1]]:2: error: displacement out of range
@@ -61,6 +67,8 @@
 ## relocation the author asked for.
 	bis $1, $2, $3 !literal
 # CHECK: [[#@LINE-1]]:18: error: invalid relocation for field
+	ret $31, ($26), 1 !gprelhigh
+# CHECK: [[#@LINE-1]]:21: error: invalid relocation for field
 
 ## A !lituse_* names the literal it uses by sequence number, so there has to be
 ## one; GNU as says so too.
