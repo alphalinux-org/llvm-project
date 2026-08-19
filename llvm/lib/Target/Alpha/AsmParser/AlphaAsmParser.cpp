@@ -9,6 +9,8 @@
 #include "MCTargetDesc/AlphaFixupKinds.h"
 #include "MCTargetDesc/AlphaMCTargetDesc.h"
 #include "TargetInfo/AlphaTargetInfo.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/BinaryFormat/ELF.h"
@@ -151,7 +153,6 @@ public:
     else if (Kind == Immediate)
       Imm.Val = MCSpecifierExpr::create(Imm.Val, Spec, Ctx);
   }
-
   static std::unique_ptr<AlphaOperand> createToken(StringRef Str, SMLoc S) {
     auto Op = std::make_unique<AlphaOperand>(Token);
     Op->Tok.Data = Str.data();
@@ -400,7 +401,46 @@ ParseStatus AlphaAsmParser::parseDirective(AsmToken DirectiveID) {
     getParser().eatToEndOfStatement();
     return ParseStatus::Success;
   }
-  if (ID == ".frame" || ID == ".mask" || ID == ".fmask" || ID == ".usepv") {
+  if (ID == ".frame" || ID == ".mask" || ID == ".fmask") {
+    getParser().eatToEndOfStatement();
+    return ParseStatus::Success;
+  }
+  // `.eflag <n>` sets flag bits in the ECOFF procedure descriptor; the asm
+  // printer emits `.eflag 48' for -mieee-conformant, so the integrated
+  // assembler has to read back what it writes.  The ELF object carries no
+  // procedure descriptor for the bits to land in, so they are accepted and
+  // dropped, as GNU as does for an ELF target.
+  if (ID == ".eflag") {
+    int64_t Flags;
+    if (getParser().parseAbsoluteExpression(Flags))
+      return ParseStatus::Failure;
+    getParser().eatToEndOfStatement();
+    return ParseStatus::Success;
+  }
+  // `.usepv sym, std|no` sets the STO_ALPHA_STD_GPLOAD / STO_ALPHA_NOPV bit on
+  // sym so the linker can optimize same-gp calls (R_ALPHA_BRSGP).  Used by
+  // hand-written assembly that defines functions without .ent/.prologue.
+  if (ID == ".usepv") {
+    const unsigned STO_ALPHA_NOPV = 0x80, STO_ALPHA_STD_GPLOAD = 0x88;
+    StringRef SymName;
+    if (getParser().parseIdentifier(SymName))
+      return Error(DirectiveID.getLoc(), "expected symbol name after .usepv");
+    if (getLexer().isNot(AsmToken::Comma))
+      return Error(getLexer().getLoc(), "expected ',' after symbol name");
+    getParser().Lex(); // ,
+    StringRef Mode;
+    if (getParser().parseIdentifier(Mode))
+      return Error(getLexer().getLoc(), "expected 'std' or 'no'");
+    unsigned Other;
+    if (Mode == "std")
+      Other = STO_ALPHA_STD_GPLOAD;
+    else if (Mode == "no")
+      Other = STO_ALPHA_NOPV;
+    else
+      return Error(getLexer().getLoc(), "unknown .usepv mode '" + Mode + "'");
+    MCSymbol *Sym = getContext().getOrCreateSymbol(SymName);
+    auto *SymELF = static_cast<MCSymbolELF *>(Sym);
+    SymELF->setOther((SymELF->getOther() & ~STO_ALPHA_STD_GPLOAD) | Other);
     getParser().eatToEndOfStatement();
     return ParseStatus::Success;
   }
@@ -564,6 +604,7 @@ bool AlphaAsmParser::parseInstruction(ParseInstructionInfo &Info,
                         .Case("literal", Alpha::fixup_alpha_literal)
                         .Case("gprelhigh", Alpha::fixup_alpha_gprelhigh)
                         .Case("gprellow", Alpha::fixup_alpha_gprellow)
+                        .Case("gprel", Alpha::fixup_alpha_gprel16)
                         .Case("gpdisp", Alpha::fixup_alpha_gpdisp)
                         .Case("tprelhi", Alpha::fixup_alpha_tprelhi)
                         .Case("tprello", Alpha::fixup_alpha_tprello)
@@ -577,11 +618,6 @@ bool AlphaAsmParser::parseInstruction(ParseInstructionInfo &Info,
     if (!Spec)
       return Error(getLexer().getLoc(), "unknown relocation name");
     getParser().Lex(); // name
-    // Ignore the optional !seq sequence number used to pair relocations.
-    if (getLexer().is(AsmToken::Exclaim)) {
-      getParser().Lex(); // !
-      getParser().Lex(); // number
-    }
     static_cast<AlphaOperand &>(*Operands.back())
         .applySpecifier(Spec, getContext());
   }
