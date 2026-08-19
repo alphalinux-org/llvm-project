@@ -202,6 +202,7 @@ multiclass AlphaInstRW {
   // An FP branch tests an FP register, which changes nothing here.
   def : InstRW<[Wr_Br], (instrs FBEQ, FBNE, FBLT, FBLE, FBGT, FBGE)>;
   def : InstRW<[Wr_JSR], (instrs JSRt)>;
+  def : InstRW<[Wr_JSR], (instrs RETabh)>;
 }
 
 //===----------------------------------------------------------------------===//

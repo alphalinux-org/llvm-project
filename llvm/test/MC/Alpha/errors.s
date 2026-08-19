@@ -61,6 +61,8 @@
 ## relocation the author asked for.
 	bis $1, $2, $3 !literal
 # CHECK: [[#@LINE-1]]:18: error: invalid relocation for field
+	ret $31, ($26), 1 !gprelhigh
+# CHECK: [[#@LINE-1]]:21: error: invalid relocation for field
 
 ## A !lituse_* names the literal it uses by sequence number, so there has to be
 ## one; GNU as says so too.

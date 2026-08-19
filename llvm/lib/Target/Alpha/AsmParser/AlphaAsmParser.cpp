@@ -77,8 +77,16 @@ public:
   }
   // A register written in parentheses, `($reg)`, as jsr/jmp/ret/wh64 use: the
   // parser produces a memory operand (base with a zero displacement) that these
-  // instructions consume as a plain base register.
-  bool isParenReg() const { return Kind == Memory; }
+  // instructions consume as a plain base register.  The displacement has to be
+  // absent, because there is nowhere in the encoding to put one: matching
+  // `8($3)' here would assemble it as `($3)' and lose the 8.  GNU as rejects
+  // those forms, so failing to match produces the same diagnosis.
+  bool isParenReg() const {
+    if (Kind != Memory)
+      return false;
+    const auto *CE = dyn_cast<MCConstantExpr>(Mem.Off);
+    return CE && CE->getValue() == 0;
+  }
 
   StringRef getToken() const {
     assert(Kind == Token);
@@ -1009,25 +1017,9 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     return false;
   }
 
-  // ret $31, ($Rb), 1: the return written in full in hand assembly.  The
-  // return target register $Rb is what matters -- it is not always $26 -- so
-  // route it through the RETb form, which keeps the register it names.  RETb
-  // still holds no hint of its own, so only the canonical 1 is taken here.
-  if (Mnemonic == "ret" && Operands.size() == 4 && Operands[1]->isReg() &&
-      Operands[2]->isMem() && isConstImm(*Operands[3], 1) &&
-      static_cast<AlphaOperand &>(*Operands[1]).getReg() == Alpha::R31) {
-    MCInst Inst;
-    Inst.setOpcode(Alpha::RETb);
-    Inst.addOperand(MCOperand::createReg(
-        static_cast<AlphaOperand &>(*Operands[2]).getMemBase()));
-    Inst.setLoc(IDLoc);
-    Out.emitInstruction(Inst, getSTI());
-    return false;
-  }
-
   // jmp $31, ($Rb), 0: an indirect jump through $Rb.  JMP holds neither the
-  // link register nor the hint, so, as with ret above, only the spelling whose
-  // fields the encoding can hold is taken here.
+  // link register nor the hint, so only the spelling whose fields the encoding
+  // can hold is taken here.
   if (Mnemonic == "jmp" && Operands.size() == 4 && Operands[1]->isReg() &&
       Operands[2]->isMem() && isConstImm(*Operands[3], 0) &&
       static_cast<AlphaOperand &>(*Operands[1]).getReg() == Alpha::R31) {
