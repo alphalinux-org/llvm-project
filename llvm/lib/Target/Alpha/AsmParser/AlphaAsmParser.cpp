@@ -9,6 +9,7 @@
 #include "MCTargetDesc/AlphaFixupKinds.h"
 #include "MCTargetDesc/AlphaMCTargetDesc.h"
 #include "TargetInfo/AlphaTargetInfo.h"
+#include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
@@ -515,6 +516,47 @@ ParseStatus AlphaAsmParser::parseDirective(AsmToken DirectiveID) {
         MCSpecifierExpr::create(Expr, Alpha::fixup_alpha_gprel32, getContext());
     getStreamer().emitValue(GPRel, 4, DirectiveID.getLoc());
     return ParseStatus::Success;
+  }
+  // `.s_floating` and `.t_floating` emit IEEE single and double values.  The
+  // VAX formats the architecture also names (.f_floating, .d_floating and
+  // .g_floating) are deliberately absent: nothing on Alpha Linux emits them.
+  if (ID == ".s_floating" || ID == ".t_floating") {
+    bool IsSingle = ID == ".s_floating";
+    const fltSemantics &Sem =
+        IsSingle ? APFloat::IEEEsingle() : APFloat::IEEEdouble();
+    unsigned Size = IsSingle ? 4 : 8;
+    // GNU as aligns the value to its own width first, and code that relies on
+    // that does not write the .align itself.  It fills the padding the way the
+    // section calls for: unop in an executable section, zeros elsewhere.  A
+    // float constant normally lives in .rodata or .data, where writing a unop
+    // would put an instruction in the data.
+    MCSection *Sec = getStreamer().getCurrentSectionOnly();
+    if (Sec && Sec->isText())
+      getStreamer().emitCodeAlignment(Align(Size), getSTI());
+    else
+      getStreamer().emitValueToAlignment(Align(Size));
+    do {
+      bool Neg = getLexer().is(AsmToken::Minus);
+      if (Neg || getLexer().is(AsmToken::Plus))
+        getParser().Lex();
+      if (getLexer().isNot(AsmToken::Real) &&
+          getLexer().isNot(AsmToken::Integer))
+        return Error(getLexer().getLoc(), "expected floating-point number");
+      APFloat Value(Sem);
+      if (llvm::Error E =
+              Value
+                  .convertFromString(getParser().getTok().getString(),
+                                     APFloat::rmNearestTiesToEven)
+                  .takeError()) {
+        consumeError(std::move(E));
+        return Error(getLexer().getLoc(), "invalid floating-point number");
+      }
+      getParser().Lex();
+      if (Neg)
+        Value.changeSign();
+      getStreamer().emitIntValue(Value.bitcastToAPInt().getZExtValue(), Size);
+    } while (getParser().parseOptionalToken(AsmToken::Comma));
+    return getParser().parseEOL();
   }
   return ParseStatus::NoMatch;
 }
