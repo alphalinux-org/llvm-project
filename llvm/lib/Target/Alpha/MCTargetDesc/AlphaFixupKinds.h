@@ -45,6 +45,9 @@ enum Fixups {
   // that lets the linker relax a local call.
   fixup_alpha_hint,
   fixup_alpha_lituse_jsr,
+  // A 21-bit PC-relative branch to a routine sharing the caller's global
+  // pointer (R_ALPHA_BRSGP), from a `!samegp` suffix.
+  fixup_alpha_brsgp,
 
   fixup_alpha_invalid,
   NumTargetFixupKinds = fixup_alpha_invalid - FirstTargetFixupKind
@@ -76,6 +79,8 @@ inline StringRef getSpecifierName(unsigned Kind) {
     return "dtprelhi";
   case fixup_alpha_dtprello:
     return "dtprello";
+  case fixup_alpha_brsgp:
+    return "samegp";
   default:
     return "";
   }
