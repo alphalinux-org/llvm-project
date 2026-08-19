@@ -8,11 +8,22 @@
 	.text
 .ifndef LAYOUT
 
+## The operand kinds are checked, not just their number: reading a register
+## operand as a memory one asserts in an assertions build and returns garbage
+## without.
+	ldgp $29, $27
+# CHECK: [[#@LINE-1]]:12: error: expected memory operand of the form disp($reg)
+
 	jsr $26, $27
 # CHECK: [[#@LINE-1]]:2: error: invalid operand for instruction
 
 ## The 16-bit signed displacement of a memory-format instruction.
 	ldq $1, 40000($30)
+# CHECK: [[#@LINE-1]]:2: error: displacement out of range
+
+## ldgp's displacement rides in the lda half of the pair, which has the same
+## 16-bit field.
+	ldgp $29, 65536($27)
 # CHECK: [[#@LINE-1]]:2: error: displacement out of range
 
 ## The 8-bit unsigned literal of an operate-format instruction.

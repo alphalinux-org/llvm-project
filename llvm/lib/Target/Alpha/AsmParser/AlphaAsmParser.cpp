@@ -77,8 +77,16 @@ public:
   }
   // A register written in parentheses, `($reg)`, as jsr/jmp/ret/wh64 use: the
   // parser produces a memory operand (base with a zero displacement) that these
-  // instructions consume as a plain base register.
-  bool isParenReg() const { return Kind == Memory; }
+  // instructions consume as a plain base register.  The displacement has to be
+  // absent, because there is nowhere in the encoding to put one: matching
+  // `8($3)' here would assemble it as `($3)' and lose the 8.  GNU as rejects
+  // those forms, so failing to match produces the same diagnosis.
+  bool isParenReg() const {
+    if (Kind != Memory)
+      return false;
+    const auto *CE = dyn_cast<MCConstantExpr>(Mem.Off);
+    return CE && CE->getValue() == 0;
+  }
 
   StringRef getToken() const {
     assert(Kind == Token);
@@ -852,22 +860,35 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   // ldgp $29, 0($base): expand to ldah/lda with a GPDISP relocation (addend 4)
   // referencing the parsed base register.
   if (Mnemonic == "ldgp" && Operands.size() == 3) {
+    // ldgp $Ra, disp($Rb).  The destination is $Ra, not always $29: GNU as
+    // assembles `ldgp $0, 0($27)' into a pair naming $0.  The displacement is
+    // carried by the lda half.
+    if (!Operands[1]->isReg())
+      return Error(Operands[1]->getStartLoc(), "expected register operand");
+    if (!Operands[2]->isMem())
+      return Error(Operands[2]->getStartLoc(),
+                   "expected memory operand of the form disp($reg)");
+    MCRegister Dst = static_cast<AlphaOperand &>(*Operands[1]).getReg();
     MCRegister Base = static_cast<AlphaOperand &>(*Operands[2]).getMemBase();
+    const MCExpr *Off = static_cast<AlphaOperand &>(*Operands[2]).getMemOff();
     const MCExpr *GpDisp =
         MCSpecifierExpr::create(MCConstantExpr::create(4, getContext()),
                                 Alpha::fixup_alpha_gpdisp, getContext());
     MCInst Ldah;
     Ldah.setOpcode(Alpha::LDAHm);
-    Ldah.addOperand(MCOperand::createReg(Alpha::R29));
+    Ldah.addOperand(MCOperand::createReg(Dst));
     Ldah.addOperand(MCOperand::createReg(Base));
     Ldah.addOperand(MCOperand::createExpr(GpDisp));
     Ldah.setLoc(IDLoc);
     Out.emitInstruction(Ldah, getSTI());
     MCInst Lda;
     Lda.setOpcode(Alpha::LEA);
-    Lda.addOperand(MCOperand::createReg(Alpha::R29));
-    Lda.addOperand(MCOperand::createReg(Alpha::R29));
-    Lda.addOperand(MCOperand::createImm(0));
+    Lda.addOperand(MCOperand::createReg(Dst));
+    Lda.addOperand(MCOperand::createReg(Dst));
+    if (const auto *CE = dyn_cast<MCConstantExpr>(Off))
+      Lda.addOperand(MCOperand::createImm(CE->getValue()));
+    else
+      Lda.addOperand(MCOperand::createExpr(Off));
     Lda.setLoc(IDLoc);
     Out.emitInstruction(Lda, getSTI());
     return false;
@@ -908,19 +929,6 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     Call.addOperand(MCOperand::createReg(Alpha::R27));
     Call.setLoc(IDLoc);
     Out.emitInstruction(Call, getSTI());
-    return false;
-  }
-
-  // ret $Ra, ($Rb), hint: the return written in full in hand assembly.  The
-  // return target register $Rb is what matters (it is not always $26); Ra=$31
-  // and hint=1 as our ret encodes, so route it through the RETb form.
-  if (Mnemonic == "ret" && Operands.size() == 4 && Operands[2]->isMem()) {
-    MCInst Inst;
-    Inst.setOpcode(Alpha::RETb);
-    Inst.addOperand(MCOperand::createReg(
-        static_cast<AlphaOperand &>(*Operands[2]).getMemBase()));
-    Inst.setLoc(IDLoc);
-    Out.emitInstruction(Inst, getSTI());
     return false;
   }
 
