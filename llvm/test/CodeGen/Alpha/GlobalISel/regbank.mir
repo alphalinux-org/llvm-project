@@ -74,10 +74,9 @@ body:             |
     ; CHECK-LABEL: name: phi_from_both_ends
     ; CHECK: %{{[0-9]+}}:fpr(s64) = G_PHI
     %0:_(s64) = COPY $r16
-    %1:_(s1) = G_TRUNC %0(s64)
     %2:_(p0) = COPY $r17
     %3:_(s64) = COPY $f16
-    G_BRCOND %1(s1), %bb.1
+    G_BRCOND %0(s64), %bb.1
     G_BR %bb.2
 
   bb.1:

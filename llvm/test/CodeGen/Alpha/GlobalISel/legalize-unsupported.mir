@@ -1,0 +1,185 @@
+# RUN: llc -mtriple=alpha-unknown-linux-gnu -run-pass=legalizer %s -o - \
+# RUN:   | FileCheck %s
+# RUN: not llc -mtriple=alpha-unknown-linux-gnu -run-pass=legalizer \
+# RUN:   -global-isel-abort=1 %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=ABORT
+# RUN: llc -mtriple=alpha-unknown-linux-gnu -mattr=+no-fp-regs \
+# RUN:   -run-pass=legalizer %s -o - | FileCheck %s --check-prefix=NOFP
+
+# The rules that are deliberately `.unsupported()`: division and the atomics,
+# whose lowerings the SelectionDAG path builds -- division as a library call
+# with a non-standard convention, an atomic as a retry loop a custom inserter
+# emits.  A rule that quietly lowered one of these instead would produce code
+# that looks legal and calls the wrong thing.
+#
+# Without -global-isel-abort=1 the function is marked failedISel and handed
+# whole to the SelectionDAG path, which is the arrangement being tested; the
+# second run line pins the diagnostic the aborting form prints.
+
+# ABORT: LLVM ERROR: unable to legalize instruction: {{.*}}G_SDIV
+
+---
+name:            sdiv
+legalized:       false
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $r16, $r17
+    ; CHECK-LABEL: name: sdiv
+    ; CHECK: failedISel: true
+    ; CHECK: G_SDIV
+    %0:_(s64) = COPY $r16
+    %1:_(s64) = COPY $r17
+    %2:_(s64) = G_SDIV %0, %1
+    $r0 = COPY %2(s64)
+    RET implicit $r0
+...
+---
+name:            urem
+legalized:       false
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $r16, $r17
+    ; CHECK-LABEL: name: urem
+    ; CHECK: failedISel: true
+    ; CHECK: G_UREM
+    %0:_(s64) = COPY $r16
+    %1:_(s64) = COPY $r17
+    %2:_(s64) = G_UREM %0, %1
+    $r0 = COPY %2(s64)
+    RET implicit $r0
+...
+---
+name:            atomicrmw_add
+legalized:       false
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $r16, $r17
+    ; CHECK-LABEL: name: atomicrmw_add
+    ; CHECK: failedISel: true
+    ; CHECK: G_ATOMICRMW_ADD
+    %0:_(p0) = COPY $r16
+    %1:_(s64) = COPY $r17
+    %2:_(s64) = G_ATOMICRMW_ADD %0(p0), %1 :: (load store seq_cst (s64))
+    $r0 = COPY %2(s64)
+    RET implicit $r0
+...
+---
+name:            cmpxchg
+legalized:       false
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $r16, $r17, $r18
+    ; CHECK-LABEL: name: cmpxchg
+    ; CHECK: failedISel: true
+    ; CHECK: G_ATOMIC_CMPXCHG
+    %0:_(p0) = COPY $r16
+    %1:_(s64) = COPY $r17
+    %2:_(s64) = COPY $r18
+    %3:_(s64) = G_ATOMIC_CMPXCHG %0(p0), %1, %2 :: (load store seq_cst seq_cst (s64))
+    $r0 = COPY %3(s64)
+    RET implicit $r0
+...
+
+---
+# Every floating rule is unsupported under -mno-fp-regs, which has no register
+# for the result to live in.  The SelectionDAG path lowers such a function to
+# the soft-float libcalls; this one has no lowering of its own, so it says so
+# and the function goes there whole.  Without the feature the same rule is
+# legal, which is what the first RUN line checks here.
+name:            fadd
+legalized:       false
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $f16, $f17
+    ; CHECK-LABEL: name: fadd
+    ; CHECK-NOT: failedISel: true
+    ; NOFP-LABEL: name: fadd
+    ; NOFP: failedISel: true
+    ; NOFP: G_FADD
+    %0:_(s64) = COPY $f16
+    %1:_(s64) = COPY $f17
+    %2:_(s64) = G_FADD %0, %1
+    $f0 = COPY %2(s64)
+    RET implicit $f0
+...
+
+---
+# A misaligned access.  The rule names the natural alignment, so an align-1
+# quadword load does not match it and is unsupported: Alpha has no instruction
+# that loads a datum straddling two quadwords, and the ldq_u/extql/extqh pair
+# the SelectionDAG path builds for it is not something the legalizer here
+# reproduces.  Naming one byte in that rule instead would declare this legal
+# and send it to a selector written to refuse it, where the failure surfaces as
+# `cannot select` rather than as this.
+#
+# The aligned case below is the accept side: a rule that had simply been made
+# unsupported for every alignment would pass the first half of this and lose
+# ordinary loads entirely.
+name:            load_misaligned
+legalized:       false
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $r16
+    ; CHECK-LABEL: name: load_misaligned
+    ; CHECK: failedISel: true
+    ; CHECK: G_LOAD
+    %0:_(p0) = COPY $r16
+    %1:_(s64) = G_LOAD %0(p0) :: (load (s64), align 1)
+    $r0 = COPY %1(s64)
+    RET implicit $r0
+...
+---
+name:            load_aligned
+legalized:       false
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $r16
+    ; CHECK-LABEL: name: load_aligned
+    ; CHECK-NOT: failedISel: true
+    %0:_(p0) = COPY $r16
+    %1:_(s64) = G_LOAD %0(p0) :: (load (s64))
+    $r0 = COPY %1(s64)
+    RET implicit $r0
+...
+
+---
+# An extending load.  An opcode with no rules at all has an empty rule set that
+# verify() accepts vacuously, so leaving G_ZEXTLOAD and G_SEXTLOAD out would
+# leave nothing checking this -- and it is reachable: legalizing a load of a
+# type that is not a power of two, an i40 at -O0, produces exactly this.  The
+# selector has no counterpart for either opcode.
+#
+# `.lower()` looks like the answer and is not.  lowerLoad only *splits* a load,
+# and for a byte-sized, power-of-two, naturally aligned extending load -- which
+# is what this is -- it has nothing to split and returns UnableToLegalize, so
+# the rule would fail one step further on rather than here.  Selecting these
+# directly is the improvement to make: ldl already sign-extends a longword, and
+# ldbu and ldwu zero-extend where there is BWX.  Until then, hand the function
+# to the SelectionDAG path whole.
+#
+# This case is a lock, not a detector, and the distinction is worth writing
+# down: an opcode with no rules at all also fails to legalize and is also
+# marked failedISel, so without the rule this output is byte-identical
+# and the case still passes.  It has teeth in the other direction only -- it
+# fails if someone declares these legal without giving the selector something
+# to select, which is the mistake the rule is here to prevent.
+name:            zextload
+legalized:       false
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $r16
+    ; CHECK-LABEL: name: zextload
+    ; CHECK: failedISel: true
+    ; CHECK: G_ZEXTLOAD
+    %0:_(p0) = COPY $r16
+    %1:_(s64) = G_ZEXTLOAD %0(p0) :: (load (s32))
+    $r0 = COPY %1(s64)
+    RET implicit $r0
+...
