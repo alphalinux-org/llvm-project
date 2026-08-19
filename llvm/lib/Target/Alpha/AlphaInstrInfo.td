@@ -182,6 +182,10 @@ def u8imm : Operand<i64> {
   let EncoderMethod = "getLit8Encoding";
 }
 
+// The 14-bit hint field of `ret', written literally rather than as a
+// displacement to divide down.
+def u14imm : Operand<i64>;
+
 // An immediate that fits in the 8-bit operate literal field.
 def immUExt8 : ImmLeaf<i64, [{ return isUInt<8>(Imm); }]>;
 
@@ -2182,6 +2186,14 @@ def RETb : MbrForm<0b10, (outs), (ins parenGPR:$Rb), "ret $Rb", []> {
 def RETab : MbrForm<0b10, (outs), (ins GPRC:$Ra, parenGPR:$Rb), "ret $Ra, $Rb",
                     []> {
   let hint = 0;
+}
+// ret takes its hint literally, unlike jsr and jmp, whose operand is a byte
+// displacement the assembler divides by four: theirs predicts a target, this
+// one selects a prediction-stack action.  GNU as encodes it unscaled.
+def RETabh : MbrForm<0b10, (outs), (ins GPRC:$Ra, parenGPR:$Rb, u14imm:$hintval),
+                     "ret $Ra, $Rb, $hintval", []> {
+  bits<14> hintval;
+  let hint = hintval;
 }
 }
 let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1,
