@@ -9,6 +9,7 @@
 #include "MCTargetDesc/AlphaFixupKinds.h"
 #include "MCTargetDesc/AlphaMCTargetDesc.h"
 #include "TargetInfo/AlphaTargetInfo.h"
+#include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
@@ -264,10 +265,23 @@ class AlphaAsmParser : public MCTargetAsmParser {
   DenseMap<unsigned, MCSymbol *> GpDispLdaLabels;
   SmallVector<MCSymbol *, 2> PendingPreInsnLabels;
 
-  // A floating-point qualifier written on the mnemonic, as MCInst flags, and
-  // the mnemonic without it.  Set while parsing and consumed when matching:
-  // most qualified operates are spelled `addt/su' with no def of their own, so
-  // the match is retried against the base name with the qualifier recorded.
+  // GNU as aligns a data item to its own width before emitting it
+  // (alpha_cons_align, gas/config/tc-alpha.c), filling the padding the way the
+  // section calls for: unop in an executable section, zeros elsewhere.
+  void emitDataAlignment(Align A) {
+    // Assembly output echoes the directives as they were written, and reading
+    // it back runs it through this parser again, which aligns it then.  An
+    // alignment printed here would be pure noise -- one line before every data
+    // item -- so leave the text alone.
+    if (getStreamer().hasRawTextSupport())
+      return;
+    MCSection *Sec = getStreamer().getCurrentSectionOnly();
+    if (Sec && Sec->isText())
+      getStreamer().emitCodeAlignment(A, getSTI());
+    else
+      getStreamer().emitValueToAlignment(A);
+  }
+
   // The field a relocation specifier is written into, to be compared with the
   // one the matched encoding has.  Every GOT-, GP- and TLS-relative specifier
   // fills a 16-bit memory displacement; !samegp fills a 21-bit branch.
@@ -281,6 +295,13 @@ class AlphaAsmParser : public MCTargetAsmParser {
   // field the matched encoding actually has once it is known.
   unsigned PendingSpecifier = 0;
   SMLoc PendingSpecifierLoc;
+  // Whether a data directive aligns itself first.  GNU as starts with it on and
+  // `.align 0' turns it off, until the next `.align N' or section change.
+  bool AutoAlignOn = true;
+  // A floating-point qualifier written on the mnemonic, as MCInst flags, and
+  // the mnemonic without it.  Set while parsing and consumed when matching:
+  // most qualified operates are spelled `addt/su' with no def of their own, so
+  // the match is retried against the base name with the qualifier recorded.
   unsigned PendingFPQual = 0;
   bool PendingFPQualIsV = false;
   StringRef PendingFPQualBase;
@@ -444,6 +465,65 @@ ParseStatus AlphaAsmParser::parseDirective(AsmToken DirectiveID) {
         return ParseStatus::Success;
       }
     }
+  }
+
+  // GNU as aligns every data item to its own width first, and hand-written
+  // Alpha assembly leans on it: a .quad table written after an .asciz is
+  // expected to start on an 8-byte boundary, and an ldq from it otherwise
+  // faults.  The .2byte/.4byte/.8byte spellings are the explicitly unaligned
+  // ones -- gas maps them to s_alpha_ucons, "Dwarf wants these versions" --
+  // so they are left to the generic parser untouched, as is .byte.
+  //
+  // Only the alignment is emitted here; the values themselves are still the
+  // generic parser's, which NoMatch hands them back to.
+  {
+    unsigned ConsAlign = StringSwitch<unsigned>(DirectiveID.getIdentifier())
+                             .Cases({".short", ".value"}, 2u)
+                             .Cases({".long", ".int"}, 4u)
+                             .Case(".quad", 8u)
+                             .Case(".octa", 16u)
+                             .Default(0u);
+    if (ConsAlign) {
+      if (AutoAlignOn)
+        emitDataAlignment(Align(ConsAlign));
+      return ParseStatus::NoMatch;
+    }
+  }
+
+  // `.align 0' turns auto-alignment off and emits nothing; any other `.align'
+  // turns it back on and aligns (s_alpha_align).  A section change turns it
+  // back on too, which is why the section directives are watched here.
+  if (DirectiveID.getIdentifier() == ".align") {
+    int64_t Alignment;
+    SMLoc Loc = getParser().getTok().getLoc();
+    if (getParser().parseAbsoluteExpression(Alignment))
+      return ParseStatus::Failure;
+    // GNU as takes an optional fill value, which it uses for the padding.
+    // Nothing on Alpha writes one, and the section-appropriate fill this emits
+    // is what the callers want, so accept and ignore it.
+    if (getParser().parseOptionalToken(AsmToken::Comma)) {
+      int64_t Fill;
+      if (getParser().parseAbsoluteExpression(Fill))
+        return ParseStatus::Failure;
+    }
+    if (getParser().parseEOL())
+      return ParseStatus::Failure;
+    if (Alignment == 0) {
+      AutoAlignOn = false;
+      return ParseStatus::Success;
+    }
+    if (Alignment < 0 || Alignment >= 32)
+      return Error(Loc, "alignment must be between 0 and 31");
+    AutoAlignOn = true;
+    emitDataAlignment(Align(int64_t(1) << Alignment));
+    return ParseStatus::Success;
+  }
+  if (StringSwitch<bool>(DirectiveID.getIdentifier())
+          .Cases({".text", ".data", ".rodata", ".bss", ".section", ".pushsection",
+                  ".popsection", ".previous"}, true)
+          .Default(false)) {
+    AutoAlignOn = true;
+    return ParseStatus::NoMatch;
   }
 
   // ECOFF/OSF procedure-descriptor directives.  Most are hand-written-assembly
@@ -612,6 +692,9 @@ ParseStatus AlphaAsmParser::parseDirective(AsmToken DirectiveID) {
     if (getParser().parseExpression(Expr))
       return ParseStatus::Failure;
     getParser().eatToEndOfStatement();
+    // A four-byte item, aligned like one (s_alpha_gprel32).
+    if (AutoAlignOn)
+      emitDataAlignment(Align(4));
     // There is no `!gprel32' suffix to print: the `!' grammar attaches a
     // relocation specifier to an instruction operand, never to a data
     // directive.  So assembly output echoes the directive itself, the way
@@ -630,6 +713,44 @@ ParseStatus AlphaAsmParser::parseDirective(AsmToken DirectiveID) {
         MCSpecifierExpr::create(Expr, Alpha::fixup_alpha_gprel32, getContext());
     getStreamer().emitValue(GPRel, 4, DirectiveID.getLoc());
     return ParseStatus::Success;
+  }
+  // `.s_floating` and `.t_floating` emit IEEE single and double values.  The
+  // VAX formats the architecture also names (.f_floating, .d_floating and
+  // .g_floating) are deliberately absent: nothing on Alpha Linux emits them.
+  if (ID == ".s_floating" || ID == ".t_floating") {
+    bool IsSingle = ID == ".s_floating";
+    const fltSemantics &Sem =
+        IsSingle ? APFloat::IEEEsingle() : APFloat::IEEEdouble();
+    unsigned Size = IsSingle ? 4 : 8;
+    // GNU as aligns the value to its own width first, and code that relies on
+    // that does not write the .align itself.  It fills the padding the way the
+    // section calls for: unop in an executable section, zeros elsewhere.  A
+    // float constant normally lives in .rodata or .data, where writing a unop
+    // would put an instruction in the data.
+    if (AutoAlignOn)
+      emitDataAlignment(Align(Size));
+    do {
+      bool Neg = getLexer().is(AsmToken::Minus);
+      if (Neg || getLexer().is(AsmToken::Plus))
+        getParser().Lex();
+      if (getLexer().isNot(AsmToken::Real) &&
+          getLexer().isNot(AsmToken::Integer))
+        return Error(getLexer().getLoc(), "expected floating-point number");
+      APFloat Value(Sem);
+      if (llvm::Error E =
+              Value
+                  .convertFromString(getParser().getTok().getString(),
+                                     APFloat::rmNearestTiesToEven)
+                  .takeError()) {
+        consumeError(std::move(E));
+        return Error(getLexer().getLoc(), "invalid floating-point number");
+      }
+      getParser().Lex();
+      if (Neg)
+        Value.changeSign();
+      getStreamer().emitIntValue(Value.bitcastToAPInt().getZExtValue(), Size);
+    } while (getParser().parseOptionalToken(AsmToken::Comma));
+    return getParser().parseEOL();
   }
   return ParseStatus::NoMatch;
 }

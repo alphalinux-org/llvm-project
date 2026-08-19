@@ -10,6 +10,10 @@
 ## instruction word.
 
 	.data
+## GNU as aligns each item to its own width; `.align 0' turns that off, which
+## is what lets the mixed widths below sit next to each other and makes a
+## write of the wrong width visible.
+	.align	0
 a:
 ## Each fixed-up field is followed by a constant, and the value is wide enough
 ## that a write of the wrong width would be seen reaching into it.
@@ -38,6 +42,7 @@ dend:
 ## A symbol the assembler cannot resolve keeps a relocation instead, whose type
 ## follows the width of the field and whether the reference is pc-relative.
 	.section .rel,"a",@progbits
+	.align	0
 	.quad	undef_q
 	.long	undef_l
 	.quad	undef_q - .
