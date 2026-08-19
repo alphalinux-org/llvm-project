@@ -35,28 +35,88 @@ static void adjustStack(MachineBasicBlock &MBB,
       .addReg(Alpha::R30);
 }
 
+// Copy one integer register to another with `bis $31, Src, Dst`.
+static void copyReg(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
+                    const DebugLoc &DL, const AlphaInstrInfo &TII, Register Dst,
+                    Register Src) {
+  BuildMI(MBB, MBBI, DL, TII.get(Alpha::BIS), Dst)
+      .addReg(Alpha::R31)
+      .addReg(Src);
+}
+
+void AlphaFrameLowering::determineCalleeSaves(MachineFunction &MF,
+                                              BitVector &SavedRegs,
+                                              RegScavenger *RS) const {
+  TargetFrameLowering::determineCalleeSaves(MF, SavedRegs, RS);
+  // When a frame pointer is needed, reserve a slot for the caller's $15, which
+  // the prologue saves before repurposing $15 as the frame pointer.
+  if (hasFP(MF)) {
+    auto *FI = MF.getInfo<AlphaMachineFunctionInfo>();
+    if (FI->getFramePointerSaveIndex() < 0)
+      FI->setFramePointerSaveIndex(MF.getFrameInfo().CreateStackObject(
+          8, Align(8), /*isSpillSlot=*/true));
+  }
+}
+
 void AlphaFrameLowering::emitPrologue(MachineFunction &MF,
                                       MachineBasicBlock &MBB) const {
   const AlphaInstrInfo &TII = *MF.getSubtarget<AlphaSubtarget>().getInstrInfo();
-  uint64_t StackSize = MF.getFrameInfo().getStackSize();
+  MachineFrameInfo &MFI = MF.getFrameInfo();
+  auto *AFI = MF.getInfo<AlphaMachineFunctionInfo>();
+  uint64_t StackSize = MFI.getStackSize();
   MachineBasicBlock::iterator MBBI = MBB.begin();
   DebugLoc DL;
 
   // Establish the global pointer from the procedure value ($27) if needed.
-  if (MF.getInfo<AlphaMachineFunctionInfo>()->usesGP()) {
+  if (AFI->usesGP()) {
     MBB.addLiveIn(Alpha::R27);
     BuildMI(MBB, MBBI, DL, TII.get(Alpha::LDGP));
   }
 
   adjustStack(MBB, MBBI, DL, TII, -(int64_t)StackSize);
+
+  if (hasFP(MF)) {
+    // Save the caller's $15 and set $15 to the current stack pointer, before
+    // the callee-save spills rather than after them: those address their slots
+    // through $15, which stays put while variable stack allocations move $30.
+    // The save itself must address its slot through $30, since $15 is not the
+    // frame pointer yet.
+    MachineBasicBlock::iterator Save = MBBI;
+    int FPSlot = AFI->getFramePointerSaveIndex();
+    int64_t Off = MFI.getObjectOffset(FPSlot) + (int64_t)StackSize;
+    BuildMI(MBB, Save, DL, TII.get(Alpha::STQ))
+        .addReg(Alpha::R15)
+        .addReg(Alpha::R30)
+        .addImm(Off);
+    copyReg(MBB, Save, DL, TII, Alpha::R15, Alpha::R30);
+  }
 }
 
 void AlphaFrameLowering::emitEpilogue(MachineFunction &MF,
                                       MachineBasicBlock &MBB) const {
   const AlphaInstrInfo &TII = *MF.getSubtarget<AlphaSubtarget>().getInstrInfo();
+  auto *AFI = MF.getInfo<AlphaMachineFunctionInfo>();
   uint64_t StackSize = MF.getFrameInfo().getStackSize();
   MachineBasicBlock::iterator MBBI = MBB.getFirstTerminator();
   DebugLoc DL = MBBI != MBB.end() ? MBBI->getDebugLoc() : DebugLoc();
+
+  if (hasFP(MF)) {
+    // Restore $30 from the frame pointer (undoing any variable allocation),
+    // then restore the caller's $15 and deallocate the fixed frame.  All of
+    // that follows the callee-saved reloads, which PEI placed above this point
+    // and which still reach their slots through $15.
+    copyReg(MBB, MBBI, DL, TII, Alpha::R30, Alpha::R15);
+
+    // $30 now equals the frame bottom, so reach the save slot through it (the
+    // caller's $15 is about to be restored, so it cannot be the base).
+    int FPSlot = AFI->getFramePointerSaveIndex();
+    int64_t Off =
+        MF.getFrameInfo().getObjectOffset(FPSlot) + (int64_t)StackSize;
+    BuildMI(MBB, MBBI, DL, TII.get(Alpha::LDQ), Alpha::R15)
+        .addReg(Alpha::R30)
+        .addImm(Off);
+  }
+
   adjustStack(MBB, MBBI, DL, TII, StackSize);
 }
 
