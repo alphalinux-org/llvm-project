@@ -1,5 +1,6 @@
 # RUN: llvm-mc -triple=alpha-unknown-linux-gnu -filetype=obj %s -o %t.o
 # RUN: llvm-objdump -dr %t.o | FileCheck %s
+# RUN: llvm-readelf -r -s %t.o | FileCheck %s --check-prefix=RELOC
 
 # GNU as macros the kernel's hand-written assembly relies on.
 
@@ -35,3 +36,23 @@
 # CHECK-NEXT: R_ALPHA_LITERAL schedule_tail
 # CHECK-NEXT: jmp $31, ($27), 0
 	jmp $31, schedule_tail
+
+	.ent memcpy
+memcpy:
+	.prologue 0
+	ret ($26)
+	.end memcpy
+
+# .prologue 0 gives memcpy the STO_ALPHA_NOPV st_other (0x80) the linker checks.
+# RELOC: FUNC {{.*}}<other: 0x80>{{.*}} memcpy
+
+	.ent std_gpload
+std_gpload:
+	.prologue 1
+	ret ($26)
+	.end std_gpload
+
+# .prologue 1 gives the function the STO_ALPHA_STD_GPLOAD st_other (0x88).
+# Bit 3 (0x08) survives: st_other holds the whole byte, not just the three
+# visibility bits.
+# RELOC: FUNC {{.*}}<other: 0x88>{{.*}} std_gpload
