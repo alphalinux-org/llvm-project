@@ -318,6 +318,17 @@ ParseStatus AlphaAsmParser::parseDirective(AsmToken DirectiveID) {
       }
     }
   }
+
+  // ECOFF/OSF procedure-descriptor directives (.ent/.end/.frame/.prologue/
+  // .mask/.fmask) carry hand-written-assembly bookkeeping that the ELF object
+  // does not need.  Accept and ignore them.  .end in particular must be caught
+  // here, ahead of the generic directive that would otherwise stop assembly.
+  StringRef ID = DirectiveID.getIdentifier();
+  if (ID == ".ent" || ID == ".end" || ID == ".frame" || ID == ".prologue" ||
+      ID == ".mask" || ID == ".fmask" || ID == ".usepv") {
+    getParser().eatToEndOfStatement();
+    return ParseStatus::Success;
+  }
   return ParseStatus::NoMatch;
 }
 
