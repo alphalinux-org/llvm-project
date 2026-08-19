@@ -26,6 +26,7 @@
 #include "llvm/MC/MCSymbolELF.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/MathExtras.h"
 
 using namespace llvm;
 
@@ -226,6 +227,15 @@ public:
 
   ParseStatus parseOperand(OperandVector &Operands);
   ParseStatus parseMemOperand(OperandVector &Operands);
+
+  // Add a 32-bit signed value to Base with ldah/lda, writing the result to Rc;
+  // returns the register now holding it (Rc, or Base if nothing was emitted).
+  MCRegister emitConst32(MCRegister Rc, int32_t V32, MCRegister Base, SMLoc L,
+                         MCStreamer &Out);
+  // Materialize the 64-bit constant V into Rc entirely in code, matching the
+  // isel constant builder (small values are one or two instructions; a wide
+  // value builds its high half, shifts it up, then adds the low half).
+  void emitLoadImm(MCRegister Rc, int64_t V, SMLoc L, MCStreamer &Out);
 };
 
 } // end anonymous namespace
@@ -502,6 +512,73 @@ bool AlphaAsmParser::parseInstruction(ParseInstructionInfo &Info,
   return false;
 }
 
+MCRegister AlphaAsmParser::emitConst32(MCRegister Rc, int32_t V32,
+                                       MCRegister Base, SMLoc L,
+                                       MCStreamer &Out) {
+  auto emit = [&](unsigned Op, int64_t Imm, MCRegister Src) {
+    MCInst I;
+    I.setOpcode(Op);
+    I.addOperand(MCOperand::createReg(Rc));
+    I.addOperand(MCOperand::createImm(Imm));
+    I.addOperand(MCOperand::createReg(Src));
+    I.setLoc(L);
+    Out.emitInstruction(I, getSTI());
+  };
+  // V32 = (Hi << 16) + Lo, Lo sign-extended.  Hi lies in [-0x8000, 0x8000]; the
+  // +0x8000 case does not fit ldah's signed field, so emit two ldah of 0x4000.
+  int64_t Lo = static_cast<int16_t>(V32);
+  int64_t Hi = (static_cast<int64_t>(V32) - Lo) >> 16;
+  MCRegister Cur = Base;
+  if (Hi != 0) {
+    if (isInt<16>(Hi)) {
+      emit(Alpha::LDAH, Hi, Cur);
+    } else {
+      emit(Alpha::LDAH, Hi / 2, Cur);
+      emit(Alpha::LDAH, Hi / 2, Rc);
+    }
+    Cur = Rc;
+  }
+  if (Lo != 0 || Cur == Base) {
+    emit(Alpha::LDA, Lo, Cur);
+    Cur = Rc;
+  }
+  return Cur;
+}
+
+void AlphaAsmParser::emitLoadImm(MCRegister Rc, int64_t V, SMLoc L,
+                                 MCStreamer &Out) {
+  auto emit1 = [&](unsigned Op, ArrayRef<MCOperand> Ops) {
+    MCInst I;
+    I.setOpcode(Op);
+    for (const MCOperand &O : Ops)
+      I.addOperand(O);
+    I.setLoc(L);
+    Out.emitInstruction(I, getSTI());
+  };
+  // A 16-bit value is a single lda; a value that fits 32 bits is an ldah/lda
+  // pair (with a zapnot to clear the sign extension of an unsigned 32-bit value
+  // whose bit 31 is set).
+  if (SignExtend64<16>(V) == V) {
+    emit1(Alpha::LDAi, {MCOperand::createReg(Rc), MCOperand::createImm(V)});
+    return;
+  }
+  if (isInt<32>(V) || isUInt<32>(V)) {
+    emitConst32(Rc, static_cast<int32_t>(V), Alpha::R31, L, Out);
+    if (!isInt<32>(V))
+      emit1(Alpha::ZAPNOTi, {MCOperand::createReg(Rc), MCOperand::createReg(Rc),
+                             MCOperand::createImm(0xf)});
+    return;
+  }
+  // Wider: build the high half, shift it up by 32, then add the low half; the
+  // sign of the low half is already folded into the high half.
+  int32_t Lo32 = static_cast<int32_t>(V);
+  emitConst32(Rc, static_cast<int32_t>((V - Lo32) >> 32), Alpha::R31, L, Out);
+  emit1(Alpha::SLLi, {MCOperand::createReg(Rc), MCOperand::createReg(Rc),
+                      MCOperand::createImm(32)});
+  if (Lo32 != 0)
+    emitConst32(Rc, Lo32, Rc, L, Out);
+}
+
 // A parsed operand that is exactly the constant `V`.  The full spellings of
 // ret and jmp below carry fields the bare encodings do not, so each is taken
 // only where what it says is what the encoding holds.
@@ -723,6 +800,17 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
       Ptr.addOperand(MCOperand::createExpr(Sym));
       Ptr.setLoc(IDLoc);
       Out.emitInstruction(Ptr, getSTI());
+      return false;
+    }
+  }
+
+  // ldi/ldiq $Rc, imm: load an immediate constant, materializing it in code.
+  if ((Mnemonic == "ldi" || Mnemonic == "ldiq") && Operands.size() == 3 &&
+      Operands[1]->isReg() && Operands[2]->isImm()) {
+    const MCExpr *E = static_cast<AlphaOperand &>(*Operands[2]).getImm();
+    if (auto *CE = dyn_cast<MCConstantExpr>(E)) {
+      emitLoadImm(static_cast<AlphaOperand &>(*Operands[1]).getReg(),
+                  CE->getValue(), IDLoc, Out);
       return false;
     }
   }
