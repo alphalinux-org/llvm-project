@@ -410,6 +410,24 @@ def S8SUBL : OForm<0x10, 0x1b, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
                    "s8subl $Ra, $Rb, $Rc",
                    [(set i64:$Rc, (sext_inreg (sub (shl i64:$Ra, (i64 3)),
                                                    i64:$Rb), i32))]>;
+// Literal forms of scaled add/subtract (assembler-only; no DAG patterns needed
+// since the compiler always uses register forms from the patterns above).
+def S4ADDQi : OFormL<0x10, 0x22, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
+                     "s4addq $Ra, $lit, $Rc", []>;
+def S8ADDQi : OFormL<0x10, 0x32, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
+                     "s8addq $Ra, $lit, $Rc", []>;
+def S4SUBQi : OFormL<0x10, 0x2b, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
+                     "s4subq $Ra, $lit, $Rc", []>;
+def S8SUBQi : OFormL<0x10, 0x3b, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
+                     "s8subq $Ra, $lit, $Rc", []>;
+def S4ADDLi : OFormL<0x10, 0x02, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
+                     "s4addl $Ra, $lit, $Rc", []>;
+def S8ADDLi : OFormL<0x10, 0x12, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
+                     "s8addl $Ra, $lit, $Rc", []>;
+def S4SUBLi : OFormL<0x10, 0x0b, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
+                     "s4subl $Ra, $lit, $Rc", []>;
+def S8SUBLi : OFormL<0x10, 0x1b, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
+                     "s8subl $Ra, $lit, $Rc", []>;
 }
 
 // Literal (8-bit immediate) form of an operate instruction:
@@ -707,6 +725,19 @@ def CVTTQn : FP_r<0x16, 0x0af, "cvttq", []>;
 // -mfp-rounding-mode=d (e.g. glibc s_rint.c).
 def CVTTQ_SVID : FP_r<0x16, 0x7ef, "cvttq/svid", []>;
 
+// Register-register conditional moves with no pattern of their own: the low
+// bit tests, which nothing selects, and the two conditions DAG canonicalization
+// rewrites away (setge/setle against zero become setgt/setlt against -1/1), so
+// the compiler never emits them but hand-written assembly and the platform's
+// own libraries are full of them.
+def CMOVLBS : OForm<0x11, 0x14, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                    "cmovlbs $Ra, $Rb, $Rc", []>;
+def CMOVLBC : OForm<0x11, 0x16, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                    "cmovlbc $Ra, $Rb, $Rc", []>;
+def CMOVGE : OForm<0x11, 0x46, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                   "cmovge $Ra, $Rb, $Rc", []>;
+def CMOVLE : OForm<0x11, 0x64, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+                   "cmovle $Ra, $Rb, $Rc", []>;
 // Move the floating-point control register to/from a floating register.  The
 // operand is encoded in all three register fields.  These carry no pattern and
 // exist only so hand-written assembly (context save/restore) assembles.

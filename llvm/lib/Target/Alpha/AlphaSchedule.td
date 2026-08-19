@@ -143,6 +143,10 @@ multiclass AlphaInstRW {
   // The immediate forms cost what their register forms do.
   def : InstRW<[Wr_IALU], (instrs
       LDAd, LDAg, LDAt, LDAHd, LDAHg, LDAHt, LDAHm, LDAtlsgd, LDAtlsldm, NOP)>;
+  // The scaled forms likewise; the shift is part of the adder.
+  def : InstRW<[Wr_IALU], (instrs
+      S4ADDLi, S4ADDQi, S4SUBLi, S4SUBQi, S8ADDLi, S8ADDQi, S8SUBLi, S8SUBQi)>;
+  def : InstRW<[Wr_ICmov, ReadDefault, Rd_ITest], (instrs CMOVLBC, CMOVLBS, CMOVGE, CMOVLE)>;
   // cpys and its sign-manipulating forms are add-pipe operations, as are the
   // conversions with a baked-in qualifier.
   def : InstRW<[Wr_FAdd], (instrs FABSS, FABST, FNEGS, FNEGT, FCPYSS, FCPYST)>;
