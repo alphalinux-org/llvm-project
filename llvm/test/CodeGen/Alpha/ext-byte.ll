@@ -1,4 +1,6 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
+; RUN: llc -mtriple=alpha-unknown-linux-gnu -global-isel -global-isel-abort=1 \
+; RUN:   < %s | FileCheck %s
 
 ; Extracting a byte/word/longword at a constant byte offset is one ext.
 define i64 @byte1(i64 %x) {

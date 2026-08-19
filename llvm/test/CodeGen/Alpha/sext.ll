@@ -1,4 +1,6 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
+; RUN: llc -mtriple=alpha-unknown-linux-gnu -global-isel -global-isel-abort=1 \
+; RUN:   < %s | FileCheck %s
 
 ; CHECK-LABEL: sext32:
 ; CHECK:       addl $16, $31, $0

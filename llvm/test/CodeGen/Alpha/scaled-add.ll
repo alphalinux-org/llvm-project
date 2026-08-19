@@ -1,4 +1,6 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu < %s | FileCheck %s
+; RUN: llc -mtriple=alpha-unknown-linux-gnu -global-isel -global-isel-abort=1 \
+; RUN:   < %s | FileCheck %s
 
 ; Quadword scaled add/subtract, and the longword forms that fold the sign-extend.
 define i64 @q4(i64 %a, i64 %b) {

@@ -1,5 +1,7 @@
 ; RUN: llc -verify-machineinstrs -mtriple=alpha-unknown-linux-gnu -mcpu=ev6 < %s \
 ; RUN:   | FileCheck %s
+; RUN: llc -verify-machineinstrs -mtriple=alpha-unknown-linux-gnu -mcpu=ev6 \
+; RUN:   -global-isel -global-isel-abort=1 < %s | FileCheck %s
 
 ; A bsr to an outlined function leaves the caller's global pointer alone: the
 ; outlined body cannot touch $29 -- getOutliningTypeImpl rules out every

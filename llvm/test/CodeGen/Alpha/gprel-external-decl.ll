@@ -1,4 +1,6 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu -relocation-model=static < %s | FileCheck %s
+; RUN: llc -mtriple=alpha-unknown-linux-gnu -relocation-model=static -global-isel \
+; RUN:   -global-isel-abort=1 < %s | FileCheck %s
 
 ; Under -fno-pic clang marks every symbol dso_local, an `extern` declaration of
 ; something that in fact lives in a shared library included.  A gp-relative

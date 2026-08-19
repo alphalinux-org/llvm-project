@@ -1,0 +1,96 @@
+# RUN: llc -mtriple=alpha-unknown-linux-gnu -run-pass=instruction-select \
+# RUN:   -global-isel-abort=0 -verify-machineinstrs %s -o - | FileCheck %s
+
+# An under-aligned quadword access must not reach a selected ldq or stq.
+# Alpha does not fault on one: it ignores the low address bits and touches the
+# wrong bytes, so a wrong answer is the failure mode, not a signal.
+# KNOWN-ISSUES.md records the shape of the bug that lets one through.
+#
+# This asks the question of the selection pass alone, which is where the two
+# refusals that exist can be told apart.  The refusal that fires here is not
+# AlphaInstructionSelector::selectLoadStore's own alignment check: it is
+# InstructionSelect's legality check, which asks AlphaLegalizerInfo directly
+# and reports "instruction is not legal" before the selector is called at all.
+# The selector's check is never reached, here or in a whole-pipeline run --
+# and it could not help if it were, because select() calls selectImpl() before
+# the switch that reaches selectLoadStore, so an imported pattern matching
+# G_LOAD would win first.  The legalizer's AlignInBits is the whole defence,
+# and this test is the assertion that it is still standing where it counts.
+#
+# Both under-aligned functions must fail selection; with -global-isel-abort=0
+# that is recorded as failedISel with the generic instruction left in place.
+
+---
+name:            load_underaligned
+alignment:       1
+legalized:       true
+regBankSelected: true
+tracksRegLiveness: true
+registers:
+  - { id: 0, class: gpr }
+  - { id: 1, class: gpr }
+liveins:
+  - { reg: '$r16' }
+body:             |
+  bb.1:
+    liveins: $r16
+
+    ; CHECK-LABEL: name: load_underaligned
+    ; CHECK: failedISel: true
+    ; CHECK: G_LOAD
+    %0:gpr(p0) = COPY $r16
+    %1:gpr(s64) = G_LOAD %0(p0) :: (load (s64), align 1)
+    $r0 = COPY %1(s64)
+    RET implicit $r0
+...
+---
+name:            store_underaligned
+alignment:       1
+legalized:       true
+regBankSelected: true
+tracksRegLiveness: true
+registers:
+  - { id: 0, class: gpr }
+  - { id: 1, class: gpr }
+liveins:
+  - { reg: '$r16' }
+  - { reg: '$r17' }
+body:             |
+  bb.1:
+    liveins: $r16, $r17
+
+    ; CHECK-LABEL: name: store_underaligned
+    ; CHECK: failedISel: true
+    ; CHECK: G_STORE
+    %0:gpr(p0) = COPY $r16
+    %1:gpr(s64) = COPY $r17
+    G_STORE %1(s64), %0(p0) :: (store (s64), align 1)
+    RET
+...
+---
+name:            load_aligned
+alignment:       1
+legalized:       true
+regBankSelected: true
+tracksRegLiveness: true
+registers:
+  - { id: 0, class: gpr }
+  - { id: 1, class: gpr }
+liveins:
+  - { reg: '$r16' }
+body:             |
+  bb.1:
+    liveins: $r16
+
+    ; The accept side.  A refusal that refuses everything proves nothing -- the
+    ; round-11 verifier that rejected every function with two divisions passed
+    ; its reject-side tests too -- so the naturally aligned form of the same
+    ; load has to select.
+    ; CHECK-LABEL: name: load_aligned
+    ; CHECK-NOT: failedISel: true
+    ; CHECK: LDQ
+    %0:gpr(p0) = COPY $r16
+    %1:gpr(s64) = G_LOAD %0(p0) :: (load (s64))
+    $r0 = COPY %1(s64)
+    RET implicit $r0
+...

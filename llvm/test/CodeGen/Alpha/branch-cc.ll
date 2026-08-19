@@ -1,4 +1,6 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu -O2 < %s | FileCheck %s
+; RUN: llc -mtriple=alpha-unknown-linux-gnu -O2 -global-isel \
+; RUN:   -global-isel-abort=1 < %s | FileCheck %s
 
 ; A comparison against zero becomes a single test-and-branch.  The branch is
 ; emitted for the fall-through edge, so the condition is the inverse of the
@@ -74,10 +76,13 @@ f:
   ret void
 }
 
-; Comparing two variables still needs an explicit compare feeding a bne.
+; Comparing two variables still needs an explicit compare feeding a branch on
+; its result.  Which of the two operand orders is used, and so whether the
+; branch over the call is beq or bne, differs between the two instruction
+; selectors and costs the same either way.
 ; CHECK-LABEL: cmpvar:
-; CHECK:      cmp{{l[te]}} $1{{[67]}}, $1{{[67]}},
-; CHECK:      bne
+; CHECK:      cmp{{l[te]}} $1{{[67]}}, $1{{[67]}}, [[R:\$[0-9]+]]
+; CHECK:      b{{eq|ne}} [[R]],
 define void @cmpvar(i64 %x, i64 %y) {
   %c = icmp slt i64 %x, %y
   br i1 %c, label %t, label %f
