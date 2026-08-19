@@ -21,6 +21,31 @@ define void @store_trunc(ptr %p, float %x) {
   ret void
 }
 
+; Converting to and from double is not symmetric, which is worth pinning: half
+; to double goes through float, calling __extendhfsf2 and widening the result,
+; while double to half has a libcall of its own.  Without -mieee the widening
+; is a register move rather than a cvtst, since the two formats share a
+; representation and only the trapping behaviour differs.
+; CHECK-LABEL: load_ext_double:
+; CHECK:       ldq $27, __extendhfsf2($29){{.*}}!literal
+; CHECK:       jsr $26, ($27)
+; CHECK:       cpys $f0, $f0, $f0
+; CHECK:       ret
+define double @load_ext_double(ptr %p) {
+  %h = load half, ptr %p
+  %r = fpext half %h to double
+  ret double %r
+}
+
+; CHECK-LABEL: store_trunc_double:
+; CHECK:       ldq $27, __truncdfhf2($29){{.*}}!literal
+; CHECK:       ret
+define void @store_trunc_double(ptr %p, double %x) {
+  %h = fptrunc double %x to half
+  store half %h, ptr %p
+  ret void
+}
+
 ; A half that is only moved needs no conversion at all: it is a 16-bit datum, so
 ; the load and store are the ordinary unaligned word sequence and no libcall is
 ; emitted.  Nothing covered the no-conversion path.
