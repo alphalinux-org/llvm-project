@@ -8,6 +8,7 @@
 
 #include "llvm/IR/RuntimeLibcalls.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/TargetParser/Triple.h"
 #include "gtest/gtest.h"
 using namespace llvm;
 
@@ -58,6 +59,22 @@ TEST(RuntimeLibcallsTest, LibcallImplByName) {
     EXPECT_EQ(*I++, RTLIB::impl_truncl_f80);
     EXPECT_EQ(*I++, RTLIB::impl_truncl_ppcf128);
   }
+}
+
+TEST(RuntimeLibcallsTest, AlphaSystemLibrary) {
+  RTLIB::RuntimeLibcallsInfo Info{Triple("alpha-unknown-linux-gnu")};
+
+  // A target with no SystemRuntimeLibrary of its own gets an empty set, and
+  // every operation that needs a libcall then has none to call.  Alpha's entry
+  // is what makes the default libm and compiler-rt routines available to it.
+  EXPECT_TRUE(Info.isAvailable(RTLIB::impl_sin));
+  EXPECT_TRUE(Info.isAvailable(RTLIB::impl_floorf));
+  EXPECT_TRUE(Info.isAvailable(RTLIB::impl_memcpy));
+
+  // The 128-bit integer helpers are asked for separately: Alpha is a 64-bit
+  // target, so an i128 multiply or divide is a call rather than an expansion.
+  EXPECT_TRUE(Info.isAvailable(RTLIB::impl___multi3));
+  EXPECT_TRUE(Info.isAvailable(RTLIB::impl___divti3));
 }
 
 } // namespace
