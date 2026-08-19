@@ -11,6 +11,7 @@
 #include "TargetInfo/AlphaTargetInfo.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringSwitch.h"
+#include "llvm/BinaryFormat/ELF.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
@@ -22,6 +23,7 @@
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSubtargetInfo.h"
+#include "llvm/MC/MCSymbolELF.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/Casting.h"
 
@@ -185,6 +187,49 @@ public:
 };
 
 class AlphaAsmParser : public MCTargetAsmParser {
+  // The symbol named by the most recent `.ent`, whose st_other bits `.prologue`
+  // sets.
+  MCSymbol *CurEntSym = nullptr;
+
+  // What the ECOFF procedure directives said about one procedure.  GNU as
+  // keeps this to the end of the file and synthesises .eh_frame from it there
+  // (alpha_elf_md_finish), so that hand-written assembly -- glibc's setjmp,
+  // __longjmp, start and the string routines, the dynamic linker's trampoline
+  // -- gets unwind information without writing .cfi_* directives.
+  struct EntFrame {
+    MCSymbol *Begin = nullptr;
+    MCSymbol *End = nullptr;
+    // Where the prologue is complete.  Set by `.prologue', and its absence is
+    // what says this procedure gets no frame description at all.
+    MCSymbol *Prologue = nullptr;
+    unsigned Mask = 0;
+    unsigned FMask = 0;
+    // DWARF register numbers, defaulted as GNU as defaults them.
+    unsigned FPReg = 30;
+    unsigned RAReg = 26;
+    int64_t FrameSize = 0;
+    int64_t MaskOffset = 0;
+    int64_t FMaskOffset = 0;
+  };
+  std::vector<EntFrame> EntFrames;
+  // Index into EntFrames of the procedure between `.ent' and `.end', or -1.
+  int CurEntFrame = -1;
+
+  // A frame register as GNU as reads one (tc_get_register): written `$N',
+  // and anything else warns and is taken as the stack pointer.
+  unsigned parseFrameRegister() {
+    MCRegister Reg;
+    SMLoc S, E;
+    if (getLexer().is(AsmToken::Dollar) &&
+        tryParseRegister(Reg, S, E).isSuccess()) {
+      int N = getContext().getRegisterInfo()->getDwarfRegNum(Reg, true);
+      if (N >= 0)
+        return N;
+    }
+    Warning(getLexer().getLoc(), "frame reg expected, using $30");
+    return 30;
+  }
+
 #define GET_ASSEMBLER_HEADER
 #include "AlphaGenAsmMatcher.inc"
 
@@ -205,6 +250,8 @@ public:
     // On Alpha `.word` is a 16-bit datum, matching GNU as.
     P.addAliasForDirective(".word", ".2byte");
   }
+
+  void onEndOfFile() override;
 
   bool parseRegister(MCRegister &Reg, SMLoc &StartLoc, SMLoc &EndLoc) override;
   ParseStatus tryParseRegister(MCRegister &Reg, SMLoc &StartLoc,
@@ -318,13 +365,128 @@ ParseStatus AlphaAsmParser::parseDirective(AsmToken DirectiveID) {
     }
   }
 
-  // ECOFF/OSF procedure-descriptor directives (.ent/.end/.frame/.prologue/
-  // .mask/.fmask) carry hand-written-assembly bookkeeping that the ELF object
-  // does not need.  Accept and ignore them.  .end in particular must be caught
-  // here, ahead of the generic directive that would otherwise stop assembly.
+  // ECOFF/OSF procedure-descriptor directives.  Most are hand-written-assembly
+  // bookkeeping the ELF object does not need, but .ent names a procedure and
+  // .prologue records how it establishes the global pointer, which the linker
+  // needs when a caller reaches it with `!samegp`.  .end in particular must be
+  // caught here, ahead of the generic directive that would stop assembly.
   StringRef ID = DirectiveID.getIdentifier();
-  if (ID == ".ent" || ID == ".end" || ID == ".frame" || ID == ".prologue" ||
-      ID == ".mask" || ID == ".fmask" || ID == ".usepv") {
+  if (ID == ".ent") {
+    StringRef Name;
+    if (getParser().parseIdentifier(Name))
+      return Error(getParser().getTok().getLoc(),
+                   "expected symbol name after .ent");
+    CurEntSym = getContext().getOrCreateSymbol(Name);
+    // Mark the symbol as a function, matching GAS behavior.
+    static_cast<MCSymbolELF *>(CurEntSym)->setType(ELF::STT_FUNC);
+    // Start collecting the procedure's frame.  A local label rather than the
+    // procedure's own symbol, so that .eh_frame needs no relocation against a
+    // global -- GNU as does the same, and for the same reason.
+    if (!getStreamer().hasRawTextSupport()) {
+      EntFrame F;
+      F.Begin = getContext().createTempSymbol("ent");
+      getStreamer().emitLabel(F.Begin);
+      CurEntFrame = EntFrames.size();
+      EntFrames.push_back(F);
+    }
+    getParser().eatToEndOfStatement();
+    return ParseStatus::Success;
+  }
+  if (ID == ".prologue") {
+    int64_t Arg;
+    if (getParser().parseAbsoluteExpression(Arg))
+      return ParseStatus::Failure;
+    getParser().eatToEndOfStatement();
+    // .prologue 0 marks a routine that needs no procedure value (it runs on the
+    // caller's gp: STO_ALPHA_NOPV); .prologue 1 marks the standard two-word gp
+    // load a same-gp caller may skip (STO_ALPHA_STD_GPLOAD).
+    if (CurEntSym) {
+      auto *Sym = static_cast<MCSymbolELF *>(CurEntSym);
+      const unsigned STO_ALPHA_NOPV = 0x80, STO_ALPHA_STD_GPLOAD = 0x88;
+      unsigned Other = Sym->getOther() & ~STO_ALPHA_STD_GPLOAD;
+      if (Arg == 0)
+        Other |= STO_ALPHA_NOPV;
+      else if (Arg == 1)
+        Other |= STO_ALPHA_STD_GPLOAD;
+      Sym->setOther(Other);
+    }
+    // The frame description takes effect here: everything .frame and .mask
+    // describe is in place once the prologue is done.
+    if (CurEntFrame >= 0) {
+      EntFrames[CurEntFrame].Prologue = getContext().createTempSymbol("prol");
+      getStreamer().emitLabel(EntFrames[CurEntFrame].Prologue);
+    }
+    return ParseStatus::Success;
+  }
+  if (ID == ".end") {
+    // GNU as gives the procedure its st_size here, from .ent to .end.  Without
+    // it every function gcc compiles is a FUNC of size 0, which leaves gdb and
+    // the profilers unable to say which function an address is in, and makes
+    // `nm --size-sort' and ld's --gc-sections warnings meaningless.
+    // Assembly output echoes .end as it was written and an assembler reading
+    // it back does this then, so adding a label and a .size there would be
+    // noise.
+    if (CurEntSym && !getStreamer().hasRawTextSupport()) {
+      MCSymbol *EndSym = getContext().createTempSymbol("end");
+      getStreamer().emitLabel(EndSym);
+      static_cast<MCSymbolELF *>(CurEntSym)
+          ->setSize(MCBinaryExpr::createSub(
+              MCSymbolRefExpr::create(EndSym, getContext()),
+              MCSymbolRefExpr::create(CurEntSym, getContext()), getContext()));
+      if (CurEntFrame >= 0)
+        EntFrames[CurEntFrame].End = EndSym;
+    }
+    CurEntFrame = -1;
+    CurEntSym = nullptr;
+    getParser().eatToEndOfStatement();
+    return ParseStatus::Success;
+  }
+  if (ID == ".frame") {
+    // .frame <frame register>, <frame size>, <return-address register>
+    //        [, <offset of the saved $a0>]
+    // The last operand has nowhere to go in an ELF object; GNU as ignores it.
+    EntFrame Discard;
+    EntFrame &F = CurEntFrame >= 0 ? EntFrames[CurEntFrame] : Discard;
+    if (CurEntFrame < 0 && !getStreamer().hasRawTextSupport())
+      Warning(DirectiveID.getLoc(), ".frame outside of .ent");
+    F.FPReg = parseFrameRegister();
+    int64_t Size;
+    if (!getParser().parseOptionalToken(AsmToken::Comma) ||
+        getParser().parseAbsoluteExpression(Size) ||
+        !getParser().parseOptionalToken(AsmToken::Comma)) {
+      Warning(DirectiveID.getLoc(), "bad .frame directive");
+      getParser().eatToEndOfStatement();
+      return ParseStatus::Success;
+    }
+    F.FrameSize = Size;
+    F.RAReg = parseFrameRegister();
+    getParser().eatToEndOfStatement();
+    return ParseStatus::Success;
+  }
+  if (ID == ".mask" || ID == ".fmask") {
+    // .mask <bitmask of saved registers>, <offset of the first from the CFA>
+    int64_t Val, Offset;
+    if (getParser().parseAbsoluteExpression(Val) ||
+        !getParser().parseOptionalToken(AsmToken::Comma) ||
+        getParser().parseAbsoluteExpression(Offset)) {
+      Warning(DirectiveID.getLoc(), Twine("bad ") + ID + " directive");
+      getParser().eatToEndOfStatement();
+      return ParseStatus::Success;
+    }
+    if (CurEntFrame >= 0) {
+      EntFrame &F = EntFrames[CurEntFrame];
+      if (ID == ".mask") {
+        F.Mask = Val;
+        F.MaskOffset = Offset;
+      } else {
+        F.FMask = Val;
+        F.FMaskOffset = Offset;
+      }
+    }
+    getParser().eatToEndOfStatement();
+    return ParseStatus::Success;
+  }
+  if (ID == ".usepv") {
     getParser().eatToEndOfStatement();
     return ParseStatus::Success;
   }
@@ -399,6 +561,75 @@ ParseStatus AlphaAsmParser::parseOperand(OperandVector &Operands) {
   getParser().Lex(); // )
   Operands.push_back(AlphaOperand::createMem(Base, Off, S, E));
   return ParseStatus::Success;
+}
+
+// Synthesise .eh_frame from the ECOFF procedure directives, as GNU as does at
+// the end of assembly (alpha_elf_md_finish).  Doing it here rather than as the
+// directives are read is what makes the two rules below possible: the frame
+// covers the whole procedure although nothing is known about it until `.end',
+// and a file that described its frames itself is left alone.
+void AlphaAsmParser::onEndOfFile() {
+  // Assembly output passes the directives through unchanged; an assembler
+  // reading it back does this then.
+  if (getStreamer().hasRawTextSupport())
+    return;
+  // If anything in the file wrote .cfi_* directives, that is the description
+  // of record and these directives are only bookkeeping beside it.  gcc emits
+  // both, which is why this is a whole-file decision and not a per-procedure
+  // one.
+  if (!getStreamer().getDwarfFrameInfos().empty())
+    return;
+
+  for (const EntFrame &F : EntFrames) {
+    // No `.prologue' means the procedure never said where its frame is set
+    // up, so there is nothing to describe.  glibc's ENTRY macro is like this,
+    // and GNU as gives those procedures no FDE either.
+    if (!F.Prologue || !F.Begin || !F.End)
+      continue;
+    SmallVector<MCCFIInstruction, 8> Instrs;
+    // A procedure that neither moves the stack pointer nor saves a register
+    // keeps the CIE's rule, CFA = $30, for its whole length.
+    if (F.FPReg != 30 || F.Mask || F.FMask || F.FrameSize) {
+      if (F.FPReg != 30) {
+        if (F.FrameSize)
+          Instrs.push_back(
+              MCCFIInstruction::cfiDefCfa(F.Prologue, F.FPReg, F.FrameSize));
+        else
+          Instrs.push_back(
+              MCCFIInstruction::createDefCfaRegister(F.Prologue, F.FPReg));
+      } else if (F.FrameSize) {
+        Instrs.push_back(
+            MCCFIInstruction::cfiDefCfaOffset(F.Prologue, F.FrameSize));
+      }
+      // The saved registers sit at consecutive slots from the offset the mask
+      // gives, in register order -- except the return address, which is
+      // stored first whatever its number.
+      unsigned Mask = F.Mask;
+      int64_t Offset = F.MaskOffset;
+      if (Mask & (1u << 26)) {
+        Instrs.push_back(MCCFIInstruction::createOffset(F.Prologue, 26, Offset));
+        Offset += 8;
+        Mask &= ~(1u << 26);
+      }
+      while (Mask) {
+        unsigned I = llvm::countr_zero(Mask);
+        Mask &= Mask - 1;
+        Instrs.push_back(MCCFIInstruction::createOffset(F.Prologue, I, Offset));
+        Offset += 8;
+      }
+      // The floating-point registers are DWARF numbers 32 and up.
+      Mask = F.FMask;
+      Offset = F.FMaskOffset;
+      while (Mask) {
+        unsigned I = llvm::countr_zero(Mask);
+        Mask &= Mask - 1;
+        Instrs.push_back(
+            MCCFIInstruction::createOffset(F.Prologue, I + 32, Offset));
+        Offset += 8;
+      }
+    }
+    getStreamer().emitCFIFrame(F.Begin, F.End, F.RAReg, Instrs);
+  }
 }
 
 bool AlphaAsmParser::parseInstruction(ParseInstructionInfo &Info,

@@ -451,6 +451,16 @@ void MCStreamer::emitCFIStartProc(bool IsSimple, SMLoc Loc) {
 void MCStreamer::emitCFIStartProcImpl(MCDwarfFrameInfo &Frame) {
 }
 
+void MCStreamer::emitCFIFrame(MCSymbol *Begin, MCSymbol *End, unsigned RAReg,
+                              ArrayRef<MCCFIInstruction> Instructions) {
+  MCDwarfFrameInfo Frame;
+  Frame.Begin = Begin;
+  Frame.End = End;
+  Frame.RAReg = RAReg;
+  Frame.Instructions.assign(Instructions.begin(), Instructions.end());
+  DwarfFrameInfos.push_back(std::move(Frame));
+}
+
 void MCStreamer::emitCFIEndProc() {
   MCDwarfFrameInfo *CurFrame = getCurrentDwarfFrameInfo();
   if (!CurFrame)

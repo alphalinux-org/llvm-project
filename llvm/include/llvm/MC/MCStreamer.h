@@ -1021,6 +1021,14 @@ public:
   virtual void emitCFISections(bool EH, bool Debug, bool SFrame);
   void emitCFIStartProc(bool IsSimple, SMLoc Loc = SMLoc());
   void emitCFIEndProc();
+  /// Add a frame description whose extent and instructions are already known,
+  /// rather than building one from .cfi_* directives as they are parsed.  A
+  /// target whose assembly describes frames some other way -- Alpha's
+  /// .ent/.frame/.mask, which say nothing until the procedure is complete --
+  /// collects the labels as it goes and adds the frame at the end of the file.
+  /// Every instruction must carry the label it takes effect at.
+  void emitCFIFrame(MCSymbol *Begin, MCSymbol *End, unsigned RAReg,
+                    ArrayRef<MCCFIInstruction> Instructions);
   virtual void emitCFIDefCfa(int64_t Register, int64_t Offset, SMLoc Loc = {});
   virtual void emitCFIDefCfaOffset(int64_t Offset, SMLoc Loc = {});
   virtual void emitCFIDefCfaRegister(int64_t Register, SMLoc Loc = {});
