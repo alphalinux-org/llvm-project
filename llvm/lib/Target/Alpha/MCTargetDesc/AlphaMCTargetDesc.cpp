@@ -28,6 +28,16 @@
 
 using namespace llvm;
 
+unsigned llvm::getFPRoundMode(const MCSubtargetInfo &STI) {
+  if (STI.hasFeature(Alpha::FeatureFPRoundChopped))
+    return Alpha::FPRoundChopped;
+  if (STI.hasFeature(Alpha::FeatureFPRoundMinus))
+    return Alpha::FPRoundMinus;
+  if (STI.hasFeature(Alpha::FeatureFPRoundDynamic))
+    return Alpha::FPRoundDynamic;
+  return Alpha::FPRoundNormal;
+}
+
 static MCAsmInfo *createAlphaMCAsmInfo(const MCRegisterInfo &MRI,
                                        const Triple &TT,
                                        const MCTargetOptions &Options) {

@@ -495,7 +495,9 @@ let isCodeGenOnly = 1 in def FCPYST : FCpys<[(set f64:$Rc, (fcopysign f64:$Ra, f
 class FP_rr<bits<11> func, string mnem, ValueType vt, SDPatternOperator node>
     : FForm<0x16, func, (outs FPRC:$Rc), (ins FPRC:$Ra, FPRC:$Rb),
             mnem # " $Ra, $Rb, $Rc",
-            [(set vt:$Rc, (node vt:$Ra, vt:$Rb))]>;
+            [(set vt:$Rc, (node vt:$Ra, vt:$Rb))]> {
+  let TrapClass = 1;  // Arithmetic: su / sui.
+}
 
 def ADDS : FP_rr<0x080, "adds", f32, fadd>;
 def ADDT : FP_rr<0x0a0, "addt", f64, fadd>;
@@ -511,7 +513,9 @@ def DIVT : FP_rr<0x0a3, "divt", f64, fdiv>;
 // f64 values use, so the same instructions serve both.
 class CMPT_rr<bits<11> func, string mnem>
     : FForm<0x16, func, (outs FPRC:$Rc), (ins FPRC:$Ra, FPRC:$Rb),
-            mnem # " $Ra, $Rb, $Rc", []>;
+            mnem # " $Ra, $Rb, $Rc", []> {
+  let TrapClass = 2;  // Compare: su only.
+}
 def CMPTEQ : CMPT_rr<0x0a5, "cmpteq">;
 def CMPTLT : CMPT_rr<0x0a6, "cmptlt">;
 def CMPTLE : CMPT_rr<0x0a7, "cmptle">;
@@ -529,20 +533,27 @@ class FP_r<bits<6> opc, bits<11> func, string mnem, list<dag> pat>
   let Ra = 31;
 }
 // Precision conversions between S_floating (f32) and T_floating (f64).
+let TrapClass = 5 in
 def CVTST : FP_r<0x16, 0x2ac, "cvtst", [(set f64:$Rc, (fpextend f32:$Rb))]>;
+let TrapClass = 1 in  // T-to-S convert is arithmetic: su / sui.
 def CVTTS : FP_r<0x16, 0x0ac, "cvtts", [(set f32:$Rc, (fpround f64:$Rb))]>;
 
 // Square root, from the FIX extension (ev6).
-let Predicates = [HasFIX], hasSideEffects = 0 in {
+let Predicates = [HasFIX], hasSideEffects = 0, TrapClass = 1 in {
 def SQRTS : FP_r<0x14, 0x08b, "sqrts", [(set f32:$Rc, (fsqrt f32:$Rb))]>;
 def SQRTT : FP_r<0x14, 0x0ab, "sqrtt", [(set f64:$Rc, (fsqrt f64:$Rb))]>;
 }
 
 // Integer/floating conversions on values held in floating-point registers.
+// Integer-to-float can only raise inexact, so it takes the sui qualifier only.
+let TrapClass = 4 in {
 def CVTQT : FP_r<0x16, 0x0be, "cvtqt", []>;
 def CVTQS : FP_r<0x16, 0x0bc, "cvtqs", []>;
+}
 // cvttq/c: convert T-floating to quadword with chopped (round-toward-zero)
-// rounding, matching C's fp-to-integer truncation semantics.
+// rounding, matching C's fp-to-integer truncation semantics.  Float-to-int
+// takes the sv / svi qualifier.
+let TrapClass = 3 in
 def CVTTQ : FP_r<0x16, 0x02f, "cvttq/c", []>;
 
 // Move the floating-point control register to/from a floating register.  The
