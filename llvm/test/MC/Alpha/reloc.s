@@ -7,6 +7,7 @@
 # CHECK: R_ALPHA_LITERAL g
 # CHECK: R_ALPHA_GPRELHIGH g
 # CHECK: R_ALPHA_GPRELLOW g
+# CHECK: R_ALPHA_GPREL16 g
 
 # The object path is not the only one these expressions reach: printing one
 # needs a printSpecifierExpr of its own, and without it the base class's
@@ -20,9 +21,13 @@
 # ASM-NEXT: {{.*}}kind: fixup_alpha_gprelhigh
 # ASM:      lda $0, g($0) !gprellow
 # ASM-NEXT: {{.*}}kind: fixup_alpha_gprellow
+# ASM:      lda $0, g($29) !gprel
+# ASM-NEXT: {{.*}}kind: fixup_alpha_gprel16
 	ldgp $29, 0($27)
 	ldq $27, g($29)		!literal
 	jsr $26, ($27)
 	ldah $0, g($29)		!gprelhigh
 	lda $0, g($0)		!gprellow
+# The 16-bit gp-relative form, which GNU as spells !gprel.
+	lda $0, g($29)		!gprel
 	ret
