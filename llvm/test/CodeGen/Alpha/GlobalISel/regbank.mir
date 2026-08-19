@@ -1,0 +1,94 @@
+# RUN: llc -mtriple=alpha-unknown-linux-gnu -run-pass=regbankselect %s -o - \
+# RUN:   | FileCheck %s
+
+# Most opcodes name their bank: integer arithmetic is general and floating
+# arithmetic is floating.  A load, a store and a phi say nothing on their own,
+# so their bank is read from the instructions around them.
+
+---
+# Arithmetic decides its own bank, and the two operands of a floating add are
+# floating even though they arrive by copy.
+name:            arith
+legalized:       true
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $r16, $r17, $f16, $f17
+    ; CHECK-LABEL: name: arith
+    ; CHECK:      %{{[0-9]+}}:gpr(s64) = G_ADD
+    ; CHECK:      %{{[0-9]+}}:fpr(s64) = G_FADD
+    %0:_(s64) = COPY $r16
+    %1:_(s64) = COPY $r17
+    %2:_(s64) = G_ADD %0, %1
+    %3:_(s64) = COPY $f16
+    %4:_(s64) = COPY $f17
+    %5:_(s64) = G_FADD %3, %4
+    $r0 = COPY %2(s64)
+    $f0 = COPY %5(s64)
+    RET implicit $r0, implicit $f0
+...
+---
+# A load takes the bank of what reads it: the floating add here, not the
+# general register the address arrived in.
+name:            load_from_use
+legalized:       true
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $r16, $f16
+    ; CHECK-LABEL: name: load_from_use
+    ; CHECK: %{{[0-9]+}}:fpr(s64) = G_LOAD
+    %0:_(p0) = COPY $r16
+    %1:_(s64) = G_LOAD %0(p0) :: (load (s64))
+    %2:_(s64) = COPY $f16
+    %3:_(s64) = G_FADD %1, %2
+    $f0 = COPY %3(s64)
+    RET implicit $f0
+...
+---
+# A store takes the bank of what it is given, so the same address feeds a
+# general store here.
+name:            store_from_def
+legalized:       true
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $r16, $r17
+    ; CHECK-LABEL: name: store_from_def
+    ; CHECK:      %[[V:[0-9]+]]:gpr(s64) = COPY $r17
+    ; CHECK-NEXT: G_STORE %[[V]](s64)
+    %0:_(p0) = COPY $r16
+    %1:_(s64) = COPY $r17
+    G_STORE %1(s64), %0(p0) :: (store (s64))
+    RET
+...
+---
+# A phi is decided from both ends: one incoming value is a floating add, so
+# the phi and the value that says nothing are floating too.
+name:            phi_from_both_ends
+legalized:       true
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $r16, $r17, $f16
+    ; CHECK-LABEL: name: phi_from_both_ends
+    ; CHECK: %{{[0-9]+}}:fpr(s64) = G_PHI
+    %0:_(s64) = COPY $r16
+    %1:_(s1) = G_TRUNC %0(s64)
+    %2:_(p0) = COPY $r17
+    %3:_(s64) = COPY $f16
+    G_BRCOND %1(s1), %bb.1
+    G_BR %bb.2
+
+  bb.1:
+    %4:_(s64) = G_LOAD %2(p0) :: (load (s64))
+    G_BR %bb.3
+
+  bb.2:
+    %5:_(s64) = G_FADD %3, %3
+
+  bb.3:
+    %6:_(s64) = G_PHI %4(s64), %bb.1, %5(s64), %bb.2
+    $f0 = COPY %6(s64)
+    RET implicit $f0
+...
