@@ -25,4 +25,20 @@ void alpha::getAlphaTargetFeatures(const Driver &D, const ArgList &Args,
     else
       Features.push_back("-build-constants");
   }
+
+  // The instruction-set extensions a processor implies come from its
+  // ProcessorModel in Alpha.td, which -mcpu selects via -target-cpu; there is
+  // nothing to add here for them.
+
+  // Explicit -m<ext>/-mno-<ext> flags, which override the processor defaults.
+  auto Handle = [&](unsigned Pos, unsigned Neg, StringRef Feat) {
+    if (Arg *A = Args.getLastArg(Pos, Neg))
+      Features.push_back(A->getOption().matches(Pos)
+                             ? Args.MakeArgString("+" + Feat)
+                             : Args.MakeArgString("-" + Feat));
+  };
+  Handle(options::OPT_mbwx, options::OPT_mno_bwx, "bwx");
+  Handle(options::OPT_mcix, options::OPT_mno_cix, "cix");
+  Handle(options::OPT_mmax, options::OPT_mno_max, "mvi");
+  Handle(options::OPT_mfix, options::OPT_mno_fix, "fix");
 }
