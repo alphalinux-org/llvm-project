@@ -39,6 +39,10 @@
         not     $1, $2
 # CHECK: bis $1, $2, $3
         or      $1, $2, $3
+# CHECK: eqv $1, $2, $3
+        xornot  $1, $2, $3
+# CHECK: eqv $1, 5, $3
+        xornot  $1, 5, $3
 # CHECK: cpys $f1, $f1, $f2
         fmov    $f1, $f2
 # CHECK: cpysn $f1, $f1, $f2
