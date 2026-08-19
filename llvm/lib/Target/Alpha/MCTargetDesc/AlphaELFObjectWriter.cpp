@@ -48,6 +48,8 @@ protected:
     }
     switch (unsigned(Fixup.getKind())) {
     case FK_Data_4:
+      if (Target.getSpecifier() == Alpha::fixup_alpha_gprel32)
+        return ELF::R_ALPHA_GPREL32;
       return IsPCRel ? ELF::R_ALPHA_SREL32 : ELF::R_ALPHA_REFLONG;
     case FK_Data_8:
       return IsPCRel ? ELF::R_ALPHA_SREL64 : ELF::R_ALPHA_REFQUAD;
@@ -55,6 +57,8 @@ protected:
       return ELF::R_ALPHA_BRADDR;
     case Alpha::fixup_alpha_brsgp:
       return ELF::R_ALPHA_BRSGP;
+    case Alpha::fixup_alpha_gprel32:
+      return ELF::R_ALPHA_GPREL32;
     case Alpha::fixup_alpha_literal:
       return ELF::R_ALPHA_LITERAL;
     case Alpha::fixup_alpha_gprelhigh:
@@ -77,6 +81,8 @@ protected:
       return ELF::R_ALPHA_DTPRELHI;
     case Alpha::fixup_alpha_dtprello:
       return ELF::R_ALPHA_DTPRELLO;
+    case Alpha::fixup_alpha_gprel16:
+      return ELF::R_ALPHA_GPREL16;
     case Alpha::fixup_alpha_hint:
       return ELF::R_ALPHA_HINT;
     case Alpha::fixup_alpha_lituse_jsr:
@@ -88,13 +94,15 @@ protected:
   }
 
   bool needsRelocateWithSymbol(const MCValue &, unsigned Type) const override {
-    // The GP-relative and TLS relocations reference the symbol itself.  The GOT
-    // literal is left section-relative for a local symbol so the linker can
-    // pair it with a lituse_jsr and relax the call; an external symbol keeps
-    // its name because it has no local section to fold into.
+    // The TLS relocations reference the symbol itself.  The GOT literal is left
+    // section-relative for a local symbol so the linker can pair it with a
+    // lituse_jsr and relax the call; an external symbol keeps its name because
+    // it has no local section to fold into.  A GP-relative relocation computes
+    // sym + addend - GP, which a section symbol and an addend give just as
+    // well, so those do not pin the symbol: pinning them dragged every jump
+    // table's block labels and every constant-pool entry into the symbol table,
+    // where a symbolizer picked one of them over the function containing it.
     switch (Type) {
-    case ELF::R_ALPHA_GPRELHIGH:
-    case ELF::R_ALPHA_GPRELLOW:
     case ELF::R_ALPHA_TPRELHI:
     case ELF::R_ALPHA_TPRELLO:
     case ELF::R_ALPHA_GOTTPREL:
