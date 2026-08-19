@@ -1,0 +1,17 @@
+## An object whose e_machine is EM_ALPHA is recognised as an Alpha one: the
+## format is named elf64-alpha and the architecture maps back to the alpha
+## triple, which is what the object readers and writers have to agree on.
+
+# RUN: yaml2obj %s -o %t
+# RUN: llvm-readobj --file-headers %t | FileCheck %s
+
+# CHECK: Format: elf64-alpha
+# CHECK: Arch: alpha
+# CHECK: Machine: EM_ALPHA (0x9026)
+
+--- !ELF
+FileHeader:
+  Class:   ELFCLASS64
+  Data:    ELFDATA2LSB
+  Type:    ET_REL
+  Machine: EM_ALPHA
