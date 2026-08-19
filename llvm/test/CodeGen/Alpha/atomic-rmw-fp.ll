@@ -16,6 +16,14 @@ define double @fadd_f64(ptr %p, double %v) {
   ret double %r
 }
 
+; CHECK-LABEL: fmax_f64:
+; CHECK:       ldq_l
+; CHECK:       stq_c
+define double @fmax_f64(ptr %p, double %v) {
+  %r = atomicrmw fmax ptr %p, double %v monotonic
+  ret double %r
+}
+
 ; The wrapping forms have no instruction either and take the same path.
 ; CHECK-LABEL: uinc_wrap:
 ; CHECK:       ldq_l
