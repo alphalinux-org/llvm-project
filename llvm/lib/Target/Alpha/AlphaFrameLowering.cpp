@@ -120,11 +120,36 @@ void AlphaFrameLowering::emitEpilogue(MachineFunction &MF,
   adjustStack(MBB, MBBI, DL, TII, StackSize);
 }
 
+bool AlphaFrameLowering::hasReservedCallFrame(const MachineFunction &MF) const {
+  // A call passes its stack arguments at fixed offsets from the stack pointer,
+  // so the space for the largest of them is part of the frame and no call
+  // moves the stack pointer.  The default answer would be no as soon as the
+  // function has a frame pointer, which would leave that space uncounted and
+  // let a spill slot land on top of an outgoing argument.
+  //
+  // A variable-sized allocation is the exception: it moves the stack pointer,
+  // so the argument area cannot keep a fixed place in the frame and has to be
+  // carved out around each call instead.
+  return !MF.getFrameInfo().hasVarSizedObjects();
+}
+
 MachineBasicBlock::iterator AlphaFrameLowering::eliminateCallFramePseudoInstr(
     MachineFunction &MF, MachineBasicBlock &MBB,
     MachineBasicBlock::iterator I) const {
-  // Arguments are passed in registers, so the call-frame markers just get
-  // removed; stack argument space is not handled yet.
+  // With the call frame reserved on entry, the markers just get removed.
+  if (!hasReservedCallFrame(MF)) {
+    // Otherwise make room for the outgoing arguments below whatever the stack
+    // pointer now points at, and take it back afterwards, keeping the stack
+    // pointer aligned across the call.
+    const AlphaInstrInfo &TII =
+        *MF.getSubtarget<AlphaSubtarget>().getInstrInfo();
+    int64_t Amount = alignTo(I->getOperand(0).getImm(), getStackAlign());
+    if (Amount) {
+      if (I->getOpcode() == TII.getCallFrameSetupOpcode())
+        Amount = -Amount;
+      adjustStack(MBB, I, I->getDebugLoc(), TII, Amount);
+    }
+  }
   return MBB.erase(I);
 }
 
