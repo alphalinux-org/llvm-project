@@ -46,3 +46,15 @@
 # andnot is an alias of bic.
 # CHECK: bic $1, $2, $3                    # encoding: [0x03,0x01,0x22,0x44]
 	andnot $1, $2, $3
+
+# bsr with an explicit link register.
+# CHECK: bsr $23, foo
+	bsr $23, foo
+
+# ret/jmp through a register written in parentheses.
+# CHECK: ret ($26)                         # encoding: [0x01,0x80,0xfa,0x6b]
+	ret ($26)
+# CHECK: jmp ($3)                          # encoding: [0x00,0x00,0xe3,0x6b]
+	jmp ($3)
+
+foo:

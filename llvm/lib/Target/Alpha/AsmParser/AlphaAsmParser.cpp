@@ -473,17 +473,17 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     return false;
   }
 
-  // ret $31, ($26), 1: the canonical return, written in full in hand assembly.
-  // Our ret prints and encodes exactly this form, so emit the bare word.  RET
-  // carries neither the return-address register nor the hint, so nothing else
-  // is taken here: a spelling naming another register goes to the matcher,
-  // which says so, rather than quietly returning through $26.
+  // ret $31, ($Rb), 1: the return written in full in hand assembly.  The
+  // return target register $Rb is what matters -- it is not always $26 -- so
+  // route it through the RETb form, which keeps the register it names.  RETb
+  // still holds no hint of its own, so only the canonical 1 is taken here.
   if (Mnemonic == "ret" && Operands.size() == 4 && Operands[1]->isReg() &&
       Operands[2]->isMem() && isConstImm(*Operands[3], 1) &&
-      static_cast<AlphaOperand &>(*Operands[1]).getReg() == Alpha::R31 &&
-      static_cast<AlphaOperand &>(*Operands[2]).getMemBase() == Alpha::R26) {
+      static_cast<AlphaOperand &>(*Operands[1]).getReg() == Alpha::R31) {
     MCInst Inst;
-    Inst.setOpcode(Alpha::RET);
+    Inst.setOpcode(Alpha::RETb);
+    Inst.addOperand(MCOperand::createReg(
+        static_cast<AlphaOperand &>(*Operands[2]).getMemBase()));
     Inst.setLoc(IDLoc);
     Out.emitInstruction(Inst, getSTI());
     return false;
