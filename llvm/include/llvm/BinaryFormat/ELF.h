@@ -159,7 +159,7 @@ enum {
   EM_RH32 = 38,          // TRW RH-32
   EM_RCE = 39,           // Motorola RCE
   EM_ARM = 40,           // ARM
-  EM_ALPHA = 41,         // DEC Alpha
+  EM_OLD_ALPHA = 41,     // DEC Alpha (the gABI-assigned number)
   EM_SH = 42,            // Hitachi SH
   EM_SPARCV9 = 43,       // SPARC V9
   EM_TRICORE = 44,       // Siemens TriCore
@@ -325,6 +325,10 @@ enum {
   EM_VE = 251,            // NEC SX-Aurora VE
   EM_CSKY = 252,          // C-SKY 32-bit processor
   EM_LOONGARCH = 258,     // LoongArch
+  // DEC Alpha's assigned number is EM_OLD_ALPHA (41), but every real Alpha
+  // object (Linux, the GNU toolchain, Digital UNIX) uses this historical
+  // value instead, so it is the one that matters in practice.
+  EM_ALPHA = 0x9026,
 };
 
 // Object file classes.

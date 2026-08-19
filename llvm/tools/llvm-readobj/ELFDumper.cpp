@@ -1191,7 +1191,7 @@ constexpr EnumStringDef<unsigned, 2> ElfMachineTypeDefs[] = {
   ENUM_ENT(EM_RH32,          "TRW RH-32"),
   ENUM_ENT(EM_RCE,           "Motorola RCE"),
   ENUM_ENT(EM_ARM,           "ARM"),
-  ENUM_ENT(EM_ALPHA,         "EM_ALPHA"),
+  ENUM_ENT(EM_OLD_ALPHA,     "DEC Alpha (gABI)"),
   ENUM_ENT(EM_SH,            "Hitachi SH"),
   ENUM_ENT(EM_SPARCV9,       "Sparc v9"),
   ENUM_ENT(EM_TRICORE,       "Siemens Tricore"),
@@ -1332,6 +1332,7 @@ constexpr EnumStringDef<unsigned, 2> ElfMachineTypeDefs[] = {
   ENUM_ENT(EM_VE,            "NEC SX-Aurora Vector Engine"),
   ENUM_ENT(EM_LOONGARCH,     "LoongArch"),
   ENUM_ENT(EM_INTELGT,       "Intel Graphics Technology"),
+  ENUM_ENT(EM_ALPHA,         "Digital Alpha"),
 };
 // clang-format on
 constexpr auto ElfMachineType = BUILD_ENUM_STRINGS(ElfMachineTypeDefs);

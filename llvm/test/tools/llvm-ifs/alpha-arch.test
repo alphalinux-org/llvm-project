@@ -1,0 +1,58 @@
+## Alpha objects carry the historical e_machine 0x9026 rather than the
+## gABI-assigned 41, so "alpha" in a text stub has to mean 0x9026 in both
+## directions: reading an object writes Arch: alpha, and writing an object back
+## from that stub reproduces 0x9026 rather than the gABI number.
+
+# RUN: yaml2obj %s -o %t.so
+# RUN: llvm-ifs --input-format=ELF --output-ifs=- %t.so | FileCheck %s
+# RUN: llvm-ifs --input-format=ELF --output-ifs=%t.ifs %t.so
+# RUN: llvm-ifs --input-format=IFS --output-elf=%t.rt.so %t.ifs
+# RUN: llvm-readobj --file-headers %t.rt.so | FileCheck %s --check-prefix=ELF
+
+# CHECK:      --- !ifs-v1
+# CHECK-NEXT: IfsVersion: {{[1-9]\d*\.(0|([1-9]\d*))}}
+# CHECK-NEXT: Target: { ObjectFormat: ELF, Arch: alpha, Endianness: little, BitWidth: 64 }
+
+## 0x9026, not 41.
+# ELF: Machine: EM_ALPHA (0x9026)
+
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS64
+  Data:            ELFDATA2LSB
+  Type:            ET_DYN
+  Machine:         EM_ALPHA
+Sections:
+  - Name:            .dynstr
+    Type:            SHT_STRTAB
+    Flags:           [ SHF_ALLOC ]
+    Address:         0x0000
+    Content:         "00"
+  - Name:            .dynamic
+    Type:            SHT_DYNAMIC
+    Flags:           [ SHF_ALLOC ]
+    Address:         0x0000000000000008
+    Link:            .dynstr
+    AddressAlign:    0x0000000000000008
+    EntSize:         0x0000000000000010
+    Entries:
+      - Tag:             DT_STRSZ
+        Value:           0x0000000000000001
+      - Tag:             DT_STRTAB
+        Value:           0x0000000000000000
+      - Tag:             DT_SYMTAB
+        Value:           0x0000000000000000
+      - Tag:             DT_NULL
+        Value:           0x0000000000000000
+ProgramHeaders:
+  - Type:     PT_LOAD
+    Flags:    [ PF_R ]
+    VAddr:    0x0000
+    Align:    8
+    FirstSec: .dynstr
+    LastSec:  .dynamic
+  - Type:     PT_DYNAMIC
+    Flags:    [ PF_X, PF_R ]
+    VAddr:    0x0008
+    FirstSec: .dynamic
+    LastSec:  .dynamic

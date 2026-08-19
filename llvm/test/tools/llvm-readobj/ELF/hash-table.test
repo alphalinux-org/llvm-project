@@ -53,7 +53,8 @@ ProgramHeaders:
 # RUN: llvm-readobj --hash-table %t.x32.ent8 | FileCheck %s --check-prefix=HASH
 # RUN: llvm-readelf --hash-table %t.x32.ent8 | FileCheck %s --check-prefix=HASH
 
-## We don't support dumping hash tables on EM_S390 and EM_ALPHA platforms and report a warning.
+## We don't support dumping hash tables on EM_S390 and EM_ALPHA (0x9026,
+## the value real Alpha objects carry) platforms and report a warning.
 ## On these platforms the size of entries is 8, which violates the ELF specification, which says that the size
 ## of hash entries in the hash table must be 4.
 
@@ -66,10 +67,25 @@ ProgramHeaders:
 # WARN-HASH-NEXT: }
 
 # RUN: yaml2obj --docnum=1 -DMACHINE=EM_ALPHA %s -o %t.alpha
-# RUN: llvm-readobj --hash-table %t.alpha 2>&1 | FileCheck %s -DFILE=%t.alpha --check-prefixes=WARN-HASH -DNAME="EM_ALPHA"
-# RUN: llvm-readelf --hash-table %t.alpha 2>&1 | FileCheck %s -DFILE=%t.alpha --check-prefixes=WARN-HASH -DNAME="EM_ALPHA"
+# RUN: llvm-readobj --hash-table %t.alpha 2>&1 | FileCheck %s -DFILE=%t.alpha --check-prefixes=WARN-HASH -DNAME="Digital Alpha"
+# RUN: llvm-readelf --hash-table %t.alpha 2>&1 | FileCheck %s -DFILE=%t.alpha --check-prefixes=WARN-HASH -DNAME="Digital Alpha"
 
-## We don't report warnings about the unsupported hash table on EM_S390 and EM_ALPHA platforms
+## The quirk is EM_ALPHA's alone.  EM_OLD_ALPHA (41) is the gABI-assigned number
+## no real object carries, and it gets the standard 4-byte entries -- which is a
+## behaviour change, since 41 is the number EM_ALPHA used to have.
+
+# RUN: yaml2obj --docnum=1 -DMACHINE=EM_OLD_ALPHA %s -o %t.alphastd
+# RUN: llvm-readobj --hash-table %t.alphastd 2>&1 | \
+# RUN:   FileCheck %s -DFILE=%t.alphastd --check-prefix=STD --implicit-check-not=warning:
+# RUN: llvm-readelf --hash-table %t.alphastd 2>&1 | \
+# RUN:   FileCheck %s -DFILE=%t.alphastd --check-prefix=STD --implicit-check-not=warning:
+
+# STD:      HashTable {
+# STD-NEXT:   Num Buckets:
+# STD-NEXT:   Num Chains:
+# STD:      }
+
+## We don't report warnings about the unsupported hash table on EM_S390 and EM_ALPHA (0x9026) platforms
 ## when --hash-table is not requested.
 
 # RUN: llvm-readobj %t.s390 2>&1 | FileCheck %s -DFILE=%t.s390 --allow-empty --implicit-check-not="warning:"

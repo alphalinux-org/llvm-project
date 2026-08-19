@@ -40,6 +40,9 @@ uint16_t ELF::convertArchNameToEMachine(StringRef Arch) {
       .Case("rh32", EM_RH32)
       .Case("rce", EM_RCE)
       .Case("arm", EM_ARM)
+      // "alpha" means the value real objects use; see EM_ALPHA in ELF.h.  The
+      // gABI-assigned EM_OLD_ALPHA has no name here because nothing emits it,
+      // and a name given to --arch is a name in .ifs text stubs forever.
       .Case("alpha", EM_ALPHA)
       .Case("sh", EM_SH)
       .Case("sparcv9", EM_SPARCV9)
