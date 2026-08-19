@@ -54,6 +54,12 @@ AlphaTargetMachine::AlphaTargetMachine(const Target &T, const Triple &TT,
   // shouldOutlineFromFunctionByDefault permits, which is the minsize ones.
   this->Options.EnableMachineOutliner = true;
   setSupportsDefaultOutlining(true);
+  // GlobalISel does not cover everything the SelectionDAG path does: the
+  // legalizer marks a jump table, a va_arg, an alloca, an atomic and the rest
+  // of the gaps unsupported so such a function is handed back to that path.
+  // That is a fall back rather than an error only if abort is disabled, and it
+  // is what every one of those cases is documented to do.
+  setGlobalISelAbort(GlobalISelAbortMode::DisableWithDiag);
   initAsmInfo();
 }
 

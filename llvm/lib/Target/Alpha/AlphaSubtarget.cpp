@@ -8,6 +8,7 @@
 
 #include "AlphaSubtarget.h"
 #include "AlphaTargetMachine.h"
+#include "GISel/AlphaLegalizerInfo.h"
 #include "GISel/AlphaRegisterBankInfo.h"
 
 #define DEBUG_TYPE "alpha-subtarget"
@@ -36,7 +37,12 @@ AlphaSubtarget::AlphaSubtarget(const Triple &TT, StringRef CPU,
       InstrInfo(initializeSubtargetDependencies(CPU, TuneCPU, FS)),
       TLInfo(static_cast<const AlphaTargetMachine &>(TM), *this),
       FrameLowering(*this) {
+  Legalizer.reset(new AlphaLegalizerInfo(*this));
   RegBankInfo.reset(new AlphaRegisterBankInfo());
+}
+
+const LegalizerInfo *AlphaSubtarget::getLegalizerInfo() const {
+  return Legalizer.get();
 }
 
 const RegisterBankInfo *AlphaSubtarget::getRegBankInfo() const {
