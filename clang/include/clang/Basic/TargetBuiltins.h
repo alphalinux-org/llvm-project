@@ -445,6 +445,17 @@ namespace clang {
     };
   }
 
+  /// Alpha builtins
+  namespace Alpha {
+  enum {
+    LastTIBuiltin = clang::Builtin::FirstTSBuiltin - 1,
+#define GET_BUILTIN_ENUMERATORS
+#include "clang/Basic/BuiltinsAlpha.inc"
+#undef GET_BUILTIN_ENUMERATORS
+    LastTSBuiltin
+  };
+  } // namespace Alpha
+
   /// XCore builtins
   namespace XCore {
     enum {
