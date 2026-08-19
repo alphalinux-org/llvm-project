@@ -197,15 +197,19 @@ def tlsgd_sym : SymOperand<"getTlsgdEncoding">;
 def tlsldm_sym : SymOperand<"getTlsldmEncoding">;
 def dtprelhi_sym : SymOperand<"getDtprelHighEncoding">;
 def dtprello_sym : SymOperand<"getDtprelLowEncoding">;
-// Retained alias so existing definitions read naturally.
-def symbol : SymOperand<"getGprelLowEncoding">;
-
 // A register printed inside parentheses, `($reg)`, as used by the jsr/jmp/ldq_u
 // address forms.  Written this way (rather than literal parens in the asm
 // string) so the instructions stay in the assembler matcher and disassembler.
+def ParenRegAsmOperand : AsmOperandClass {
+  let Name = "ParenReg";
+  let PredicateMethod = "isParenReg";
+  let RenderMethod = "addParenRegOperands";
+  let ParserMethod = "parseMemOperand";
+}
 def parenGPR : RegisterOperand<GPRC> {
   let PrintMethod = "printParenReg";
   let DecoderMethod = "DecodeGPRCRegisterClass";
+  let ParserMatchClass = ParenRegAsmOperand;
 }
 
 // The base register of ldq_u/stq_u, printed `0($reg)`: unlike jsr/jmp, the
@@ -239,6 +243,18 @@ let hasSideEffects = 1 in
 def MB : AlphaInst<(outs), (ins), "mb", [(atomic_fence timm, timm)]> {
   let Opcode = 0x18;
   let Inst{25-0} = 0x4000;
+}
+
+// The other misc-format barriers: write memory barrier and the trap barriers.
+class MiscBarrier<bits<26> func, string mnem>
+    : AlphaInst<(outs), (ins), mnem, []> {
+  let Opcode = 0x18;
+  let Inst{25-0} = func;
+}
+let hasSideEffects = 1 in {
+def WMB   : MiscBarrier<0x4400, "wmb">;
+def TRAPB : MiscBarrier<0x0000, "trapb">;
+def EXCB  : MiscBarrier<0x0400, "excb">;
 }
 
 // Register-register integer operate instruction: `<mnem> $Ra, $Rb, $Rc`
@@ -1827,6 +1843,32 @@ def LDAi  : MFormD<0x08, (outs GPRC:$Rc), (ins s16imm:$disp), "lda $Rc, $disp",
 def LDAHi : MFormD<0x09, (outs GPRC:$Rc), (ins s16imm:$disp), "ldah $Rc, $disp",
                    []> { let Rb = 31; }
 }
+
+// unop: the canonical no-op, ldq_u $31, 0($30).
+let isAsmParserOnly = 1 in
+def UNOP : AlphaInst<(outs), (ins), "unop", []> {
+  let Opcode = 0x0b;
+  let Inst{25-21} = 31;
+  let Inst{20-16} = 30;
+  let Inst{15-0} = 0;
+}
+
+// The misc-format cache hints: opcode 0x18 with the address in $Rb and $Ra
+// tied off to $31.  They are hints, so dropping one is always legal.
+class MiscHint<bits<16> func, string mnem>
+    : AlphaInst<(outs), (ins parenGPR:$Rb), mnem # " $Rb", []> {
+  bits<5> Rb;
+  let Opcode = 0x18;
+  let Inst{25-21} = 31;
+  let Inst{20-16} = Rb;
+  let Inst{15-0} = func;
+}
+
+def FETCH   : MiscHint<0x8000, "fetch">;
+def FETCH_M : MiscHint<0xa000, "fetch_m">;
+def ECB     : MiscHint<0xe800, "ecb">;
+def WH64    : MiscHint<0xf800, "wh64">;
+def WH64EN  : MiscHint<0xfc00, "wh64en">;
 } // hasSideEffects = 0
 
 // andnot: an alias of bic (and with the complement of the second operand).
