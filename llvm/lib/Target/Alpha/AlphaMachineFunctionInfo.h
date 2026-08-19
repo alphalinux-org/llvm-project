@@ -25,6 +25,10 @@ class AlphaMachineFunctionInfo : public MachineFunctionInfo {
   /// The initial va_list offset: the number of bytes of named arguments.
   unsigned VarArgsOffset = 0;
 
+  /// Frame index of the slot holding the caller's frame pointer ($15), used
+  /// only when the function needs a frame pointer.  -1 if none.
+  int FramePointerSaveIndex = -1;
+
 public:
   AlphaMachineFunctionInfo() = default;
   AlphaMachineFunctionInfo(const Function &F, const TargetSubtargetInfo *STI) {}
@@ -37,6 +41,9 @@ public:
 
   unsigned getVarArgsOffset() const { return VarArgsOffset; }
   void setVarArgsOffset(unsigned O) { VarArgsOffset = O; }
+
+  int getFramePointerSaveIndex() const { return FramePointerSaveIndex; }
+  void setFramePointerSaveIndex(int FI) { FramePointerSaveIndex = FI; }
 };
 
 } // end namespace llvm
