@@ -11,6 +11,7 @@ tablegen(LLVM AlphaGenDisassemblerTables.inc -gen-disassembler)
 tablegen(LLVM AlphaGenAsmMatcher.inc -gen-asm-matcher)
 tablegen(LLVM AlphaGenRegisterInfo.inc -gen-register-info)
 tablegen(LLVM AlphaGenSubtargetInfo.inc -gen-subtarget)
+tablegen(LLVM AlphaGenRegisterBank.inc -gen-register-bank)
 
 add_public_tablegen_target(AlphaCommonTableGen)
 
@@ -25,9 +26,11 @@ add_llvm_target(AlphaCodeGen
   AlphaTargetMachine.cpp
   AlphaTargetObjectFile.cpp
   AlphaTrapBarriers.cpp
+  GISel/AlphaRegisterBankInfo.cpp
 
   LINK_COMPONENTS
   AsmPrinter
+  GlobalISel
   CodeGen
   CodeGenTypes
   Core
