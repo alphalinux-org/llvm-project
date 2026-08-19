@@ -1978,6 +1978,40 @@ def WH64    : MiscHint<0xf800, "wh64">;
 def WH64EN  : MiscHint<0xfc00, "wh64en">;
 } // hasSideEffects = 0
 
+// bsr with an explicit link register, e.g. the millicode `bsr $23, __divqu`.
+let isCall = 1 in
+def BSRr : BForm<0x34, (outs), (ins GPRC:$Ra, brtarget:$target),
+                 "bsr $Ra, $target", []>;
+
+// br with an explicit link register / a bare target ($31 discards the saved PC).
+let isBranch = 1, isTerminator = 1, isBarrier = 1, isAsmParserOnly = 1 in {
+def BRr : BForm<0x30, (outs), (ins GPRC:$Ra, brtarget:$target),
+                "br $Ra, $target", []>;
+let Ra = 31 in
+def BRt : BForm<0x30, (outs), (ins brtarget:$target), "br $target", []>;
+}
+
+// ret/jmp with the explicit operand forms the assembler writes.  ret defaults
+// its hint to 1 (return prediction) unless a link register is given.
+let isReturn = 1, isTerminator = 1, isBarrier = 1, isAsmParserOnly = 1 in {
+def RETb : MbrForm<0b10, (outs), (ins parenGPR:$Rb), "ret $Rb", []> {
+  let Ra = 31;
+  let hint = 1;
+}
+def RETab : MbrForm<0b10, (outs), (ins GPRC:$Ra, parenGPR:$Rb), "ret $Ra, $Rb",
+                    []> {
+  let hint = 0;
+}
+}
+let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1,
+    isAsmParserOnly = 1 in {
+def JMPb : MbrForm<0b00, (outs), (ins parenGPR:$Rb), "jmp $Rb", []> {
+  let Ra = 31;
+}
+def JMPab : MbrForm<0b00, (outs), (ins GPRC:$Ra, parenGPR:$Rb), "jmp $Ra, $Rb",
+                    []>;
+}
+
 // andnot: an alias of bic (and with the complement of the second operand).
 def : InstAlias<"andnot $Ra, $Rb, $Rc", (BIC GPRC:$Rc, GPRC:$Ra, GPRC:$Rb)>;
 def : InstAlias<"andnot $Ra, $lit, $Rc", (BICi GPRC:$Rc, GPRC:$Ra, u8imm:$lit)>;

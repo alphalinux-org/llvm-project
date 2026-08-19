@@ -185,6 +185,8 @@ multiclass AlphaInstRW {
       MSKQHi)>;
   def : InstRW<[Wr_ILoad], (instrs LDQ_Um, UNOP)>;
   def : InstRW<[Wr_IStore, Rd_StData], (instrs STQ_Um)>;
+  def : InstRW<[Wr_Br], (instrs BRr, BRt)>;
+  def : InstRW<[Wr_JSR], (instrs BSRr, JMPab, JMPb, RETab, RETb)>;
   def : InstRW<[Wr_Misc], (instrs
       TRAPB, WMB, EXCB, ECB, WH64, WH64EN, FETCH, FETCH_M)>;
 }
