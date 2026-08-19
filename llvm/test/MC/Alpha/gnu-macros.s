@@ -41,12 +41,18 @@
 # CHECK-NEXT: jmp $31, ($27), 0
 	jmp $31, schedule_tail
 
+# A `!samegp` branch to a routine sharing the caller's gp emits an R_ALPHA_BRSGP
+# relocation; the target must carry the .prologue-derived st_other (here NOPV).
+# CHECK: bne $1,
+	bne $1, memcpy !samegp
+
 	.ent memcpy
 memcpy:
 	.prologue 0
 	ret ($26)
 	.end memcpy
 
+# RELOC: R_ALPHA_BRSGP
 # .prologue 0 gives memcpy the STO_ALPHA_NOPV st_other (0x80) the linker checks.
 # RELOC: FUNC {{.*}}<other: 0x80>{{.*}} memcpy
 
