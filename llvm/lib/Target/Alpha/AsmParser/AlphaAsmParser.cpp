@@ -11,6 +11,7 @@
 #include "TargetInfo/AlphaTargetInfo.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringSwitch.h"
+#include "llvm/BinaryFormat/ELF.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
@@ -22,6 +23,7 @@
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSubtargetInfo.h"
+#include "llvm/MC/MCSymbolELF.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/Casting.h"
 
@@ -185,6 +187,10 @@ public:
 };
 
 class AlphaAsmParser : public MCTargetAsmParser {
+  // The symbol named by the most recent `.ent`, whose st_other bits `.prologue`
+  // sets.
+  MCSymbol *CurEntSym = nullptr;
+
 #define GET_ASSEMBLER_HEADER
 #include "AlphaGenAsmMatcher.inc"
 
@@ -319,13 +325,49 @@ ParseStatus AlphaAsmParser::parseDirective(AsmToken DirectiveID) {
     }
   }
 
-  // ECOFF/OSF procedure-descriptor directives (.ent/.end/.frame/.prologue/
-  // .mask/.fmask) carry hand-written-assembly bookkeeping that the ELF object
-  // does not need.  Accept and ignore them.  .end in particular must be caught
-  // here, ahead of the generic directive that would otherwise stop assembly.
+  // ECOFF/OSF procedure-descriptor directives.  Most are hand-written-assembly
+  // bookkeeping the ELF object does not need, but .ent names a procedure and
+  // .prologue records how it establishes the global pointer, which the linker
+  // needs when a caller reaches it with `!samegp`.  .end in particular must be
+  // caught here, ahead of the generic directive that would stop assembly.
   StringRef ID = DirectiveID.getIdentifier();
-  if (ID == ".ent" || ID == ".end" || ID == ".frame" || ID == ".prologue" ||
-      ID == ".mask" || ID == ".fmask" || ID == ".usepv") {
+  if (ID == ".ent") {
+    StringRef Name;
+    if (getParser().parseIdentifier(Name))
+      return Error(getParser().getTok().getLoc(),
+                   "expected symbol name after .ent");
+    CurEntSym = getContext().getOrCreateSymbol(Name);
+    // Mark the symbol as a function, matching GAS behavior.
+    static_cast<MCSymbolELF *>(CurEntSym)->setType(ELF::STT_FUNC);
+    getParser().eatToEndOfStatement();
+    return ParseStatus::Success;
+  }
+  if (ID == ".prologue") {
+    int64_t Arg;
+    if (getParser().parseAbsoluteExpression(Arg))
+      return ParseStatus::Failure;
+    getParser().eatToEndOfStatement();
+    // .prologue 0 marks a routine that needs no procedure value (it runs on the
+    // caller's gp: STO_ALPHA_NOPV); .prologue 1 marks the standard two-word gp
+    // load a same-gp caller may skip (STO_ALPHA_STD_GPLOAD).
+    if (CurEntSym) {
+      auto *Sym = static_cast<MCSymbolELF *>(CurEntSym);
+      const unsigned STO_ALPHA_NOPV = 0x80, STO_ALPHA_STD_GPLOAD = 0x88;
+      unsigned Other = Sym->getOther() & ~STO_ALPHA_STD_GPLOAD;
+      if (Arg == 0)
+        Other |= STO_ALPHA_NOPV;
+      else if (Arg == 1)
+        Other |= STO_ALPHA_STD_GPLOAD;
+      Sym->setOther(Other);
+    }
+    return ParseStatus::Success;
+  }
+  if (ID == ".end") {
+    CurEntSym = nullptr;
+    getParser().eatToEndOfStatement();
+    return ParseStatus::Success;
+  }
+  if (ID == ".frame" || ID == ".mask" || ID == ".fmask" || ID == ".usepv") {
     getParser().eatToEndOfStatement();
     return ParseStatus::Success;
   }
