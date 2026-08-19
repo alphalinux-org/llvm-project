@@ -461,6 +461,14 @@ class FSign<bits<11> func, dag ins, string asmstr, list<dag> pattern>
   let Inst{15-5} = func;
   let Inst{4-0} = Rc;
 }
+
+// A plain register move: cpys Rb, Rb, Rc.
+class FMov<list<dag> pat> : FSign<0x020, (ins FPRC:$Rb), "cpys $Rb, $Rb, $Rc",
+                                  pat> {
+  bits<5> Rb;
+  let fa = Rb;
+  let fb = Rb;
+}
 // fabs: cpys $f31, Rb, Rc.
 class FAbs<list<dag> pat> : FSign<0x020, (ins FPRC:$Rb), "cpys $$f31, $Rb, $Rc",
                                   pat> {
@@ -533,8 +541,14 @@ class FP_r<bits<6> opc, bits<11> func, string mnem, list<dag> pat>
   let Ra = 31;
 }
 // Precision conversions between S_floating (f32) and T_floating (f64).
+// A float loaded with lds is already held in T_floating form, so widening one
+// to double is a register move.  cvtst would fault on an infinity or a NaN
+// unless it asks for software completion, so it is only used under -mieee,
+// where it also handles a denormal properly.  GCC makes the same split.
 let TrapClass = 5 in
-def CVTST : FP_r<0x16, 0x2ac, "cvtst", [(set f64:$Rc, (fpextend f32:$Rb))]>;
+def CVTST : FP_r<0x16, 0x2ac, "cvtst", []>;
+let isCodeGenOnly = 1, Predicates = [NotIEEE] in
+def FPEXTST : FMov<[(set f64:$Rc, (fpextend f32:$Rb))]>;
 let TrapClass = 1 in  // T-to-S convert is arithmetic: su / sui.
 def CVTTS : FP_r<0x16, 0x0ac, "cvtts", [(set f32:$Rc, (fpround f64:$Rb))]>;
 
@@ -594,6 +608,11 @@ def LDAHm : MForm<0x09, (outs GPRC:$Ra), (ins memri:$addr), "ldah $Ra, $addr",
 }
 
 } // hasSideEffects = 0, mayLoad = 0, mayStore = 0
+
+// Under -mieee the widening goes through cvtst, whose /s form is completed in
+// software; without it the register move above is used instead.
+let Predicates = [HasIEEE] in
+def : Pat<(f64 (fpextend f32:$Rb)), (CVTST $Rb)>;
 
 // Materialize a small signed constant with `lda $Rc, imm($31)`.
 def : Pat<(i64 immSExt16:$imm), (LDA immSExt16:$imm, R31)>;
