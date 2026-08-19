@@ -183,8 +183,10 @@ multiclass AlphaInstRW {
       ZAPi, EXTQLi, EXTWHi, EXTLHi, EXTQHi, INSBLi, INSWLi, INSLLi, INSQLi,
       INSWHi, INSLHi, INSQHi, MSKBLi, MSKWLi, MSKLLi, MSKQLi, MSKWHi, MSKLHi,
       MSKQHi)>;
-  def : InstRW<[Wr_ILoad], (instrs LDQ_Um)>;
+  def : InstRW<[Wr_ILoad], (instrs LDQ_Um, UNOP)>;
   def : InstRW<[Wr_IStore, Rd_StData], (instrs STQ_Um)>;
+  def : InstRW<[Wr_Misc], (instrs
+      TRAPB, WMB, EXCB, ECB, WH64, WH64EN, FETCH, FETCH_M)>;
 }
 
 //===----------------------------------------------------------------------===//
