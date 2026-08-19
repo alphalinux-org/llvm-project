@@ -203,6 +203,7 @@ multiclass AlphaInstRW {
   def : InstRW<[Wr_Br], (instrs FBEQ, FBNE, FBLT, FBLE, FBGT, FBGE)>;
   def : InstRW<[Wr_JSR], (instrs JSRt)>;
   def : InstRW<[Wr_JSR], (instrs RETabh)>;
+  def : InstRW<[Wr_JSR], (instrs JMPt)>;
 }
 
 //===----------------------------------------------------------------------===//

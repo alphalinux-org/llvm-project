@@ -912,17 +912,6 @@ void AlphaAsmParser::emitLoadImm(MCRegister Rc, int64_t V, SMLoc L,
     emitConst32(Rc, Lo32, Rc, L, Out);
 }
 
-// A parsed operand that is exactly the constant `V`.  The full spellings of
-// ret and jmp below carry fields the bare encodings do not, so each is taken
-// only where what it says is what the encoding holds.
-static bool isConstImm(MCParsedAsmOperand &Op, int64_t V) {
-  auto &AOp = static_cast<AlphaOperand &>(Op);
-  if (!AOp.isImm())
-    return false;
-  const auto *CE = dyn_cast<MCConstantExpr>(AOp.getImm());
-  return CE && CE->getValue() == V;
-}
-
 bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
                                              OperandVector &Operands,
                                              MCStreamer &Out,
@@ -1014,21 +1003,6 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     Call.addOperand(MCOperand::createReg(Alpha::R27));
     Call.setLoc(IDLoc);
     emitInst(Call, Out);
-    return false;
-  }
-
-  // jmp $31, ($Rb), 0: an indirect jump through $Rb.  JMP holds neither the
-  // link register nor the hint, so only the spelling whose fields the encoding
-  // can hold is taken here.
-  if (Mnemonic == "jmp" && Operands.size() == 4 && Operands[1]->isReg() &&
-      Operands[2]->isMem() && isConstImm(*Operands[3], 0) &&
-      static_cast<AlphaOperand &>(*Operands[1]).getReg() == Alpha::R31) {
-    MCInst Inst;
-    Inst.setOpcode(Alpha::JMP);
-    Inst.addOperand(MCOperand::createReg(
-        static_cast<AlphaOperand &>(*Operands[2]).getMemBase()));
-    Inst.setLoc(IDLoc);
-    Out.emitInstruction(Inst, getSTI());
     return false;
   }
 
@@ -1276,6 +1250,20 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   switch (Result) {
   case Match_Success:
     Inst.setLoc(IDLoc);
+    // The jsr/jmp branch-prediction hint is spelled as a byte offset that the
+    // encoder divides by four, so a value with either low bit set does not
+    // survive the encoding: `jsr $26, ($27), 1' assembles as a hint of zero.
+    // GNU as writes it the same way and says so ("jump hint unaligned"), which
+    // is the one thing this used to leave out.  A symbol needs no check -- the
+    // hint comes from an R_ALPHA_HINT then, and the linker computes the field
+    // itself.
+    if (Inst.getOpcode() == Alpha::JSRt || Inst.getOpcode() == Alpha::JMPt) {
+      const MCOperand &Hint = Inst.getOperand(2);
+      if (Hint.isImm() && (Hint.getImm() & 3))
+        Warning(Operands.back()->getStartLoc(),
+                "branch-prediction hint is not a multiple of four; its low "
+                "bits are dropped");
+    }
     if (PendingLituse)
       Inst.setFlags(Inst.getFlags() | Alpha::encodeLituse(PendingLituse));
     // Whatever was written is what this instruction carries -- including

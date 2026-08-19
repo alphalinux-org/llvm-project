@@ -1213,6 +1213,15 @@ def JSRt : MbrForm<0b01, (outs), (ins GPRC:$Ra, parenGPR:$Rb, jsrtarget:$sym),
   let hint = sym;
 }
 
+// jmp $Ra, ($Rb), target: the tail-call spelling of the same thing.
+let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1,
+    isAsmParserOnly = 1 in
+def JMPt : MbrForm<0b00, (outs), (ins GPRC:$Ra, parenGPR:$Rb, jsrtarget:$sym),
+                   "jmp $Ra, $Rb, $sym", []> {
+  bits<14> sym;
+  let hint = sym;
+}
+
 // Division millicode call: enter __divq etc. through $23; the routine preserves
 // all but a handful of registers, so no ldgp reload is needed afterwards.
 let isCall = 1, Uses = [R24, R25, R27],
