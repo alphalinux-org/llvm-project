@@ -73,6 +73,10 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   // Global addresses are loaded from the GOT; constant pools are GP-relative.
   setOperationAction(ISD::GlobalAddress, MVT::i64, Custom);
   setOperationAction(ISD::GlobalTLSAddress, MVT::i64, Custom);
+  setOperationAction(ISD::DYNAMIC_STACKALLOC, MVT::i64, Custom);
+  // Save/restore of the stack pointer expand to a copy from/to $30.
+  setOperationAction(ISD::STACKSAVE, MVT::Other, Expand);
+  setOperationAction(ISD::STACKRESTORE, MVT::Other, Expand);
   setOperationAction(ISD::ConstantPool, MVT::i64, Custom);
 
   // Unsigned integer/floating conversions expand through the signed ones.
@@ -256,6 +260,8 @@ SDValue AlphaTargetLowering::LowerOperation(SDValue Op,
     return LowerConstantPool(Op, DAG);
   case ISD::JumpTable:
     return LowerJumpTable(Op, DAG);
+  case ISD::DYNAMIC_STACKALLOC:
+    return LowerDYNAMIC_STACKALLOC(Op, DAG);
   case ISD::BR_CC:
     return LowerBR_CC(Op, DAG);
   case ISD::BR_JT:
@@ -465,6 +471,34 @@ SDValue AlphaTargetLowering::LowerJumpTable(SDValue Op,
   SDValue GP = DAG.getRegister(Alpha::R29, MVT::i64);
   SDValue Hi = DAG.getNode(AlphaISD::GPREL_HI, DL, MVT::i64, TJT, GP);
   return DAG.getNode(AlphaISD::GPREL_LO, DL, MVT::i64, TJT, Hi);
+}
+
+SDValue AlphaTargetLowering::LowerDYNAMIC_STACKALLOC(SDValue Op,
+                                                     SelectionDAG &DAG) const {
+  SDValue Chain = Op.getOperand(0);
+  SDValue Size = Op.getOperand(1);
+  MaybeAlign Alignment =
+      cast<ConstantSDNode>(Op.getOperand(2))->getMaybeAlignValue();
+  SDLoc DL(Op);
+
+  // Round the requested size up to the 16-byte stack alignment and subtract it
+  // from the stack pointer.
+  Size = DAG.getNode(ISD::ADD, DL, MVT::i64, Size,
+                     DAG.getConstant(15, DL, MVT::i64));
+  Size = DAG.getNode(ISD::AND, DL, MVT::i64, Size,
+                     DAG.getSignedConstant(-16, DL, MVT::i64));
+
+  SDValue SP = DAG.getCopyFromReg(Chain, DL, Alpha::R30, MVT::i64);
+  SDValue NewSP = DAG.getNode(ISD::SUB, DL, MVT::i64, SP, Size);
+
+  // Over-align the result if the allocation needs more than the stack default.
+  if (Alignment && *Alignment > Align(16))
+    NewSP = DAG.getNode(
+        ISD::AND, DL, MVT::i64, NewSP,
+        DAG.getSignedConstant(-(int64_t)Alignment->value(), DL, MVT::i64));
+
+  Chain = DAG.getCopyToReg(SP.getValue(1), DL, Alpha::R30, NewSP);
+  return DAG.getMergeValues({NewSP, Chain}, DL);
 }
 
 SDValue AlphaTargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
