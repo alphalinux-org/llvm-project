@@ -22,6 +22,13 @@
 # CHECK: encoding: [0x00,0x80,0x23,0x69]
 	ret $9, ($3)
 
+## jsr scales its hint, because it is a displacement to the predicted target
+## measured in longwords from the next instruction.
+# CHECK: encoding: [0x01,0x40,0x5b,0x6b]
+	jsr $26, ($27), 4
+# CHECK: encoding: [0x02,0x40,0x5b,0x6b]
+	jsr $26, ($27), 8
+
 .ifdef ERR
 ## A parenthesized register has nowhere to put a displacement, so one written
 ## anyway has to be refused rather than dropped.  GNU as rejects all three.
