@@ -52,3 +52,35 @@ def FeatureCIX : SubtargetFeature<"cix", "HasCIX", "true",
                                   "cttz, ctpop)">;
 def HasCIX : Predicate<"Subtarget->hasCIX()">,
              AssemblerPredicate<(all_of FeatureCIX)>;
+
+// IEEE floating-point conformance (-mieee): arithmetic gets the software-
+// completion trap qualifier (/su) so denormals and exceptional values are
+// handled correctly.  -mieee-with-inexact adds inexact tracking (/sui).
+def FeatureIEEE : SubtargetFeature<"ieee", "HasIEEE", "true",
+                                   "Generate IEEE-conformant floating point "
+                                   "with software completion (-mieee)">;
+def FeatureIEEEInexact
+    : SubtargetFeature<"ieee-with-inexact", "HasIEEEInexact", "true",
+                       "IEEE floating point that also tracks the inexact flag "
+                       "(-mieee-with-inexact)", [FeatureIEEE]>;
+
+// -mfp-trap-mode=u: trap on underflow but without software completion (the /u
+// qualifier, as opposed to /su under -mieee).
+def FeatureFPTrapU : SubtargetFeature<"fptrap-u", "HasFPTrapU", "true",
+                                      "Trap on floating-point underflow (/u)">;
+
+// -mfp-rounding-mode: the IEEE rounding applied to floating-point operate
+// instructions.  Normal (round to nearest) is the default and needs no feature.
+def FeatureFPRoundDynamic
+    : SubtargetFeature<"fpround-dynamic", "HasFPRoundDynamic", "true",
+                       "Round floating point per the FPCR at run time (/d)">;
+def FeatureFPRoundMinus
+    : SubtargetFeature<"fpround-minus", "HasFPRoundMinus", "true",
+                       "Round floating point toward minus infinity (/m)">;
+def FeatureFPRoundChopped
+    : SubtargetFeature<"fpround-chopped", "HasFPRoundChopped", "true",
+                       "Round floating point toward zero (/c)">;
+
+// -mieee: floating point traps are completed in software.
+def HasIEEE : Predicate<"Subtarget->hasIEEE()">;
+def NotIEEE : Predicate<"!Subtarget->hasIEEE()">;

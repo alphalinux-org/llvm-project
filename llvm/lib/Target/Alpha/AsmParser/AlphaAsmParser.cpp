@@ -459,6 +459,13 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   switch (Result) {
   case Match_Success:
     Inst.setLoc(IDLoc);
+    // Whatever was written is what this instruction carries -- including
+    // nothing, which is a qualifier too.  Recording it is what stops -mieee
+    // from turning a hand-written `addt' into `addt/su': the encoder applies
+    // the subtarget's policy only to an instruction that carries no qualifier
+    // of its own, and everything the assembler sees carries one.
+    if (MII.get(Inst.getOpcode()).TSFlags & Alpha::TrapClassMask)
+      Inst.setFlags(Alpha::encodeFPQual(0, Alpha::FPRoundNormal));
     Out.emitInstruction(Inst, getSTI());
     return false;
   case Match_MnemonicFail:
