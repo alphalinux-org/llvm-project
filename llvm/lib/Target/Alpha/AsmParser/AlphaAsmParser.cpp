@@ -202,6 +202,8 @@ public:
                  const MCInstrInfo &MII)
       : MCTargetAsmParser(STI, MII) {
     setAvailableFeatures(ComputeAvailableFeatures(STI.getFeatureBits()));
+    // On Alpha `.word` is a 16-bit datum, matching GNU as.
+    P.addAliasForDirective(".word", ".2byte");
   }
 
   bool parseRegister(MCRegister &Reg, SMLoc &StartLoc, SMLoc &EndLoc) override;
