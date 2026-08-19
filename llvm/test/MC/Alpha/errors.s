@@ -40,6 +40,19 @@
 	ldq $1, x($29) !
 # CHECK: [[#@LINE-1]]:18: error: expected relocation name
 
+## The sequence number after a second `!` has to be one, and an identifier
+## there is an error rather than something consumed and dropped -- that would
+## turn `!gpdisp!N` into an unpaired `!gpdisp` carrying no addend.
+	ldah $29, 0($27) !gpdisp!lo
+# CHECK: [[#@LINE-1]]:27: error: expected sequence number
+
+## A sequence number names one ldah/lda pair, so a third use of it is an error
+## rather than the silent start of a second pair.
+	ldah $29, 0($27) !gpdisp!1
+	lda $29, 0($29) !gpdisp!1
+	lda $29, 0($29) !gpdisp!1
+# CHECK: [[#@LINE-1]]:27: error: !gpdisp!1 is already paired
+
 ## A floating-point qualifier suffix: the '/' has to be followed by one, and
 ## only an instruction with a trap/rounding field can carry one at all.
 	addt/ $f1, $f2, $f3
