@@ -2020,6 +2020,5 @@ def : InstAlias<"andnot $Ra, $lit, $Rc", (BICi GPRC:$Rc, GPRC:$Ra, u8imm:$lit)>;
 def : InstAlias<"xornot $Ra, $Rb, $Rc", (EQV GPRC:$Rc, GPRC:$Ra, GPRC:$Rb)>;
 def : InstAlias<"xornot $Ra, $lit, $Rc", (EQVi GPRC:$Rc, GPRC:$Ra, u8imm:$lit)>;
 
-// ldiq: load an immediate quadword.  GNU as implements the general 64-bit case
-// as a multi-instruction macro; the common small case is a single lda.
-def : InstAlias<"ldiq $Rc, $imm", (LDAi GPRC:$Rc, s16imm:$imm)>;
+// or: the literal form of the bis alias defined with the other pseudos.
+def : InstAlias<"or $Ra, $lit, $Rc", (BISi GPRC:$Rc, GPRC:$Ra, u8imm:$lit)>;

@@ -532,6 +532,30 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     return false;
   }
 
+  // jsr $Ra, symbol: an indirect call to a symbol reached through the GOT (GNU
+  // as's jsr-to-symbol macro).  Load the target's address from its GOT entry
+  // into $27 (the procedure value) and jsr through it.
+  if (Mnemonic == "jsr" && Operands.size() == 3 && Operands[1]->isReg() &&
+      Operands[2]->isImm() &&
+      !isa<MCConstantExpr>(
+          static_cast<AlphaOperand &>(*Operands[2]).getImm())) {
+    MCRegister Ra = static_cast<AlphaOperand &>(*Operands[1]).getReg();
+    const MCExpr *Sym = static_cast<AlphaOperand &>(*Operands[2]).getImm();
+    MCInst Ptr; // ldq $27, symbol($gp) !literal
+    Ptr.setOpcode(Alpha::LDQl);
+    Ptr.addOperand(MCOperand::createReg(Alpha::R27));
+    Ptr.addOperand(MCOperand::createExpr(Sym));
+    Ptr.setLoc(IDLoc);
+    Out.emitInstruction(Ptr, getSTI());
+    MCInst Call; // jsr $Ra, ($27)
+    Call.setOpcode(Alpha::JSRr);
+    Call.addOperand(MCOperand::createReg(Ra));
+    Call.addOperand(MCOperand::createReg(Alpha::R27));
+    Call.setLoc(IDLoc);
+    Out.emitInstruction(Call, getSTI());
+    return false;
+  }
+
   // ret $31, ($Rb), 1: the return written in full in hand assembly.  The
   // return target register $Rb is what matters -- it is not always $26 -- so
   // route it through the RETb form, which keeps the register it names.  RETb
@@ -561,6 +585,103 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     Inst.setLoc(IDLoc);
     Out.emitInstruction(Inst, getSTI());
     return false;
+  }
+
+  // jmp $Ra, symbol: a jump to a symbol reached through the GOT, expanded like
+  // jsr but discarding the return address.
+  if (Mnemonic == "jmp" && Operands.size() == 3 && Operands[1]->isReg() &&
+      Operands[2]->isImm() &&
+      !isa<MCConstantExpr>(
+          static_cast<AlphaOperand &>(*Operands[2]).getImm())) {
+    const MCExpr *Sym = static_cast<AlphaOperand &>(*Operands[2]).getImm();
+    MCInst Ptr; // ldq $27, symbol($gp) !literal
+    Ptr.setOpcode(Alpha::LDQl);
+    Ptr.addOperand(MCOperand::createReg(Alpha::R27));
+    Ptr.addOperand(MCOperand::createExpr(Sym));
+    Ptr.setLoc(IDLoc);
+    Out.emitInstruction(Ptr, getSTI());
+    MCInst Jmp; // jmp $31, ($27)
+    Jmp.setOpcode(Alpha::JMP);
+    Jmp.addOperand(MCOperand::createReg(Alpha::R27));
+    Jmp.setLoc(IDLoc);
+    Out.emitInstruction(Jmp, getSTI());
+    return false;
+  }
+
+  // jsr $Ra, ($Rb), hint: a computed call whose third operand is a
+  // branch-prediction hint (an R_ALPHA_HINT we do not need to emit).
+  if (Mnemonic == "jsr" && Operands.size() == 4 && Operands[1]->isReg() &&
+      Operands[2]->isMem()) {
+    MCInst Inst;
+    Inst.setOpcode(Alpha::JSRr);
+    Inst.addOperand(MCOperand::createReg(
+        static_cast<AlphaOperand &>(*Operands[1]).getReg()));
+    Inst.addOperand(MCOperand::createReg(
+        static_cast<AlphaOperand &>(*Operands[2]).getMemBase()));
+    Inst.setLoc(IDLoc);
+    Out.emitInstruction(Inst, getSTI());
+    return false;
+  }
+
+  // ldq/ldl/ldbu/ldwu $R, symbol: in large-data (GOT) mode GNU as expands a
+  // load from a bare symbol into a load of the symbol's GOT entry (its address)
+  // followed by a dereference of the requested width.  (GNU as also tags the
+  // second load with an R_ALPHA_LITUSE relaxation hint; omitting it costs an
+  // optimization, not correctness.)
+  unsigned DerefOp = StringSwitch<unsigned>(Mnemonic)
+                         .Case("ldq", Alpha::LDQ)
+                         .Case("ldl", Alpha::LDL)
+                         .Case("ldbu", Alpha::LDBU)
+                         .Case("ldwu", Alpha::LDWU)
+                         .Default(0);
+  if (DerefOp && Operands.size() == 3 && Operands[1]->isReg() &&
+      Operands[2]->isImm()) {
+    const MCExpr *Sym = static_cast<AlphaOperand &>(*Operands[2]).getImm();
+    if (!isa<MCConstantExpr>(Sym)) {
+      // The dereference is a real instruction and has to be available.  GNU as
+      // expands the byte and word cases into an ldq_u/ext pair when the target
+      // has no BWX; we do not implement that macro, so refuse rather than emit
+      // an instruction the target cannot execute -- which is what the matcher
+      // does for the `ldbu $0, 0($16)' spelling of the same load.
+      if ((DerefOp == Alpha::LDBU || DerefOp == Alpha::LDWU) &&
+          !getSTI().hasFeature(Alpha::FeatureBWX))
+        return Error(IDLoc, "instruction requires the following: "
+                            "Byte/word extension (BWX)");
+      MCRegister R = static_cast<AlphaOperand &>(*Operands[1]).getReg();
+      MCInst Ptr; // ldq $R, symbol($gp) !literal  (the GOT slot is a quadword)
+      Ptr.setOpcode(Alpha::LDQl);
+      Ptr.addOperand(MCOperand::createReg(R));
+      Ptr.addOperand(MCOperand::createExpr(Sym));
+      Ptr.setLoc(IDLoc);
+      Out.emitInstruction(Ptr, getSTI());
+      MCInst Deref; // <load> $R, 0($R)  (the load itself, of the given width)
+      Deref.setOpcode(DerefOp);
+      Deref.addOperand(MCOperand::createReg(R));
+      Deref.addOperand(MCOperand::createReg(R));
+      Deref.addOperand(MCOperand::createImm(0));
+      Deref.setLoc(IDLoc);
+      Out.emitInstruction(Deref, getSTI());
+      return false;
+    }
+  }
+
+  // lda $R, symbol: the address of a symbol is its GOT entry, so GNU as loads
+  // it directly (like the ldq form but without the dereference).  A base
+  // register (lda $R, disp($base)) or a constant makes this an ordinary lda
+  // instead.
+  if (Mnemonic == "lda" && Operands.size() == 3 && Operands[1]->isReg() &&
+      Operands[2]->isImm()) {
+    const MCExpr *Sym = static_cast<AlphaOperand &>(*Operands[2]).getImm();
+    if (!isa<MCConstantExpr>(Sym)) {
+      MCInst Ptr; // ldq $R, symbol($gp) !literal
+      Ptr.setOpcode(Alpha::LDQl);
+      Ptr.addOperand(MCOperand::createReg(
+          static_cast<AlphaOperand &>(*Operands[1]).getReg()));
+      Ptr.addOperand(MCOperand::createExpr(Sym));
+      Ptr.setLoc(IDLoc);
+      Out.emitInstruction(Ptr, getSTI());
+      return false;
+    }
   }
 
   MCInst Inst;
