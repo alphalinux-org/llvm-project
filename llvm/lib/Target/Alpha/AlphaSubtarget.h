@@ -19,6 +19,7 @@
 #include "MCTargetDesc/AlphaMCTargetDesc.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/CodeGen/GlobalISel/CallLowering.h"
+#include "llvm/CodeGen/GlobalISel/InstructionSelector.h"
 #include "llvm/CodeGen/GlobalISel/LegalizerInfo.h"
 #include "llvm/CodeGen/RegisterBankInfo.h"
 #include "llvm/CodeGen/SelectionDAGTargetInfo.h"
@@ -50,6 +51,7 @@ class AlphaSubtarget : public AlphaGenSubtargetInfo {
   mutable std::unique_ptr<CallLowering> CallLoweringInfo;
   mutable std::unique_ptr<LegalizerInfo> Legalizer;
   mutable std::unique_ptr<RegisterBankInfo> RegBankInfo;
+  mutable std::unique_ptr<InstructionSelector> InstSelector;
   AlphaTargetLowering TLInfo;
   AlphaFrameLowering FrameLowering;
   AlphaSelectionDAGInfo TSInfo;
@@ -80,6 +82,7 @@ public:
   }
 
   const CallLowering *getCallLowering() const override;
+  InstructionSelector *getInstructionSelector() const override;
   const LegalizerInfo *getLegalizerInfo() const override;
   const RegisterBankInfo *getRegBankInfo() const override;
 
