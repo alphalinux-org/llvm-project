@@ -18,6 +18,7 @@
 #include "AlphaInstrInfo.h"
 #include "MCTargetDesc/AlphaMCTargetDesc.h"
 #include "llvm/ADT/BitVector.h"
+#include "llvm/CodeGen/GlobalISel/CallLowering.h"
 #include "llvm/CodeGen/GlobalISel/LegalizerInfo.h"
 #include "llvm/CodeGen/RegisterBankInfo.h"
 #include "llvm/CodeGen/SelectionDAGTargetInfo.h"
@@ -46,6 +47,7 @@ class AlphaSubtarget : public AlphaGenSubtargetInfo {
   AlphaInstrInfo InstrInfo;
 
   // GlobalISel related APIs.
+  mutable std::unique_ptr<CallLowering> CallLoweringInfo;
   mutable std::unique_ptr<LegalizerInfo> Legalizer;
   mutable std::unique_ptr<RegisterBankInfo> RegBankInfo;
   AlphaTargetLowering TLInfo;
@@ -77,6 +79,7 @@ public:
     return &TSInfo;
   }
 
+  const CallLowering *getCallLowering() const override;
   const LegalizerInfo *getLegalizerInfo() const override;
   const RegisterBankInfo *getRegBankInfo() const override;
 

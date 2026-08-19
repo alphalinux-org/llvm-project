@@ -27,6 +27,7 @@ add_llvm_target(AlphaCodeGen
   AlphaTargetMachine.cpp
   AlphaTargetObjectFile.cpp
   AlphaTrapBarriers.cpp
+  GISel/AlphaCallLowering.cpp
   GISel/AlphaLegalizerInfo.cpp
   GISel/AlphaRegisterBankInfo.cpp
 

@@ -19,6 +19,12 @@
 
 namespace llvm {
 
+class GlobalValue;
+
+/// Whether a global's address can be computed from the global pointer instead
+/// of being loaded from the GOT.
+bool isAlphaGprelAddressable(const GlobalValue &GV);
+
 class AlphaTargetMachine;
 class FunctionPass;
 class PassRegistry;
