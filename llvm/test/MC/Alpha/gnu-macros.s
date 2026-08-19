@@ -1,6 +1,10 @@
 # RUN: llvm-mc -triple=alpha-unknown-linux-gnu -filetype=obj %s -o %t.o
 # RUN: llvm-objdump -dr %t.o | FileCheck %s
 # RUN: llvm-readelf -r -s %t.o | FileCheck %s --check-prefix=RELOC
+# RUN: llvm-mc -triple=alpha-unknown-linux-gnu -mattr=+bwx -filetype=obj \
+# RUN:   --defsym BWX=1 %s -o /dev/null
+# RUN: not llvm-mc -triple=alpha-unknown-linux-gnu -filetype=obj \
+# RUN:   --defsym BWX=1 %s 2>&1 | FileCheck %s --check-prefix=NOBWX
 
 # GNU as macros the kernel's hand-written assembly relies on.
 
@@ -62,3 +66,15 @@ std_gpload:
 # Bit 3 (0x08) survives: st_other holds the whole byte, not just the three
 # visibility bits.
 # RELOC: FUNC {{.*}}<other: 0x88>{{.*}} std_gpload
+
+## The byte and word loads the GOT macro expands into are BWX instructions and
+## have to be available.  GNU as expands them into an ldq_u/ext pair when the
+## target has no BWX; we do not implement that macro, so refuse rather than
+## emit an instruction the target cannot execute.  The matcher already refuses
+## the `ldbu $0, 0($16)' spelling of the same load.
+.ifdef BWX
+# NOBWX: error: instruction requires the following: Byte/word extension (BWX)
+	ldbu $0, sym
+# NOBWX: error: instruction requires the following: Byte/word extension (BWX)
+	ldwu $1, sym
+.endif

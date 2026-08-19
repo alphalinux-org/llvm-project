@@ -979,6 +979,15 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
       Operands[2]->isImm()) {
     const MCExpr *Sym = static_cast<AlphaOperand &>(*Operands[2]).getImm();
     if (!isa<MCConstantExpr>(Sym)) {
+      // The dereference is a real instruction and has to be available.  GNU as
+      // expands the byte and word cases into an ldq_u/ext pair when the target
+      // has no BWX; we do not implement that macro, so refuse rather than emit
+      // an instruction the target cannot execute -- which is what the matcher
+      // does for the `ldbu $0, 0($16)' spelling of the same load.
+      if ((DerefOp == Alpha::LDBU || DerefOp == Alpha::LDWU) &&
+          !getSTI().hasFeature(Alpha::FeatureBWX))
+        return Error(IDLoc, "instruction requires the following: "
+                            "Byte/word extension (BWX)");
       MCRegister R = static_cast<AlphaOperand &>(*Operands[1]).getReg();
       MCInst Ptr; // ldq $R, symbol($gp) !literal  (the GOT slot is a quadword)
       Ptr.setOpcode(Alpha::LDQl);
