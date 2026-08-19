@@ -2072,6 +2072,17 @@ def WindowsARM64ECSystemLibrary
                                 ExceptionModelCallsArm64EC)>;
 
 //===----------------------------------------------------------------------===//
+// Alpha Runtime Libcalls
+//===----------------------------------------------------------------------===//
+
+def isAlpha : RuntimeLibcallAvailability<"TT.getArch() == Triple::alpha">;
+
+def AlphaSystemLibrary
+    : SystemRuntimeLibrary<isAlpha,
+      (add DefaultRuntimeLibcallImpls, Int128RTLibcalls,
+           DefaultStackProtector, DefaultSafeStackGlobals)>;
+
+//===----------------------------------------------------------------------===//
 // AMDGPU Runtime Libcalls
 //===----------------------------------------------------------------------===//
 
