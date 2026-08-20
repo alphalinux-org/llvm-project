@@ -239,6 +239,20 @@ AlphaRegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
         getOperandsMapping({&Alpha::ValueMappings[Alpha::GPR3OpsIdx],
                             &Alpha::ValueMappings[Alpha::GPR3OpsIdx]});
     break;
+  case G_SELECT: {
+    // The condition is an integer whichever bank the rest is in; the two values
+    // and the result share a bank, decided from both ends as a phi's is, so
+    // that choosing between two floating values is an fcmovne rather than a
+    // round trip through memory.
+    bool IsFP = usedByFP(MI.getOperand(0).getReg(), MRI) ||
+                definedByFP(MI.getOperand(2).getReg(), MRI) ||
+                definedByFP(MI.getOperand(3).getReg(), MRI);
+    const ValueMapping *Val =
+        &Alpha::ValueMappings[IsFP ? Alpha::FPR3OpsIdx : Alpha::GPR3OpsIdx];
+    OperandsMapping = getOperandsMapping(
+        {Val, &Alpha::ValueMappings[Alpha::GPR3OpsIdx], Val, Val});
+    break;
+  }
   case G_FPEXT:
   case G_FPTRUNC:
     OperandsMapping = &Alpha::ValueMappings[Alpha::FPR3OpsIdx];

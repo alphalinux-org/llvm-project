@@ -29,3 +29,13 @@ t:
 f:
   ret i64 0
 }
+
+; CHECK-LABEL: select_bool:
+; CHECK:      xor $16, {{\$[0-9]+}}, [[X:\$[0-9]+]]
+; CHECK-NEXT: and [[X]], 1, [[A:\$[0-9]+]]
+; CHECK:      cmovne [[A]],
+define i64 @select_bool(i1 signext %a, i1 signext %b, i64 %x, i64 %y) {
+  %c = xor i1 %a, %b
+  %r = select i1 %c, i64 %x, i64 %y
+  ret i64 %r
+}

@@ -111,6 +111,21 @@ define i64 @bswap_abs(i64 %x) {
   ret i64 %b
 }
 
+; Both are a compare feeding a cmovne, signed for smax and unsigned for umin.
+; CHECK-LABEL: minmax:
+; CHECK:      bis $31, $17, [[B:\$[0-9]+]]
+; CHECK-NEXT: cmplt [[B]], $16, [[C:\$[0-9]+]]
+; CHECK-NEXT: bis $31, [[B]], [[M:\$[0-9]+]]
+; CHECK-NEXT: cmovne [[C]], $16, [[M]]
+; CHECK-NEXT: cmpult [[M]], [[B]], [[C2:\$[0-9]+]]
+; CHECK-NEXT: cmovne [[C2]], [[M]], $0
+; CHECK-NEXT: ret
+define i64 @minmax(i64 %a, i64 %b) {
+  %x = call i64 @llvm.smax.i64(i64 %a, i64 %b)
+  %y = call i64 @llvm.umin.i64(i64 %x, i64 %b)
+  ret i64 %y
+}
+
 ; The overflow bit is dead, so only the addq survives.
 ; CHECK-LABEL: overflow:
 ; CHECK:      addq $16, $17, $0
@@ -147,4 +162,6 @@ declare i64 @llvm.ctlz.i64(i64, i1)
 declare i64 @llvm.cttz.i64(i64, i1)
 declare i64 @llvm.bswap.i64(i64)
 declare i64 @llvm.abs.i64(i64, i1)
+declare i64 @llvm.smax.i64(i64, i64)
+declare i64 @llvm.umin.i64(i64, i64)
 declare {i64, i1} @llvm.uadd.with.overflow.i64(i64, i64)

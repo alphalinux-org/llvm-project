@@ -50,6 +50,7 @@ private:
   bool selectLoadStore(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectICmp(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectConstant(MachineInstr &I, MachineRegisterInfo &MRI) const;
+  bool selectSelect(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectFConstant(MachineInstr &I, MachineRegisterInfo &MRI) const;
 
   const AlphaInstrInfo &TII;
@@ -429,6 +430,48 @@ bool AlphaInstructionSelector::selectICmp(MachineInstr &I,
   return true;
 }
 
+// cmovne leaves its destination alone when the condition is zero, so a select
+// is the false value in the destination and a conditional move of the true one
+// over it.
+bool AlphaInstructionSelector::selectSelect(MachineInstr &I,
+                                            MachineRegisterInfo &MRI) const {
+  Register Dst = I.getOperand(0).getReg();
+  Register Cond = I.getOperand(1).getReg();
+  Register True = I.getOperand(2).getReg();
+  Register False = I.getOperand(3).getReg();
+
+  // Choosing between two floating values is fcmovne, which tests a floating
+  // register against zero; the 0/1 condition is moved across as it is, its bits
+  // being zero or not zero either way.
+  if (RBI.getRegBank(Dst, MRI, TRI)->getID() == Alpha::FPRRegBankID) {
+    Register Moved = MRI.createVirtualRegister(&Alpha::FPRCRegClass);
+    MachineInstrBuilder Move = BuildMI(*I.getParent(), I, I.getDebugLoc(),
+                                       TII.get(Alpha::MOVi2f), Moved)
+                                   .addUse(Cond);
+    constrainSelectedInstRegOperands(*Move, TII, TRI, RBI);
+
+    MachineInstrBuilder FMov = BuildMI(*I.getParent(), I, I.getDebugLoc(),
+                                       TII.get(Alpha::FCMOVNE), Dst)
+                                   .addUse(False)
+                                   .addUse(Moved)
+                                   .addUse(True);
+    constrainSelectedInstRegOperands(*FMov, TII, TRI, RBI);
+
+    I.eraseFromParent();
+    return true;
+  }
+
+  MachineInstrBuilder Mov =
+      BuildMI(*I.getParent(), I, I.getDebugLoc(), TII.get(Alpha::CMOVNE), Dst)
+          .addUse(False)
+          .addUse(Cond)
+          .addUse(True);
+  constrainSelectedInstRegOperands(*Mov, TII, TRI, RBI);
+
+  I.eraseFromParent();
+  return true;
+}
+
 // lda carries a signed 16-bit displacement and ldah the same shifted left 16,
 // so a constant that fits in 32 bits is built from a pair of them; anything
 // wider goes in the constant pool.  A pattern covers the 16-bit case already.
@@ -626,6 +669,8 @@ bool AlphaInstructionSelector::select(MachineInstr &I) {
     return selectICmp(I, MRI);
   case TargetOpcode::G_CONSTANT:
     return selectConstant(I, MRI);
+  case TargetOpcode::G_SELECT:
+    return selectSelect(I, MRI);
   case TargetOpcode::G_FCONSTANT:
     return selectFConstant(I, MRI);
   case TargetOpcode::G_GLOBAL_VALUE: {
