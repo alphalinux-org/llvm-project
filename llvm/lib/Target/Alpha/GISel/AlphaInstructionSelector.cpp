@@ -53,6 +53,7 @@ private:
   Register emitFCmpBit(MachineInstr &I, MachineRegisterInfo &MRI,
                        unsigned Opc, Register LHS, Register RHS,
                        Register Dst = Register()) const;
+  bool selectIntFPConv(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectConstant(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectSelect(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectFConstant(MachineInstr &I, MachineRegisterInfo &MRI) const;
@@ -739,6 +740,51 @@ bool AlphaInstructionSelector::selectConstant(MachineInstr &I,
   return true;
 }
 
+// Converting between an integer and a floating value happens in a floating
+// register, so the value has to be moved into or out of one first -- through
+// memory, since no instruction moves between the banks.
+bool AlphaInstructionSelector::selectIntFPConv(MachineInstr &I,
+                                               MachineRegisterInfo &MRI) const {
+  bool ToFP = I.getOpcode() == TargetOpcode::G_SITOFP;
+  Register Dst = I.getOperand(0).getReg();
+  Register Src = I.getOperand(1).getReg();
+  MachineBasicBlock &MBB = *I.getParent();
+
+  if (ToFP) {
+    // The integer is moved into a floating register and converted there; which
+    // convert depends on the type wanted back.
+    LLT DstTy = MRI.getType(Dst);
+    unsigned Cvt = DstTy == LLT::scalar(32) ? Alpha::CVTQS : Alpha::CVTQT;
+
+    Register Moved = MRI.createVirtualRegister(&Alpha::FPRCRegClass);
+    MachineInstrBuilder Move =
+        BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::MOVi2f), Moved)
+            .addUse(Src);
+    constrainSelectedInstRegOperands(*Move, TII, TRI, RBI);
+
+    MachineInstrBuilder Conv =
+        BuildMI(MBB, I, I.getDebugLoc(), TII.get(Cvt), Dst).addUse(Moved);
+    constrainSelectedInstRegOperands(*Conv, TII, TRI, RBI);
+  } else {
+    // A float in a register is already in T_floating form, so one convert
+    // serves both widths; the result is an integer sitting in a floating
+    // register, which then has to be moved out.
+    Register Converted = MRI.createVirtualRegister(&Alpha::FPRCRegClass);
+    MachineInstrBuilder Conv =
+        BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::CVTTQ), Converted)
+            .addUse(Src);
+    constrainSelectedInstRegOperands(*Conv, TII, TRI, RBI);
+
+    MachineInstrBuilder Move =
+        BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::MOVf2i), Dst)
+            .addUse(Converted);
+    constrainSelectedInstRegOperands(*Move, TII, TRI, RBI);
+  }
+
+  I.eraseFromParent();
+  return true;
+}
+
 // A floating-point constant lives in the constant pool, whose entries are
 // local and so addressed from the global pointer: ldah !gprelhigh, then the
 // load itself carries the !gprellow half.
@@ -832,6 +878,9 @@ bool AlphaInstructionSelector::select(MachineInstr &I) {
     return selectICmp(I, MRI);
   case TargetOpcode::G_FCMP:
     return selectFCmp(I, MRI);
+  case TargetOpcode::G_SITOFP:
+  case TargetOpcode::G_FPTOSI:
+    return selectIntFPConv(I, MRI);
   case TargetOpcode::G_CONSTANT:
     return selectConstant(I, MRI);
   case TargetOpcode::G_SELECT:

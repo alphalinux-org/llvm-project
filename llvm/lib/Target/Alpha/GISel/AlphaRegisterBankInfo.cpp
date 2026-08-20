@@ -261,6 +261,18 @@ AlphaRegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
         {Val, &Alpha::ValueMappings[Alpha::GPR3OpsIdx], Val, Val});
     break;
   }
+  case G_SITOFP:
+    // The value crosses the banks; the instruction that does the moving is
+    // built by the selector.
+    OperandsMapping =
+        getOperandsMapping({&Alpha::ValueMappings[Alpha::FPR3OpsIdx],
+                            &Alpha::ValueMappings[Alpha::GPR3OpsIdx]});
+    break;
+  case G_FPTOSI:
+    OperandsMapping =
+        getOperandsMapping({&Alpha::ValueMappings[Alpha::GPR3OpsIdx],
+                            &Alpha::ValueMappings[Alpha::FPR3OpsIdx]});
+    break;
   case G_FPEXT:
   case G_FPTRUNC:
     OperandsMapping = &Alpha::ValueMappings[Alpha::FPR3OpsIdx];

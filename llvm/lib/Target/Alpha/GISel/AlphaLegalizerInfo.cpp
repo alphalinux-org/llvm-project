@@ -106,6 +106,16 @@ AlphaLegalizerInfo::AlphaLegalizerInfo(const AlphaSubtarget &ST) {
   getActionDefinitionsBuilder({G_FPEXT, G_FPTRUNC})
       .legalFor({{s64, s32}, {s32, s64}});
 
+  // A conversion goes through a whole register: the value is moved between the
+  // banks and converted there, so the integer side is always 64 bits.
+  getActionDefinitionsBuilder(G_SITOFP)
+      .legalFor({{s32, s64}, {s64, s64}})
+      .clampScalar(1, s64, s64);
+
+  getActionDefinitionsBuilder(G_FPTOSI)
+      .legalFor({{s64, s32}, {s64, s64}})
+      .clampScalar(0, s64, s64);
+
   // A conditional move leaves its destination alone when the condition is zero,
   // so the false value is what the destination already holds.
   // A 32-bit choice is legal as it stands: cmovne and fcmovne both move whole
@@ -115,6 +125,12 @@ AlphaLegalizerInfo::AlphaLegalizerInfo(const AlphaSubtarget &ST) {
   getActionDefinitionsBuilder(G_SELECT)
       .legalFor({{s32, s1}, {s64, s1}, {p0, s1}})
       .clampScalar(0, s32, s64);
+
+  // There is no unsigned conversion instruction; both directions are built out
+  // of the signed one.
+  getActionDefinitionsBuilder(G_UITOFP).clampScalar(1, s64, s64).lower();
+
+  getActionDefinitionsBuilder(G_FPTOUI).clampScalar(0, s64, s64).lower();
 
   // The memory intrinsics become libcalls, as they do on the SelectionDAG
   // path.
