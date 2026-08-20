@@ -1,6 +1,15 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu -relocation-model=pic -O2 \
 ; RUN:   -filetype=obj < %s | llvm-readobj -r - | FileCheck %s
 
+; The same relocations have to survive the printed form, which is the only
+; thing -S, -save-temps and an external assembler ever see.  The assembler's
+; way of saying "this call uses that literal" is a sequence number on both, so
+; the printed text carries one; without it the pair reassembles to a call the
+; linker can never relax.
+; RUN: llc -mtriple=alpha-unknown-linux-gnu -relocation-model=pic -O2 < %s \
+; RUN:   | llvm-mc -triple=alpha-unknown-linux-gnu -filetype=obj -o - \
+; RUN:   | llvm-readobj -r - | FileCheck %s
+
 ; A direct call carries relocations on its jsr that let the linker optimize it.
 ; Both callees are tagged with lituse_jsr (addend 3) so the linker can relax the
 ; GOT-load-and-jsr into a direct bsr; a branch-prediction hint is emitted only

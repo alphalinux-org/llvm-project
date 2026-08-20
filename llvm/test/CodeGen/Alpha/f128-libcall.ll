@@ -20,7 +20,7 @@ target triple = "alpha-unknown-linux-gnu"
 ; CHECK-DAG: stq {{\$[0-9]+}}, 24($30)
 ; CHECK-DAG: lda $16, 0($30)
 ; CHECK-DAG: lda $17, 16($30)
-; CHECK:     ldq $27, floorl($29)
+; CHECK:     jsr $26, ($27), floorl
 define fp128 @floor_f128(fp128 %a) {
   %r = call fp128 @llvm.floor.f128(fp128 %a)
   ret fp128 %r
@@ -33,7 +33,7 @@ define fp128 @floor_f128(fp128 %a) {
 ; CHECK-DAG: lda $17, {{[0-9]+}}($30)
 ; CHECK-DAG: lda $18, {{[0-9]+}}($30)
 ; CHECK-DAG: lda $19, {{[0-9]+}}($30)
-; CHECK:     ldq $27, fmal($29)
+; CHECK:     jsr $26, ($27), fmal
 define fp128 @fma_f128(fp128 %a, fp128 %b, fp128 %c) {
   %r = call fp128 @llvm.fma.f128(fp128 %a, fp128 %b, fp128 %c)
   ret fp128 %r
@@ -43,7 +43,7 @@ define fp128 @fma_f128(fp128 %a, fp128 %b, fp128 %c) {
 ; CHECK-DAG: lda $16, 0($30)
 ; CHECK-DAG: lda $17, {{[0-9]+}}($30)
 ; CHECK-DAG: lda $18, {{[0-9]+}}($30)
-; CHECK:     ldq $27, fmaxl($29)
+; CHECK:     jsr $26, ($27), fmaxl
 define fp128 @maxnum_f128(fp128 %a, fp128 %b) {
   %r = call fp128 @llvm.maxnum.f128(fp128 %a, fp128 %b)
   ret fp128 %r
@@ -52,7 +52,7 @@ define fp128 @maxnum_f128(fp128 %a, fp128 %b) {
 ; CHECK-LABEL: sin_f128:
 ; CHECK-DAG: lda $16, 0($30)
 ; CHECK-DAG: lda $17, {{[0-9]+}}($30)
-; CHECK:     ldq $27, sinl($29)
+; CHECK:     jsr $26, ($27), sinl
 define fp128 @sin_f128(fp128 %a) {
   %r = call fp128 @llvm.sin.f128(fp128 %a)
   ret fp128 %r
@@ -62,7 +62,7 @@ define fp128 @sin_f128(fp128 %a) {
 ; CHECK-DAG: lda $16, 0($30)
 ; CHECK-DAG: lda $17, {{[0-9]+}}($30)
 ; CHECK-DAG: lda $18, {{[0-9]+}}($30)
-; CHECK:     ldq $27, fmodl($29)
+; CHECK:     jsr $26, ($27), fmodl
 define fp128 @rem_f128(fp128 %a, fp128 %b) {
   %r = frem fp128 %a, %b
   ret fp128 %r
@@ -73,7 +73,7 @@ define fp128 @rem_f128(fp128 %a, fp128 %b) {
 ; CHECK-LABEL: powi_f128:
 ; CHECK-DAG: lda $16, 0($30)
 ; CHECK-DAG: lda $17, {{[0-9]+}}($30)
-; CHECK:     ldq $27, __powitf2($29)
+; CHECK:     jsr $26, ($27), __powitf2
 define fp128 @powi_f128(fp128 %a, i32 %n) {
   %r = call fp128 @llvm.powi.f128.i32(fp128 %a, i32 %n)
   ret fp128 %r

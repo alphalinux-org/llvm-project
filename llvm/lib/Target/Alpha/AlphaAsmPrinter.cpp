@@ -60,6 +60,16 @@ public:
 
 private:
   MCOperand lowerOperand(const MachineOperand &MO) const;
+  bool emitDirectCallText(const MachineInstr &MI);
+
+  // The sequence number the next literal/lituse pair is written with.  GNU as
+  // requires one on every !lituse_* and pairs it with the !literal carrying
+  // the same number, so it has to be unique within the file rather than the
+  // function.
+  unsigned NextLituseSeq = 0;
+  // The number the descriptor of a dynamic TLS sequence was written with,
+  // which its call has to repeat.
+  unsigned PendingTlsSeq = 0;
 };
 
 } // end anonymous namespace
@@ -162,6 +172,80 @@ MCOperand AlphaAsmPrinter::lowerOperand(const MachineOperand &MO) const {
   }
 }
 
+// Print a direct call or direct tail call, whose two relocations are written
+// as a numbered pair.  The object path builds these fixups in the code emitter,
+// where the numbers do not exist -- a fixup names its target directly.  The
+// text path has only the assembler to say it to, and the assembler's way of
+// saying "this call is the use of that literal" is !literal!N on the load and
+// !lituse_jsr!N on the call.  Printing the load's relocation and not the
+// call's, which a fixed AsmString cannot avoid (it has one operand and no
+// counter), would lose the pairing --  and the pairing is the linker's only
+// input for relaxing the pair into a branch.  gcc writes exactly this text.
+bool AlphaAsmPrinter::emitDirectCallText(const MachineInstr &MI) {
+  StringRef Lituse;
+  bool IsTail = false, WantsHint = false;
+  switch (MI.getOpcode()) {
+  case Alpha::LDAtlsgd:
+  case Alpha::LDAtlsldm: {
+    // The descriptor address that opens a dynamic TLS sequence.  Its
+    // relocation is the one the following call's !lituse_tls* is paired with,
+    // so it needs the sequence number too, and the same one -- which is why it
+    // is printed here rather than from its AsmString.
+    if (!OutStreamer->hasRawTextSupport())
+      return false;
+    SmallString<128> Sym;
+    raw_svector_ostream SymOS(Sym);
+    PrintAsmOperand(&MI, 1, /*ExtraCode=*/nullptr, SymOS);
+    PendingTlsSeq = ++NextLituseSeq;
+    OutStreamer->emitRawText(
+        Twine("\tlda ") +
+        AlphaInstPrinter::getRegisterName(MI.getOperand(0).getReg()) + ", " +
+        Sym + "($29)\t\t!" +
+        (MI.getOpcode() == Alpha::LDAtlsgd ? "tlsgd" : "tlsldm") + "!" +
+        Twine(PendingTlsSeq));
+    return true;
+  }
+  case Alpha::JSRd:
+    Lituse = "lituse_jsr";
+    WantsHint = true;
+    break;
+  case Alpha::JSRdl:
+    Lituse = "lituse_jsr";
+    break;
+  case Alpha::JSRtlsgd:
+    Lituse = "lituse_tlsgd";
+    break;
+  case Alpha::JSRtlsldm:
+    Lituse = "lituse_tlsldm";
+    break;
+  default:
+    return false;
+  }
+  if (!OutStreamer->hasRawTextSupport())
+    return false;
+
+  SmallString<128> Sym;
+  raw_svector_ostream SymOS(Sym);
+  PrintAsmOperand(&MI, 0, /*ExtraCode=*/nullptr, SymOS);
+
+  // A dynamic TLS call takes the number its descriptor was written with: the
+  // linker pairs the three by that one number.
+  unsigned Seq = PendingTlsSeq ? PendingTlsSeq : ++NextLituseSeq;
+  PendingTlsSeq = 0;
+  OutStreamer->emitRawText(Twine("\tldq $27, ") + Sym + "($29)\t\t!literal!" +
+                           Twine(Seq));
+  // A callee the linker cannot reach with a branch takes a branch-prediction
+  // hint as well, which is the callee named a second time in the jump's
+  // displacement field.  A dso-local one deliberately does not: a hint would
+  // pin the jsr and stop the relaxation the lituse exists to allow.
+  OutStreamer->emitRawText(Twine(IsTail ? "\tjmp $31, ($27)" : "\tjsr $26, ($27)") +
+                           (WantsHint ? Twine(", ") + Sym : Twine()) +
+                           "\t\t!" + Lituse + "!" + Twine(Seq));
+  if (!IsTail)
+    OutStreamer->emitRawText(StringRef("\tldgp $29, 0($26)"));
+  return true;
+}
+
 void AlphaAsmPrinter::emitInstruction(const MachineInstr *MI) {
   // A bundle assembles to the instructions inside it, one after another; the
   // header carries nothing of its own.  Alpha uses one to hold the
@@ -177,6 +261,8 @@ void AlphaAsmPrinter::emitInstruction(const MachineInstr *MI) {
     // check belongs.  It compiles away in a release build.
     Alpha_MC::verifyInstructionPredicates(I->getOpcode(),
                                           getSubtargetInfo().getFeatureBits());
+    if (emitDirectCallText(*I))
+      continue;
     MCInst OutMI;
     OutMI.setOpcode(I->getOpcode());
     for (const MachineOperand &MO : I->operands()) {
