@@ -54,6 +54,7 @@ private:
   Register emitFCmpBit(MachineInstr &I, MachineRegisterInfo &MRI,
                        unsigned Opc, Register LHS, Register RHS,
                        Register Dst = Register()) const;
+  bool selectIntFPConv(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectConstant(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectSelect(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectFConstant(MachineInstr &I, MachineRegisterInfo &MRI) const;
@@ -735,23 +736,44 @@ bool AlphaInstructionSelector::selectConstant(MachineInstr &I,
 
   // Otherwise load it from the constant pool, which is addressed from the
   // global pointer.
-  MF.getInfo<AlphaMachineFunctionInfo>()->setUsesGP();
   const Constant *C =
       ConstantInt::get(Type::getInt64Ty(MF.getFunction().getContext()), V);
   unsigned CPI = MF.getConstantPool()->getConstantPoolIndex(C, Align(8));
 
-  Register HighReg = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
-  MachineInstrBuilder High =
-      BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::LDAHg), HighReg)
-          .addConstantPoolIndex(CPI)
-          .addUse(Alpha::R29);
-  constrainSelectedInstRegOperands(*High, TII, TRI, RBI);
+  emitGprelPair(I, Alpha::LDQg, Dst, MachineOperand::CreateCPI(CPI, 0), MRI);
 
-  MachineInstrBuilder Load =
-      BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::LDQg), Dst)
-          .addConstantPoolIndex(CPI)
-          .addUse(HighReg);
-  constrainSelectedInstRegOperands(*Load, TII, TRI, RBI);
+  I.eraseFromParent();
+  return true;
+}
+
+// Converting between an integer and a floating value happens in a floating
+// register, so the value has to be moved into or out of one first -- through
+// memory, since no instruction moves between the banks.
+bool AlphaInstructionSelector::selectIntFPConv(MachineInstr &I,
+                                               MachineRegisterInfo &MRI) const {
+  bool ToFP = I.getOpcode() == TargetOpcode::G_SITOFP;
+  Register Dst = I.getOperand(0).getReg();
+  Register Src = I.getOperand(1).getReg();
+
+  if (ToFP) {
+    // The integer is moved into a floating register and converted there; which
+    // convert depends on the type wanted back.
+    LLT DstTy = MRI.getType(Dst);
+    unsigned Cvt = DstTy == LLT::scalar(32) ? Alpha::CVTQS : Alpha::CVTQT;
+
+    Register Moved = MRI.createVirtualRegister(&Alpha::FPRCRegClass);
+    emit(I, Alpha::MOVi2f, Moved).addUse(Src);
+
+    emit(I, Cvt, Dst).addUse(Moved);
+  } else {
+    // A float in a register is already in T_floating form, so one convert
+    // serves both widths; the result is an integer sitting in a floating
+    // register, which then has to be moved out.
+    Register Converted = MRI.createVirtualRegister(&Alpha::FPRCRegClass);
+    emit(I, Alpha::CVTTQ, Converted).addUse(Src);
+
+    emit(I, Alpha::MOVf2i, Dst).addUse(Converted);
+  }
 
   I.eraseFromParent();
   return true;
@@ -1192,6 +1214,9 @@ bool AlphaInstructionSelector::selectInstr(MachineInstr &I) const {
     return selectICmp(I, MRI);
   case TargetOpcode::G_FCMP:
     return selectFCmp(I, MRI);
+  case TargetOpcode::G_SITOFP:
+  case TargetOpcode::G_FPTOSI:
+    return selectIntFPConv(I, MRI);
   case TargetOpcode::G_CONSTANT:
     return selectConstant(I, MRI);
   case TargetOpcode::G_SELECT:
