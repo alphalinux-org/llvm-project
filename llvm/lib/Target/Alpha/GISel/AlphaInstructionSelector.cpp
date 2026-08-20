@@ -49,6 +49,7 @@ private:
   bool selectImpl(MachineInstr &I, CodeGenCoverage &CoverageInfo) const;
   bool selectLoadStore(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectICmp(MachineInstr &I, MachineRegisterInfo &MRI) const;
+  bool selectConstant(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectFConstant(MachineInstr &I, MachineRegisterInfo &MRI) const;
 
   const AlphaInstrInfo &TII;
@@ -428,6 +429,110 @@ bool AlphaInstructionSelector::selectICmp(MachineInstr &I,
   return true;
 }
 
+// lda carries a signed 16-bit displacement and ldah the same shifted left 16,
+// so a constant that fits in 32 bits is built from a pair of them; anything
+// wider goes in the constant pool.  A pattern covers the 16-bit case already.
+bool AlphaInstructionSelector::selectConstant(MachineInstr &I,
+                                              MachineRegisterInfo &MRI) const {
+  Register Dst = I.getOperand(0).getReg();
+  int64_t V = I.getOperand(1).getCImm()->getSExtValue();
+  MachineBasicBlock &MBB = *I.getParent();
+  MachineFunction &MF = *MBB.getParent();
+  const AlphaSubtarget &STI = MF.getSubtarget<AlphaSubtarget>();
+
+  // Build a 32-bit constant on top of Base, leaving the result in Out.
+  auto emit32 = [&](int32_t V32, Register Base, Register Out) {
+    int64_t Lo = static_cast<int16_t>(V32);
+    int64_t Hi = (int64_t(V32) - Lo) >> 16;
+    Register Cur = Base;
+
+    if (Hi != 0) {
+      // A high half of 0x8000 does not fit ldah's signed field; it takes two.
+      SmallVector<int64_t, 2> Halves;
+      if (isInt<16>(Hi))
+        Halves.push_back(Hi);
+      else
+        Halves.append({Hi / 2, Hi / 2});
+      for (auto [N, Half] : enumerate(Halves)) {
+        bool Last = N + 1 == Halves.size();
+        Register Next = (Lo == 0 && Last)
+                            ? Out
+                            : MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+        MachineInstrBuilder Ldah =
+            BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::LDAH), Next)
+                .addImm(Half)
+                .addUse(Cur);
+        constrainSelectedInstRegOperands(*Ldah, TII, TRI, RBI);
+        Cur = Next;
+      }
+    }
+
+    if (Lo != 0 || Hi == 0) {
+      MachineInstrBuilder Lda =
+          BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::LDA), Out)
+              .addImm(Lo)
+              .addUse(Cur);
+      constrainSelectedInstRegOperands(*Lda, TII, TRI, RBI);
+    }
+  };
+
+  if (isInt<32>(V)) {
+    emit32(static_cast<int32_t>(V), Alpha::R31, Dst);
+    I.eraseFromParent();
+    return true;
+  }
+
+  // Wider than 32 bits.  -mbuild-constants asks for it to be built inline
+  // rather than fetched from the constant pool, because reaching the pool needs
+  // a global pointer: the dynamic loader runs before its own is established.
+  // The SelectionDAG path asks the same question in AlphaISelDAGToDAG.
+  if (STI.hasBuildConstants()) {
+    int32_t Lo32 = static_cast<int32_t>(V);
+    int64_t Hi32 = (V - Lo32) >> 32;
+
+    // V = (Hi32 << 32) + Lo32; the sign of Lo32 is already folded into Hi32.
+    Register HighVal = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+    emit32(static_cast<int32_t>(Hi32), Alpha::R31, HighVal);
+
+    Register Shifted =
+        Lo32 == 0 ? Dst : MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+    MachineInstrBuilder Sll =
+        BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::SLLi), Shifted)
+            .addUse(HighVal)
+            .addImm(32);
+    constrainSelectedInstRegOperands(*Sll, TII, TRI, RBI);
+
+    if (Lo32 != 0)
+      emit32(Lo32, Shifted, Dst);
+
+    I.eraseFromParent();
+    return true;
+  }
+
+  // Otherwise load it from the constant pool, which is addressed from the
+  // global pointer.
+  MF.getInfo<AlphaMachineFunctionInfo>()->setUsesGP();
+  const Constant *C =
+      ConstantInt::get(Type::getInt64Ty(MF.getFunction().getContext()), V);
+  unsigned CPI = MF.getConstantPool()->getConstantPoolIndex(C, Align(8));
+
+  Register HighReg = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  MachineInstrBuilder High =
+      BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::LDAHg), HighReg)
+          .addConstantPoolIndex(CPI)
+          .addUse(Alpha::R29);
+  constrainSelectedInstRegOperands(*High, TII, TRI, RBI);
+
+  MachineInstrBuilder Load =
+      BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::LDQg), Dst)
+          .addConstantPoolIndex(CPI)
+          .addUse(HighReg);
+  constrainSelectedInstRegOperands(*Load, TII, TRI, RBI);
+
+  I.eraseFromParent();
+  return true;
+}
+
 // A floating-point constant lives in the constant pool, whose entries are
 // local and so addressed from the global pointer: ldah !gprelhigh, then the
 // load itself carries the !gprellow half.
@@ -519,6 +624,8 @@ bool AlphaInstructionSelector::select(MachineInstr &I) {
     return selectLoadStore(I, MRI);
   case TargetOpcode::G_ICMP:
     return selectICmp(I, MRI);
+  case TargetOpcode::G_CONSTANT:
+    return selectConstant(I, MRI);
   case TargetOpcode::G_FCONSTANT:
     return selectFConstant(I, MRI);
   case TargetOpcode::G_GLOBAL_VALUE: {
