@@ -67,4 +67,5 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeAlphaTargetMC() {
   TargetRegistry::RegisterMCRegInfo(T, createAlphaMCRegisterInfo);
   TargetRegistry::RegisterMCSubtargetInfo(T, createAlphaMCSubtargetInfo);
   TargetRegistry::RegisterMCInstPrinter(T, createAlphaMCInstPrinter);
+  TargetRegistry::RegisterMCCodeEmitter(T, createAlphaMCCodeEmitter);
 }
