@@ -1048,21 +1048,7 @@ bool AlphaAsmParser::parseInstruction(ParseInstructionInfo &Info,
     if (getLexer().isNot(AsmToken::Identifier))
       return Error(getLexer().getLoc(), "expected relocation name");
     StringRef R = getParser().getTok().getIdentifier();
-    unsigned Spec = StringSwitch<unsigned>(R)
-                        .Case("literal", Alpha::fixup_alpha_literal)
-                        .Case("gprelhigh", Alpha::fixup_alpha_gprelhigh)
-                        .Case("gprellow", Alpha::fixup_alpha_gprellow)
-                        .Case("gprel", Alpha::fixup_alpha_gprel16)
-                        .Case("gpdisp", Alpha::fixup_alpha_gpdisp)
-                        .Case("tprelhi", Alpha::fixup_alpha_tprelhi)
-                        .Case("tprello", Alpha::fixup_alpha_tprello)
-                        .Case("gottprel", Alpha::fixup_alpha_gottprel)
-                        .Case("tlsgd", Alpha::fixup_alpha_tlsgd)
-                        .Case("tlsldm", Alpha::fixup_alpha_tlsldm)
-                        .Case("dtprelhi", Alpha::fixup_alpha_dtprelhi)
-                        .Case("dtprello", Alpha::fixup_alpha_dtprello)
-                        .Case("samegp", Alpha::fixup_alpha_brsgp)
-                        .Default(0);
+    unsigned Spec = Alpha::getSpecifierKind(R);
     // The lituse relocations name no field: only the addend matters, and it
     // says which kind of use the instruction makes of the literal that came
     // before.  So one belongs to the instruction, not to any operand, and it

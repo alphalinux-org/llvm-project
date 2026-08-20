@@ -33,8 +33,10 @@ enum Fixups {
   fixup_alpha_tprelhi,
   fixup_alpha_tprello,
   // A 16-bit GOT displacement to a thread-pointer-relative offset for
-  // initial-exec TLS (R_ALPHA_GOTTPREL).
+  // initial-exec TLS (R_ALPHA_GOTTPREL), and to a module-relative offset for
+  // local-dynamic TLS (R_ALPHA_GOTDTPREL).
   fixup_alpha_gottprel,
+  fixup_alpha_gotdtprel,
   // A 16-bit GOT displacement to the general-dynamic TLS descriptor passed to
   // __tls_get_addr (R_ALPHA_TLSGD).
   fixup_alpha_tlsgd,
@@ -72,43 +74,48 @@ enum Fixups {
   NumTargetFixupKinds = fixup_alpha_invalid - FirstTargetFixupKind
 };
 
+// Every relocation specifier, in the one place both directions read: the
+// assembler turns a `!name' suffix into a fixup kind, the printer turns a kind
+// back into the suffix it writes.  A row added to only one of two lists would
+// make the assembler accept a suffix the printer cannot write, or the other way
+// round -- which is exactly what an `llvm-mc | llvm-mc' round trip does.
+//
+// fixup_alpha_gprel32 is deliberately absent.  GNU as attaches a `!'-suffix to
+// an instruction operand, never to a data directive, so there is neither a
+// `!gprel32' to print nor one to read; the only spelling is the .gprel32
+// directive, which AlphaAsmPrinter::emitJumpTableEntry writes.
+struct SpecifierInfo {
+  unsigned Kind;
+  StringRef Name;
+};
+
+inline constexpr SpecifierInfo SpecifierInfos[] = {
+    {fixup_alpha_literal, "literal"},     {fixup_alpha_gprelhigh, "gprelhigh"},
+    {fixup_alpha_gprellow, "gprellow"},   {fixup_alpha_gprel16, "gprel"},
+    {fixup_alpha_gpdisp, "gpdisp"},       {fixup_alpha_tprelhi, "tprelhi"},
+    {fixup_alpha_tprello, "tprello"},     {fixup_alpha_gottprel, "gottprel"},
+    {fixup_alpha_gotdtprel, "gotdtprel"}, {fixup_alpha_tlsgd, "tlsgd"},
+    {fixup_alpha_tlsldm, "tlsldm"},       {fixup_alpha_dtprelhi, "dtprelhi"},
+    {fixup_alpha_dtprello, "dtprello"},   {fixup_alpha_brsgp, "samegp"},
+};
+
 // The `!name` relocation-specifier suffix that selects the given fixup kind
 // (empty for kinds without a specifier spelling).
 inline StringRef getSpecifierName(unsigned Kind) {
-  switch (Kind) {
-  case fixup_alpha_literal:
-    return "literal";
-  case fixup_alpha_gprelhigh:
-    return "gprelhigh";
-  case fixup_alpha_gprellow:
-    return "gprellow";
-  case fixup_alpha_gprel16:
-    return "gprel";
-  case fixup_alpha_gpdisp:
-    return "gpdisp";
-  case fixup_alpha_tprelhi:
-    return "tprelhi";
-  case fixup_alpha_tprello:
-    return "tprello";
-  case fixup_alpha_gottprel:
-    return "gottprel";
-  case fixup_alpha_tlsgd:
-    return "tlsgd";
-  case fixup_alpha_tlsldm:
-    return "tlsldm";
-  case fixup_alpha_dtprelhi:
-    return "dtprelhi";
-  case fixup_alpha_dtprello:
-    return "dtprello";
-  case fixup_alpha_brsgp:
-    return "samegp";
-  // fixup_alpha_gprel32 is deliberately absent.  GNU as attaches a `!'-suffix
-  // to an instruction operand, never to a data directive, so there is no
-  // `!gprel32' to print; the only spelling is the .gprel32 directive, which
-  // AlphaAsmPrinter::emitJumpTableEntry writes.
-  default:
-    return "";
-  }
+  for (const SpecifierInfo &S : SpecifierInfos)
+    if (S.Kind == Kind)
+      return S.Name;
+  return "";
+}
+
+// The fixup kind a `!name` suffix selects, or zero for a name that is not a
+// relocation specifier.  Zero is not a fixup kind: the target kinds start at
+// MCFixupKind::FirstTargetFixupKind.
+inline unsigned getSpecifierKind(StringRef Name) {
+  for (const SpecifierInfo &S : SpecifierInfos)
+    if (S.Name == Name)
+      return S.Kind;
+  return 0;
 }
 } // namespace Alpha
 } // namespace llvm
