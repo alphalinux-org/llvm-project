@@ -227,6 +227,15 @@ bool AlphaAsmPrinter::emitDirectCallText(const MachineInstr &MI) {
   case Alpha::JSRtlsldm:
     Lituse = "lituse_tlsldm";
     break;
+  case Alpha::TCRETURNd:
+    Lituse = "lituse_jsr";
+    IsTail = true;
+    WantsHint = true;
+    break;
+  case Alpha::TCRETURNdl:
+    Lituse = "lituse_jsr";
+    IsTail = true;
+    break;
   default:
     return false;
   }

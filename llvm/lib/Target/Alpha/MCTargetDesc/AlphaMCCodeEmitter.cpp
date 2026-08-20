@@ -26,10 +26,11 @@
 
 using namespace llvm;
 
-// The two fixed instruction words a direct call is made of: the load of the
-// procedure value from its GOT slot, and the jsr through it.
+// The three fixed instruction words a direct call is made of: the load of the
+// procedure value from its GOT slot, and the jsr or jmp through it.
 static constexpr uint32_t INSN_LDQ_PV = 0xa77d0000; // ldq $27, 0($29)
 static constexpr uint32_t INSN_JSR_PV = 0x6b5b4000; // jsr $26, ($27)
+static constexpr uint32_t INSN_JMP_PV = 0x6bfb0000; // jmp $31, ($27), 0
 
 // The branch a landing pad's gp reload is based on.  A zero displacement makes
 // it fall through to the ldah it puts the address of into $29.
@@ -375,11 +376,14 @@ void AlphaMCCodeEmitter::encodeInstruction(const MCInst &MI,
   case Alpha::JSRd:
   case Alpha::JSRdl:
   case Alpha::JSRtlsgd:
-  case Alpha::JSRtlsldm: {
-    // A direct call, or the call to __tls_get_addr in a dynamic TLS sequence.
-    // Each loads its own procedure value, so that a linker deleting that load
-    // knows it is deleting the only use of it.
+  case Alpha::JSRtlsldm:
+  case Alpha::TCRETURNd:
+  case Alpha::TCRETURNdl: {
+    // A direct call, tail call, or the call to __tls_get_addr in a dynamic TLS
+    // sequence.  Each loads its own procedure value, so that a linker deleting
+    // that load knows it is deleting the only use of it.
     unsigned Op = MI.getOpcode();
+    bool IsTail = Op == Alpha::TCRETURNd || Op == Alpha::TCRETURNdl;
     const MCExpr *Callee = MI.getOperand(0).getExpr();
 
     // ldq $27, callee($29) !literal
@@ -397,10 +401,13 @@ void AlphaMCCodeEmitter::encodeInstruction(const MCInst &MI,
               : Op == Alpha::JSRtlsldm ? 5
                                        : 3,
               Fixups, At);
-    if (Op == Alpha::JSRd)
+    if (Op == Alpha::JSRd || Op == Alpha::TCRETURNd)
       Fixups.push_back(
           MCFixup::create(At, Callee, MCFixupKind(Alpha::fixup_alpha_hint)));
-    support::endian::write<uint32_t>(CB, INSN_JSR_PV, llvm::endianness::little);
+    support::endian::write<uint32_t>(CB, IsTail ? INSN_JMP_PV : INSN_JSR_PV,
+                                     llvm::endianness::little);
+    if (IsTail)
+      return;
     return emitLdgp(Alpha::R26, CB, Fixups, STI);
   }
   default:

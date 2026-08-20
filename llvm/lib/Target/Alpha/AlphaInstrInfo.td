@@ -76,7 +76,17 @@ def AlphaCallBsr : SDNode<"AlphaISD::CALL_BSR", SDT_AlphaCallDirect,
                           [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
                            SDNPVariadic]>;
 
-// The -msmall-text form of a tail call: a br straight to the callee.
+// The direct forms of a tail call: with the callee symbol, so the jmp can carry
+// the hint and lituse_jsr relocations; without, for a dso-local callee, which
+// takes only the lituse; and the -msmall-text form, a br straight to the
+// callee.
+def AlphaTCReturnDirect : SDNode<"AlphaISD::TC_RETURN_DIRECT",
+                                 SDT_AlphaCallDirect,
+                                 [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
+def AlphaTCReturnDirectLocal : SDNode<"AlphaISD::TC_RETURN_DIRECT_LOCAL",
+                                      SDT_AlphaCallDirect,
+                                      [SDNPHasChain, SDNPOptInGlue,
+                                       SDNPVariadic]>;
 def AlphaTCReturnBr : SDNode<"AlphaISD::TC_RETURN_BR", SDT_AlphaCallDirect,
                              [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 
@@ -2088,6 +2098,27 @@ def TCRETURN : MbrForm<0b00, (outs), (ins), "jmp $$31, ($$27), 0",
   let Ra = 31;
   let Rb = 27;
 }
+
+// The direct tail calls, which load their own procedure value for the same
+// reason a direct call does.  TCRETURNd is tagged with the callee symbol for
+// the hint as well; TCRETURNdl takes only the lituse_jsr, which leaves the
+// linker free to relax the pair into a br.
+let isCall = 1, isTerminator = 1, isReturn = 1, isBarrier = 1, Uses = [R29],
+    Defs = [R27], isCodeGenOnly = 1, isPseudo = 1, Size = 8 in {
+def TCRETURNd : AlphaInst<(outs), (ins calltarget:$sym),
+                        "ldq $$27, $sym($$29)\t\t!literal"
+                        "\n\tjmp $$31, ($$27), 0", []>;
+def TCRETURNdl : AlphaInst<(outs), (ins calltarget:$sym),
+                         "ldq $$27, $sym($$29)\t\t!literal"
+                         "\n\tjmp $$31, ($$27), 0", []>;
+}
+def : Pat<(AlphaTCReturnDirect tglobaladdr:$sym), (TCRETURNd tglobaladdr:$sym)>;
+def : Pat<(AlphaTCReturnDirect texternalsym:$sym),
+          (TCRETURNd texternalsym:$sym)>;
+def : Pat<(AlphaTCReturnDirectLocal tglobaladdr:$sym),
+          (TCRETURNdl tglobaladdr:$sym)>;
+def : Pat<(AlphaTCReturnDirectLocal texternalsym:$sym),
+          (TCRETURNdl texternalsym:$sym)>;
 
 // A direct tail call under -msmall-text: the callee is in range, so no procedure
 // value is loaded and the jump is a plain PC-relative br.  br writes its return

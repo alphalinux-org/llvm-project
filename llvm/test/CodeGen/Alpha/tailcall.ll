@@ -1,4 +1,15 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu -mcpu=ev6 < %s | FileCheck %s
+; RUN: llc -mtriple=alpha-unknown-linux-gnu -mcpu=ev6 -filetype=obj < %s \
+; RUN:   | llvm-readobj -r - | FileCheck --check-prefix=RELOC %s
+
+; A direct tail call carries the same relocations a direct call does, so the
+; linker can relax the GOT load and the jump into a single br: a lituse_jsr
+; (addend 3) marking the jump as the literal's use, preceded by nothing and
+; followed by a hint only when the callee is not dso-local.  An indirect tail
+; call has neither.
+; RELOC:      R_ALPHA_LITERAL callee
+; RELOC-NEXT: R_ALPHA_LITUSE - 0x3
+; RELOC-NEXT: R_ALPHA_HINT callee
 
 declare i64 @callee(i64)
 declare i64 @callee2(i64, i64)
@@ -9,9 +20,11 @@ declare i64 @callee2(i64, i64)
 ; CHECK-LABEL: tail_direct:
 ; CHECK-NOT:  stq $26
 ; CHECK-NOT:  lda $30
-; CHECK:      ldq $27, callee($29)
+; The literal and the jump that uses it are written as a numbered pair, and the
+; callee, being outside this object, takes a branch-prediction hint as well.
+; CHECK:      ldq $27, callee($29){{.*}}!literal![[N:[0-9]+]]
 ; CHECK-NOT:  jsr
-; CHECK:      jmp $31, ($27), 0
+; CHECK:      jmp $31, ($27), callee{{.*}}!lituse_jsr![[N]]
 define i64 @tail_direct(i64 %x) {
   %r = tail call i64 @callee(i64 %x)
   ret i64 %r
@@ -31,7 +44,7 @@ define i64 @tail_indirect(ptr %fp, i64 %x) {
 ; Passing two register arguments through a tail call is still a jump.
 ; CHECK-LABEL: tail_two:
 ; CHECK-NOT:  jsr
-; CHECK:      jmp $31, ($27), 0
+; CHECK:      jmp $31, ($27), callee2
 define i64 @tail_two(i64 %a, i64 %b) {
   %r = tail call i64 @callee2(i64 %b, i64 %a)
   ret i64 %r

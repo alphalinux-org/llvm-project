@@ -211,7 +211,7 @@ multiclass AlphaInstRW {
   def : InstRW<[Wr_JSR], (instrs JSRt)>;
   def : InstRW<[Wr_JSR], (instrs RETabh, JSRCO, JSRCOh)>;
   def : InstRW<[Wr_FLoad], (instrs LDSf64, LDSgf64)>;
-  def : InstRW<[Wr_JSR], (instrs JMPt)>;
+  def : InstRW<[Wr_JSR], (instrs JMPt, TCRETURNd, TCRETURNdl)>;
 }
 
 //===----------------------------------------------------------------------===//
