@@ -182,11 +182,8 @@ MCOperand AlphaAsmPrinter::lowerOperand(const MachineOperand &MO) const {
 // counter), would lose the pairing --  and the pairing is the linker's only
 // input for relaxing the pair into a branch.  gcc writes exactly this text.
 bool AlphaAsmPrinter::emitDirectCallText(const MachineInstr &MI) {
-  StringRef Lituse;
-  bool IsTail = false, WantsHint = false;
-  switch (MI.getOpcode()) {
-  case Alpha::LDAtlsgd:
-  case Alpha::LDAtlsldm: {
+  unsigned Opc = MI.getOpcode();
+  if (Opc == Alpha::LDAtlsgd || Opc == Alpha::LDAtlsldm) {
     // The descriptor address that opens a dynamic TLS sequence.  Its
     // relocation is the one the following call's !lituse_tls* is paired with,
     // so it needs the sequence number too, and the same one -- which is why it
@@ -200,27 +197,14 @@ bool AlphaAsmPrinter::emitDirectCallText(const MachineInstr &MI) {
     OutStreamer->emitRawText(
         Twine("\tlda ") +
         AlphaInstPrinter::getRegisterName(MI.getOperand(0).getReg()) + ", " +
-        Sym + "($29)\t\t!" +
-        (MI.getOpcode() == Alpha::LDAtlsgd ? "tlsgd" : "tlsldm") + "!" +
-        Twine(PendingTlsSeq));
+        Sym + "($29)\t\t!" + (Opc == Alpha::LDAtlsgd ? "tlsgd" : "tlsldm") +
+        "!" + Twine(PendingTlsSeq));
     return true;
   }
-  case Alpha::JSRd:
-    Lituse = "lituse_jsr";
-    WantsHint = true;
-    break;
-  case Alpha::JSRdl:
-    Lituse = "lituse_jsr";
-    break;
-  case Alpha::JSRtlsgd:
-    Lituse = "lituse_tlsgd";
-    break;
-  case Alpha::JSRtlsldm:
-    Lituse = "lituse_tlsldm";
-    break;
-  default:
+
+  Alpha::DirectCallInfo Info;
+  if (!Alpha::getDirectCallInfo(Opc, Info))
     return false;
-  }
   if (!OutStreamer->hasRawTextSupport())
     return false;
 
@@ -238,10 +222,11 @@ bool AlphaAsmPrinter::emitDirectCallText(const MachineInstr &MI) {
   // hint as well, which is the callee named a second time in the jump's
   // displacement field.  A dso-local one deliberately does not: a hint would
   // pin the jsr and stop the relaxation the lituse exists to allow.
-  OutStreamer->emitRawText(Twine(IsTail ? "\tjmp $31, ($27)" : "\tjsr $26, ($27)") +
-                           (WantsHint ? Twine(", ") + Sym : Twine()) +
-                           "\t\t!" + Lituse + "!" + Twine(Seq));
-  if (!IsTail)
+  OutStreamer->emitRawText(
+      Twine(Info.IsTail ? "\tjmp $31, ($27)" : "\tjsr $26, ($27)") +
+      (Info.WantsHint ? Twine(", ") + Sym : Twine()) + "\t\t!" +
+      Alpha::getLituseName(Info.LituseType) + "!" + Twine(Seq));
+  if (!Info.IsTail)
     OutStreamer->emitRawText(StringRef("\tldgp $29, 0($26)"));
   return true;
 }

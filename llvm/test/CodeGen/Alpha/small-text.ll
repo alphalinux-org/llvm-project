@@ -40,9 +40,11 @@ define dso_local i32 @h(i32 %x) {
 }
 
 ; LARGE-LABEL: tail:
-; h is defined here, so it runs on our gp and the tail call stands.
-; LARGE: ldq $27, h($29){{.*}}!literal
-; LARGE: jmp $31, ($27), 0
+; LARGE: ldq $27, h($29){{.*}}!literal![[N:[0-9]+]]
+; h is defined here, so it runs on our gp and the tail call stands: the jump
+; takes the lituse that lets the linker relax the pair into a branch, and
+; deliberately no hint, which would pin it.
+; LARGE: jmp $31, ($27){{[[:space:]]+}}!lituse_jsr![[N]]
 
 ; SMALL-LABEL: tail:
 ; SMALL: ldgp $29, 0($27)
@@ -94,13 +96,40 @@ define i32 @interposable(i32 %x) {
 ; DSO, and its gp would be the one our caller found in $29 on return.
 ; SMALL-LABEL: interposable_tail:
 ; SMALL: ldq $27, preemptible($29)
-; SMALL-NOT: jmp $31, ($27), 0
-; SMALL: jsr $26, ($27)
+; SMALL-NOT: jmp $31, ($27), preemptible
+; SMALL: jsr $26, ($27), preemptible
 ; SMALL-NOT: !samegp
 define i32 @interposable_tail(i32 %x) {
   %r = tail call i32 @preemptible(i32 %x)
   ret i32 %r
 }
+
+; A dso_local ifunc still has to go through the GOT: a bsr would branch to the
+; resolver rather than to what it returned.
+; SMALL-LABEL: call_ifunc:
+; SMALL: ldq $27, resolved($29)
+; SMALL-NOT: bsr
+define i32 @call_ifunc(i32 %x) {
+  %r = call i32 @resolved(i32 %x)
+  ret i32 %r
+}
+
+@resolved = dso_local ifunc i32 (i32), ptr @resolver
+define internal ptr @resolver() {
+  ret ptr null
+}
+
+; And an undefined weak symbol has no address to branch to; the GOT entry
+; supplies the zero it has to read as.
+; SMALL-LABEL: call_weak:
+; SMALL: ldq $27, maybe($29)
+; SMALL-NOT: bsr
+define i32 @call_weak(i32 %x) {
+  %r = call i32 @maybe(i32 %x)
+  ret i32 %r
+}
+
+declare extern_weak dso_local i32 @maybe(i32)
 
 ; The relocation is the point of the !samegp suffix, so check the object file:
 ; assembly output alone would not catch a branch emitted as a plain BRADDR.

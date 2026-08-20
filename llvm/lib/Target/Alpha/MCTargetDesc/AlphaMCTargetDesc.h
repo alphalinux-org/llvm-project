@@ -376,6 +376,30 @@ inline unsigned getOtsRoundModeArg(unsigned Mode) {
 }
 } // namespace Alpha
 
+namespace Alpha {
+// What one of the direct-call pseudos -- a call, a tail call, or the call that
+// opens a dynamic TLS sequence -- expands to.  The assembly and the object
+// file each write the same three facts about it in their own notation, so a
+// divergence would be a wrong relocation on one path and not the other; they
+// read them from here instead.
+struct DirectCallInfo {
+  // The R_ALPHA_LITUSE use type the call is marked with: 3 for a jsr, 4 and 5
+  // for the two dynamic TLS descriptors.
+  unsigned LituseType;
+  // A jmp that does not come back, so no ldgp follows it.
+  bool IsTail;
+  // A callee the linker cannot reach with a branch takes a branch-prediction
+  // hint, which is the callee named a second time in the jump's displacement.
+  bool WantsHint;
+};
+
+// False for an opcode that is not one of the direct-call pseudos.
+bool getDirectCallInfo(unsigned Opc, DirectCallInfo &Info);
+
+// How a !lituse_* suffix naming this use type is spelled, for the text path.
+const char *getLituseName(unsigned Type);
+} // namespace Alpha
+
 MCCodeEmitter *createAlphaMCCodeEmitter(const MCInstrInfo &MCII,
                                         MCContext &Ctx);
 MCAsmBackend *createAlphaAsmBackend(const Target &T, const MCSubtargetInfo &STI,

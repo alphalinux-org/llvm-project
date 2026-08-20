@@ -26,10 +26,11 @@
 
 using namespace llvm;
 
-// The two fixed instruction words a direct call is made of: the load of the
-// procedure value from its GOT slot, and the jsr through it.
+// The three fixed instruction words a direct call is made of: the load of the
+// procedure value from its GOT slot, and the jsr or jmp through it.
 static constexpr uint32_t INSN_LDQ_PV = 0xa77d0000; // ldq $27, 0($29)
 static constexpr uint32_t INSN_JSR_PV = 0x6b5b4000; // jsr $26, ($27)
+static constexpr uint32_t INSN_JMP_PV = 0x6bfb0000; // jmp $31, ($27), 0
 
 // The branch a landing pad's gp reload is based on.  A zero displacement makes
 // it fall through to the ldah it puts the address of into $29.
@@ -375,11 +376,16 @@ void AlphaMCCodeEmitter::encodeInstruction(const MCInst &MI,
   case Alpha::JSRd:
   case Alpha::JSRdl:
   case Alpha::JSRtlsgd:
-  case Alpha::JSRtlsldm: {
-    // A direct call, or the call to __tls_get_addr in a dynamic TLS sequence.
-    // Each loads its own procedure value, so that a linker deleting that load
-    // knows it is deleting the only use of it.
-    unsigned Op = MI.getOpcode();
+  case Alpha::JSRtlsldm:
+  case Alpha::TCRETURNd:
+  case Alpha::TCRETURNdl: {
+    // A direct call, tail call, or the call to __tls_get_addr in a dynamic TLS
+    // sequence.  Each loads its own procedure value, so that a linker deleting
+    // that load knows it is deleting the only use of it.
+    Alpha::DirectCallInfo Info;
+    bool IsDirectCall = Alpha::getDirectCallInfo(MI.getOpcode(), Info);
+    assert(IsDirectCall && "case list disagrees with getDirectCallInfo");
+    (void)IsDirectCall;
     const MCExpr *Callee = MI.getOperand(0).getExpr();
 
     // ldq $27, callee($29) !literal
@@ -393,14 +399,14 @@ void AlphaMCCodeEmitter::encodeInstruction(const MCInst &MI,
     // writes the lituse first and bfd only inspects the relocation right after
     // a literal's, so the order is not cosmetic.
     uint32_t At = CB.size();
-    addLituse(Op == Alpha::JSRtlsgd    ? 4
-              : Op == Alpha::JSRtlsldm ? 5
-                                       : 3,
-              Fixups, At);
-    if (Op == Alpha::JSRd)
+    addLituse(Info.LituseType, Fixups, At);
+    if (Info.WantsHint)
       Fixups.push_back(
           MCFixup::create(At, Callee, MCFixupKind(Alpha::fixup_alpha_hint)));
-    support::endian::write<uint32_t>(CB, INSN_JSR_PV, llvm::endianness::little);
+    support::endian::write<uint32_t>(
+        CB, Info.IsTail ? INSN_JMP_PV : INSN_JSR_PV, llvm::endianness::little);
+    if (Info.IsTail)
+      return;
     return emitLdgp(Alpha::R26, CB, Fixups, STI);
   }
   default:

@@ -41,8 +41,11 @@ enum NodeType : unsigned {
   // return address, so it returns straight to our caller.
   TC_RETURN,
 
-  // The -msmall-text form of a tail call: a single PC-relative br to the
-  // callee, which like jmp discards the return address.
+  // The direct forms of a tail call, carrying the callee symbol so the jmp can
+  // take the same hint and lituse_jsr relocations a direct jsr does, and the
+  // -msmall-text form, a single PC-relative br to the callee.
+  TC_RETURN_DIRECT,
+  TC_RETURN_DIRECT_LOCAL,
   TC_RETURN_BR,
 
   // A direct call: it carries the callee symbol, loads the procedure value from

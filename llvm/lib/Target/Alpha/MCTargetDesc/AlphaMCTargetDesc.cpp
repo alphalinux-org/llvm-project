@@ -104,6 +104,50 @@ Alpha::FieldOps Alpha::getFieldOps(unsigned Bytes) {
   llvm_unreachable("no field instructions for this width");
 }
 
+// See the comment on DirectCallInfo in AlphaMCTargetDesc.h.
+bool Alpha::getDirectCallInfo(unsigned Opc, Alpha::DirectCallInfo &Info) {
+  struct Row {
+    unsigned Opc;
+    Alpha::DirectCallInfo Info;
+  };
+  static constexpr Row Rows[] = {
+      {Alpha::JSRd, {3, false, true}},
+      {Alpha::JSRdl, {3, false, false}},
+      {Alpha::JSRtlsgd, {4, false, false}},
+      {Alpha::JSRtlsldm, {5, false, false}},
+      {Alpha::TCRETURNd, {3, true, true}},
+      {Alpha::TCRETURNdl, {3, true, false}},
+  };
+  for (const Row &R : Rows)
+    if (R.Opc == Opc) {
+      Info = R.Info;
+      return true;
+    }
+  return false;
+}
+
+// The names GNU as accepts, which are the R_ALPHA_LITUSE use types in
+// include/elf/alpha.h.
+const char *Alpha::getLituseName(unsigned Type) {
+  switch (Type) {
+  case 0:
+    return "lituse_addr";
+  case 1:
+    return "lituse_base";
+  case 2:
+    return "lituse_bytoff";
+  case 3:
+    return "lituse_jsr";
+  case 4:
+    return "lituse_tlsgd";
+  case 5:
+    return "lituse_tlsldm";
+  case 6:
+    return "lituse_jsrdirect";
+  }
+  llvm_unreachable("no name for this lituse use type");
+}
+
 static MCAsmInfo *createAlphaMCAsmInfo(const MCRegisterInfo &MRI,
                                        const Triple &TT,
                                        const MCTargetOptions &Options) {

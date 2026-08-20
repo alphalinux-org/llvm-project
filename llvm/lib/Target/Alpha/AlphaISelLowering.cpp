@@ -725,6 +725,10 @@ const char *AlphaTargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "AlphaISD::CALL";
   case AlphaISD::TC_RETURN:
     return "AlphaISD::TC_RETURN";
+  case AlphaISD::TC_RETURN_DIRECT:
+    return "AlphaISD::TC_RETURN_DIRECT";
+  case AlphaISD::TC_RETURN_DIRECT_LOCAL:
+    return "AlphaISD::TC_RETURN_DIRECT_LOCAL";
   case AlphaISD::TC_RETURN_BR:
     return "AlphaISD::TC_RETURN_BR";
   case AlphaISD::CALL_DIRECT:
@@ -1808,12 +1812,9 @@ SDValue AlphaTargetLowering::LowerDivRem(SDValue Op, SelectionDAG &DAG) const {
   return DAG.getCopyFromReg(Chain, DL, Alpha::R27, MVT::i64, Glue);
 }
 
-// Whether a global's address can be computed from the global pointer instead
-// of being loaded from the GOT.  A gp-relative address is an ldah/lda pair
-// covering a signed 32-bit displacement, which reaches anywhere in the data
-// segment, so the only question is whether the linker will let this reference
-// see the definition's own address.  This mirrors gcc's local_symbolic_operand.
-static bool isGprelAddressable(const GlobalValue &GV) {
+// Whether a relocation may name a global's definition directly, rather than
+// going through the GOT entry that stands in for it.
+static bool isDirectlyNameable(const GlobalValue &GV) {
   // A preemptible symbol's address is whatever the dynamic linker picks.
   if (!GV.isDSOLocal())
     return false;
@@ -1825,6 +1826,17 @@ static bool isGprelAddressable(const GlobalValue &GV) {
   if (const auto *Var = dyn_cast<GlobalVariable>(&GV))
     if (Var->isAbsoluteSymbolRef())
       return false;
+  return true;
+}
+
+// Whether a global's address can be computed from the global pointer instead
+// of being loaded from the GOT.  A gp-relative address is an ldah/lda pair
+// covering a signed 32-bit displacement, which reaches anywhere in the data
+// segment, so the only question is whether the linker will let this reference
+// see the definition's own address.  This mirrors gcc's local_symbolic_operand.
+static bool isGprelAddressable(const GlobalValue &GV) {
+  if (!isDirectlyNameable(GV))
+    return false;
   // dso_local is not enough on its own.  Under -fno-pic clang marks every
   // symbol dso_local, including a plain `extern` declaration of something that
   // in fact lives in a shared library.  A gp-relative reference is a promise
@@ -2223,7 +2235,8 @@ bool AlphaTargetLowering::calleeSharesGP(const GlobalValue &GV) const {
   // which the linker aims past the callee's ldgp: it runs on our gp by
   // construction.  -msmall-data is the promise that the module needs only one
   // gp at all; gcc's decl_has_samegp takes it as sufficient too.
-  if (Subtarget.hasSmallData() || Subtarget.hasSmallText())
+  if (Subtarget.hasSmallData() ||
+      (Subtarget.hasSmallText() && isDirectlyNameable(GV)))
     return true;
   // Otherwise only a definition in this module is known to sit in our gp
   // region: the linker may give another translation unit's, even one linked
@@ -2257,6 +2270,12 @@ SDValue AlphaTargetLowering::LowerCall(CallLoweringInfo &CLI,
       CLI.IsTailCall && isEligibleForTailCallOptimization(
                             MF.getFunction().getCallingConv(), CLI.CallConv,
                             CLI.IsVarArg, NumBytes, CLI.Outs, CLI.Callee);
+  // musttail is a guarantee, not a hint: the front end has promised the caller
+  // that this frame goes away.  Emitting an ordinary call instead would let
+  // the stack grow without bound, so say so rather than miscompile silently.
+  if (!IsTailCall && CLI.CB && CLI.CB->isMustTailCall())
+    report_fatal_error("failed to perform tail call elimination on a call "
+                       "site marked musttail");
   CLI.IsTailCall = IsTailCall;
 
   SDValue Chain = CLI.Chain;
@@ -2302,20 +2321,20 @@ SDValue AlphaTargetLowering::LowerCall(CallLoweringInfo &CLI,
   if (auto *G = dyn_cast<GlobalAddressSDNode>(Callee)) {
     TargetSym = DAG.getTargetGlobalAddress(G->getGlobal(), DL, MVT::i64);
     IsLocal = G->getGlobal()->isDSOLocal();
-    BsrCall = Subtarget.hasSmallText() && IsLocal;
+    // A bsr names the definition directly, so it needs the same guarantee a
+    // gp-relative address does: an ifunc must be reached through the GOT so the
+    // resolver's answer is used rather than the resolver itself, and an
+    // undefined weak symbol has no address to branch to at all.
+    BsrCall =
+        Subtarget.hasSmallText() && isDirectlyNameable(*G->getGlobal());
   } else if (auto *E = dyn_cast<ExternalSymbolSDNode>(Callee)) {
     // A runtime-library callee has no GlobalValue to ask about preemption, so
     // take the GOT: memcpy and friends are commonly the shared libc's.
     TargetSym = DAG.getTargetExternalSymbol(E->getSymbol(), MVT::i64);
   }
-  // An indirect callee is already a value, and is its own procedure value.  A
-  // tail call still takes its procedure value in a register: only the direct
-  // call instructions load their own so far.
+  // An indirect callee is already a value, and is its own procedure value.
   if (!TargetSym.getNode())
     RegsToPass.emplace_back(Alpha::R27, Callee);
-  else if (IsTailCall && !BsrCall)
-    RegsToPass.emplace_back(
-        Alpha::R27, DAG.getNode(AlphaISD::LITERAL, DL, MVT::i64, TargetSym));
 
   SDValue Glue;
   for (auto &R : RegsToPass) {
@@ -2323,8 +2342,28 @@ SDValue AlphaTargetLowering::LowerCall(CallLoweringInfo &CLI,
     Glue = Chain.getValue(1);
   }
 
-  const TargetRegisterInfo *TRI = Subtarget.getRegisterInfo();
-  const uint32_t *Mask = TRI->getCallPreservedMask(MF, CLI.CallConv);
+  // Which of the four forms the call takes.  A direct external call passes the
+  // callee symbol as the first operand so the jsr is tagged with the hint and
+  // lituse_jsr relocations; a direct local call carries only lituse_jsr; an
+  // indirect call has neither; and a bsr names the symbol on its own.  A tail
+  // call makes the same choice, and has its own opcode for each answer.
+  enum CallForm { BsrForm, HintForm, LocalForm, IndirectForm };
+  bool IsDirect = TargetSym.getNode() != nullptr;
+  CallForm Form = BsrCall     ? BsrForm
+                  : !IsDirect ? IndirectForm
+                  : IsLocal   ? LocalForm
+                              : HintForm;
+  static const unsigned Opcodes[2][4] = {
+      {AlphaISD::CALL_BSR, AlphaISD::CALL_DIRECT, AlphaISD::CALL_DIRECT_LOCAL,
+       AlphaISD::CALL},
+      {AlphaISD::TC_RETURN_BR, AlphaISD::TC_RETURN_DIRECT,
+       AlphaISD::TC_RETURN_DIRECT_LOCAL, AlphaISD::TC_RETURN}};
+
+  SmallVector<SDValue, 8> Ops(1, Chain);
+  if (IsDirect)
+    Ops.push_back(TargetSym);
+  for (auto &R : RegsToPass)
+    Ops.push_back(DAG.getRegister(R.first, R.second.getValueType()));
 
   // A tail call jumps through the procedure value in $27 (already copied
   // above), with the argument registers held live by the glue chain.  The
@@ -2332,44 +2371,23 @@ SDValue AlphaTargetLowering::LowerCall(CallLoweringInfo &CLI,
   // time we jump. No register mask is attached: nothing is live past the jump,
   // and jmp (unlike jsr) leaves $26 untouched, so a function whose only call is
   // a tail call does not clobber the return address and needs no frame to
-  // preserve it. Under -msmall-text there is no procedure value at all: the
-  // callee is in range of a PC-relative branch and shares the global pointer,
-  // so the jump is that branch and $27 is never written.
+  // preserve it. A direct tail call carries the callee symbol just as a direct
+  // call does, so the jmp takes the hint and lituse_jsr relocations and the
+  // linker can relax the pair into a br.  Under -msmall-text there is no
+  // procedure value at all and the jump is that br to begin with.
   if (IsTailCall) {
-    SmallVector<SDValue, 8> Ops(1, Chain);
-    if (BsrCall)
-      Ops.push_back(TargetSym);
-    for (auto &R : RegsToPass)
-      Ops.push_back(DAG.getRegister(R.first, R.second.getValueType()));
     if (Glue.getNode())
       Ops.push_back(Glue);
-    return DAG.getNode(BsrCall ? AlphaISD::TC_RETURN_BR : AlphaISD::TC_RETURN,
-                       DL, MVT::Other, Ops);
+    return DAG.getNode(Opcodes[1][Form], DL, MVT::Other, Ops);
   }
 
-  // A direct external call passes the callee symbol as the first operand so the
-  // jsr is tagged with the hint and lituse_jsr relocations; a direct local call
-  // carries only lituse_jsr; an indirect call has neither.
-  bool IsDirect = TargetSym.getNode() != nullptr;
-  bool WithHint = IsDirect && !IsLocal && !BsrCall;
-  SmallVector<SDValue, 8> Ops(1, Chain);
-  if (IsDirect)
-    Ops.push_back(TargetSym);
-  for (auto &R : RegsToPass)
-    Ops.push_back(DAG.getRegister(R.first, R.second.getValueType()));
-
-  Ops.push_back(DAG.getRegisterMask(Mask));
+  const TargetRegisterInfo *TRI = Subtarget.getRegisterInfo();
+  Ops.push_back(
+      DAG.getRegisterMask(TRI->getCallPreservedMask(MF, CLI.CallConv)));
   if (Glue.getNode())
     Ops.push_back(Glue);
 
-  unsigned CallOpc = AlphaISD::CALL;
-  if (BsrCall)
-    CallOpc = AlphaISD::CALL_BSR;
-  else if (WithHint)
-    CallOpc = AlphaISD::CALL_DIRECT;
-  else if (IsDirect)
-    CallOpc = AlphaISD::CALL_DIRECT_LOCAL;
-  Chain = DAG.getNode(CallOpc, DL, {MVT::Other, MVT::Glue}, Ops);
+  Chain = DAG.getNode(Opcodes[0][Form], DL, {MVT::Other, MVT::Glue}, Ops);
   Glue = Chain.getValue(1);
 
   Chain = DAG.getCALLSEQ_END(Chain, NumBytes, 0, Glue, DL);
