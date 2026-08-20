@@ -26,7 +26,8 @@ def callseq_start : SDNode<"ISD::CALLSEQ_START", SDT_AlphaCallSeqStart,
 def callseq_end   : SDNode<"ISD::CALLSEQ_END", SDT_AlphaCallSeqEnd,
                            [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue]>;
 
-let Defs = [R30], Uses = [R30] in {
+// Eliminated by frame lowering, so no scheduler ever sees these.
+let Defs = [R30], Uses = [R30], hasNoSchedulingInfo = 1 in {
 def ADJCALLSTACKDOWN : AlphaPseudo<(outs), (ins i64imm:$amt1, i64imm:$amt2),
                                    "#ADJCALLSTACKDOWN",
                                    [(callseq_start timm:$amt1, timm:$amt2)]>;
@@ -1200,6 +1201,9 @@ class AtomicRMW<PatFrag node>
   let usesCustomInserter = 1;
   let mayLoad = 1;
   let mayStore = 1;
+  // Replaced by the ldl_l/ldq_l retry loop during selection, so no scheduler
+  // ever sees one.
+  let hasNoSchedulingInfo = 1;
 }
 
 // 64-bit memory operand.
@@ -1250,6 +1254,9 @@ class AtomicCAS<PatFrag node>
   let usesCustomInserter = 1;
   let mayLoad = 1;
   let mayStore = 1;
+  // Replaced by the ldl_l/ldq_l retry loop during selection, so no scheduler
+  // ever sees one.
+  let hasNoSchedulingInfo = 1;
 }
 class AtomicCASvt<ValueType vt>
     : PatFrag<(ops node:$ptr, node:$cmp, node:$new),
