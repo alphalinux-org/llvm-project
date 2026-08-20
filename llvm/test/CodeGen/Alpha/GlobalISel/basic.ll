@@ -226,3 +226,29 @@ define void @calls() {
   ret void
 }
 
+; Choosing between two floating values is an fcmovne on the values themselves,
+; not a pair of integer registers and a round trip through memory.
+; CHECK-LABEL: fsel:
+; CHECK:      fcmovne
+; CHECK-NOT:  cmovne
+define double @fsel(i1 %c, double %a, double %b) {
+  %r = select i1 %c, double %a, double %b
+  ret double %r
+}
+
+; The same for the single-precision width, which is not widened to a quadword.
+; CHECK-LABEL: fsel32:
+; CHECK:      fcmovne
+; CHECK-NOT:  cmovne
+define float @fsel32(i1 %c, float %a, float %b) {
+  %r = select i1 %c, float %a, float %b
+  ret float %r
+}
+
+; An integer choice is still cmovne.
+; CHECK-LABEL: isel:
+; CHECK:      cmovne
+define i64 @isel(i1 %c, i64 %a, i64 %b) {
+  %r = select i1 %c, i64 %a, i64 %b
+  ret i64 %r
+}
