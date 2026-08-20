@@ -26,6 +26,11 @@
 
 using namespace llvm;
 
+// The two fixed instruction words a direct call is made of: the load of the
+// procedure value from its GOT slot, and the jsr through it.
+static constexpr uint32_t INSN_LDQ_PV = 0xa77d0000; // ldq $27, 0($29)
+static constexpr uint32_t INSN_JSR_PV = 0x6b5b4000; // jsr $26, ($27)
+
 // The branch a landing pad's gp reload is based on.  A zero displacement makes
 // it fall through to the ldah it puts the address of into $29.
 static constexpr uint32_t INSN_BR_GP = 0xc3a00000; // br $29, .+4
@@ -134,10 +139,14 @@ public:
   // precedes it.  Only the addend matters -- it holds the use type, jsr (3),
   // tlsgd (4) or tlsldm (5) -- and bfd says so outright: "the symbol associated
   // with GPDISP and LITUSE is immaterial".  Emit no symbol, as the gpdisp pair
-  // does, rather than naming .text, which the instruction need not be in.
-  void addLituse(unsigned UseType, SmallVectorImpl<MCFixup> &Fixups) const {
-    Fixups.push_back(MCFixup::create(0, MCConstantExpr::create(UseType, Ctx),
-                                     MCFixupKind(Alpha::fixup_alpha_lituse_jsr)));
+  // does, rather than naming .text: the instruction is not necessarily in it,
+  // and a function in its own section produced a relocation against a section
+  // it is not part of.
+  void addLituse(unsigned UseType, SmallVectorImpl<MCFixup> &Fixups,
+                 uint32_t Offset = 0) const {
+    Fixups.push_back(
+        MCFixup::create(Offset, MCConstantExpr::create(UseType, Ctx),
+                        MCFixupKind(Alpha::fixup_alpha_lituse_jsr)));
   }
   unsigned getTlsldmEncoding(const MCInst &MI, unsigned OpNo,
                              SmallVectorImpl<MCFixup> &Fixups,
@@ -353,9 +362,7 @@ void AlphaMCCodeEmitter::encodeInstruction(const MCInst &MI,
     // ldgp $29, 0($27): establish the GP from the procedure value.
     return emitLdgp(Alpha::R27, CB, Fixups, STI);
   case Alpha::LDGPself:
-    // br $29, .+4 followed by an ldgp reload from the address it just wrote:
-    // establish the GP at a landing pad, which the unwinder enters with no
-    // register holding anything the reload could be based on.
+    // br $29, .+4 followed by an ldgp reload from the address it just wrote.
     support::endian::write<uint32_t>(CB, INSN_BR_GP, llvm::endianness::little);
     return emitLdgp(Alpha::R29, CB, Fixups, STI);
   case Alpha::JSR:
@@ -369,28 +376,31 @@ void AlphaMCCodeEmitter::encodeInstruction(const MCInst &MI,
   case Alpha::JSRdl:
   case Alpha::JSRtlsgd:
   case Alpha::JSRtlsldm: {
-    // A direct jsr, or the jsr to __tls_get_addr in a dynamic TLS sequence.
-    // JSRd (external callee) also fills the hint field with an R_ALPHA_HINT
-    // while encoding its operand.  Every form emits an R_ALPHA_LITUSE
-    // relocation marking the jsr as a use of the GOT literal so the linker can
-    // relax it. JSRdl carries no hint: the linker relaxes a dso-local call
-    // into a direct branch, so there is no jsr left for the hint to predict.
-    // A hint does not itself inhibit that relaxation -- GNU as writes one on
-    // exactly this jsr and bfd relaxes it anyway.  The TLS forms carry none
-    // either: their symbol operand is the thread-local variable rather than
-    // __tls_get_addr, so there is nothing to hang one on.  The ldgp reload
-    // follows as for JSR.
-    size_t FirstFixup = Fixups.size();
-    uint32_t Bits = getBinaryCodeForInstr(MI, Fixups, STI);
-    addLituse(MI.getOpcode() == Alpha::JSRtlsgd    ? 4
-              : MI.getOpcode() == Alpha::JSRtlsldm ? 5
-                                                   : 3,
-              Fixups);
-    // GNU as puts the lituse ahead of the hint, and bfd only inspects the
-    // relocation immediately following a literal's, so match that order or the
-    // GNU linker will not relax a call that has both.
-    std::rotate(Fixups.begin() + FirstFixup, Fixups.end() - 1, Fixups.end());
-    support::endian::write(CB, Bits, llvm::endianness::little);
+    // A direct call, or the call to __tls_get_addr in a dynamic TLS sequence.
+    // Each loads its own procedure value, so that a linker deleting that load
+    // knows it is deleting the only use of it.
+    unsigned Op = MI.getOpcode();
+    const MCExpr *Callee = MI.getOperand(0).getExpr();
+
+    // ldq $27, callee($29) !literal
+    Fixups.push_back(MCFixup::create(CB.size(), Callee,
+                                     MCFixupKind(Alpha::fixup_alpha_literal)));
+    support::endian::write<uint32_t>(CB, INSN_LDQ_PV, llvm::endianness::little);
+
+    // The call, marked as the use of that literal so a linker can turn the pair
+    // into a direct branch.  A callee that cannot be reached that way -- one
+    // that is not dso-local -- takes a branch-prediction hint as well.  GNU as
+    // writes the lituse first and bfd only inspects the relocation right after
+    // a literal's, so the order is not cosmetic.
+    uint32_t At = CB.size();
+    addLituse(Op == Alpha::JSRtlsgd    ? 4
+              : Op == Alpha::JSRtlsldm ? 5
+                                       : 3,
+              Fixups, At);
+    if (Op == Alpha::JSRd)
+      Fixups.push_back(
+          MCFixup::create(At, Callee, MCFixupKind(Alpha::fixup_alpha_hint)));
+    support::endian::write<uint32_t>(CB, INSN_JSR_PV, llvm::endianness::little);
     return emitLdgp(Alpha::R26, CB, Fixups, STI);
   }
   default:

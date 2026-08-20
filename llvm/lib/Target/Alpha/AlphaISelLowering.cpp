@@ -1808,21 +1808,17 @@ SDValue AlphaTargetLowering::LowerGlobalTLSAddress(SDValue Op,
 
     SDValue Arg = DAG.getNode(IsGD ? AlphaISD::TLSGD : AlphaISD::TLSLDM, DL,
                               MVT::i64, TGA);
-    SDValue Callee =
-        DAG.getNode(AlphaISD::LITERAL, DL, MVT::i64,
-                    DAG.getTargetExternalSymbol("__tls_get_addr", MVT::i64));
+
+    SDValue Callee = DAG.getTargetExternalSymbol("__tls_get_addr", MVT::i64);
 
     SDValue Chain = DAG.getCALLSEQ_START(DAG.getEntryNode(), 0, 0, DL);
     SDValue Glue;
     Chain = DAG.getCopyToReg(Chain, DL, Alpha::R16, Arg, Glue);
     Glue = Chain.getValue(1);
-    Chain = DAG.getCopyToReg(Chain, DL, Alpha::R27, Callee, Glue);
-    Glue = Chain.getValue(1);
 
     const uint32_t *Mask =
         Subtarget.getRegisterInfo()->getCallPreservedMask(MF, CallingConv::C);
-    SDValue Ops[] = {Chain, DAG.getRegister(Alpha::R16, MVT::i64),
-                     DAG.getRegister(Alpha::R27, MVT::i64),
+    SDValue Ops[] = {Chain, Callee, DAG.getRegister(Alpha::R16, MVT::i64),
                      DAG.getRegisterMask(Mask), Glue};
     Chain = DAG.getNode(IsGD ? AlphaISD::CALL_TLSGD : AlphaISD::CALL_TLSLDM, DL,
                         {MVT::Other, MVT::Glue}, Ops);
@@ -2144,15 +2140,16 @@ SDValue AlphaTargetLowering::LowerCall(CallLoweringInfo &CLI,
   if (!MemOps.empty())
     Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other, MemOps);
 
-  // For a direct call the callee address is loaded from the GOT; remember the
-  // symbol so the jsr can carry its hint and lituse_jsr relocations.  A
-  // dso-local callee can be relaxed by the linker, so it takes only the
-  // lituse_jsr relocation (a hint on the jsr would inhibit that relaxation).
+  // A direct call names its callee, and the instruction loads the procedure
+  // value from the GOT itself: a linker may only delete that load if every use
+  // of it is a call it has just turned into a branch, so sharing one load
+  // between call sites would cost the relaxation.  A dso-local callee takes
+  // only the lituse_jsr relocation, since a hint on the jsr would inhibit it.
   // Under -msmall-text a direct call to a callee the linker resolves itself is
-  // a single bsr to the symbol, so it needs neither the procedure value loaded
-  // into $27 nor a global-pointer reload.  A preemptible callee still goes
-  // through the GOT: its address is the dynamic linker's to choose, and there
-  // is no pc-relative relocation against a dynamic symbol to name it with.
+  // a single bsr to the symbol, so it needs neither a procedure value nor a
+  // global-pointer reload.  A preemptible callee still goes through the GOT:
+  // its address is the dynamic linker's to choose, and there is no
+  // pc-relative relocation against a dynamic symbol to name it with.
   bool BsrCall = false;
   SDValue Callee = CLI.Callee;
   SDValue TargetSym;
@@ -2161,18 +2158,19 @@ SDValue AlphaTargetLowering::LowerCall(CallLoweringInfo &CLI,
     TargetSym = DAG.getTargetGlobalAddress(G->getGlobal(), DL, MVT::i64);
     IsLocal = G->getGlobal()->isDSOLocal();
     BsrCall = Subtarget.hasSmallText() && IsLocal;
-    if (!BsrCall)
-      Callee = DAG.getNode(AlphaISD::LITERAL, DL, MVT::i64, TargetSym);
   } else if (auto *E = dyn_cast<ExternalSymbolSDNode>(Callee)) {
     // A runtime-library callee has no GlobalValue to ask about preemption, so
     // take the GOT: memcpy and friends are commonly the shared libc's.
     TargetSym = DAG.getTargetExternalSymbol(E->getSymbol(), MVT::i64);
-    Callee = DAG.getNode(AlphaISD::LITERAL, DL, MVT::i64, TargetSym);
   }
-  // Otherwise the callee address is already a value; use it directly as the
-  // procedure value for an indirect call.  A bsr call needs no procedure value.
-  if (!BsrCall)
+  // An indirect callee is already a value, and is its own procedure value.  A
+  // tail call still takes its procedure value in a register: only the direct
+  // call instructions load their own so far.
+  if (!TargetSym.getNode())
     RegsToPass.emplace_back(Alpha::R27, Callee);
+  else if (IsTailCall && !BsrCall)
+    RegsToPass.emplace_back(
+        Alpha::R27, DAG.getNode(AlphaISD::LITERAL, DL, MVT::i64, TargetSym));
 
   SDValue Glue;
   for (auto &R : RegsToPass) {
@@ -2210,7 +2208,7 @@ SDValue AlphaTargetLowering::LowerCall(CallLoweringInfo &CLI,
   bool IsDirect = TargetSym.getNode() != nullptr;
   bool WithHint = IsDirect && !IsLocal && !BsrCall;
   SmallVector<SDValue, 8> Ops(1, Chain);
-  if (WithHint || BsrCall)
+  if (IsDirect)
     Ops.push_back(TargetSym);
   for (auto &R : RegsToPass)
     Ops.push_back(DAG.getRegister(R.first, R.second.getValueType()));

@@ -3,6 +3,12 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu -relocation-model=pic -O2 \
 ; RUN:   -filetype=obj < %s | llvm-readobj -r - | FileCheck %s --check-prefix=RELOC
 
+; And through the printed form: the descriptor, the literal and the call are
+; tied together by one sequence number, which the text has to carry.
+; RUN: llc -mtriple=alpha-unknown-linux-gnu -relocation-model=pic -O2 < %s \
+; RUN:   | llvm-mc -triple=alpha-unknown-linux-gnu -filetype=obj -o - \
+; RUN:   | llvm-readobj -r - | FileCheck %s --check-prefix=RELOC
+
 ; Local-dynamic TLS: pass the tlsldm module descriptor to __tls_get_addr for the
 ; module's TLS base, then add the variable's module-relative offset formed with
 ; ldah !dtprelhi / lda !dtprello.  The jsr carries a lituse_tlsldm relocation

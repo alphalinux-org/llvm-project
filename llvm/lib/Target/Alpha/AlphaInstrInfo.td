@@ -66,7 +66,8 @@ def AlphaCallDirect : SDNode<"AlphaISD::CALL_DIRECT", SDT_AlphaCallDirect,
 
 // A direct call to a dso-local callee: the jsr carries only lituse_jsr, no
 // hint, so the linker may relax it to a bsr.
-def AlphaCallDirectLocal : SDNode<"AlphaISD::CALL_DIRECT_LOCAL", SDTNone,
+def AlphaCallDirectLocal : SDNode<"AlphaISD::CALL_DIRECT_LOCAL",
+                                  SDT_AlphaCallDirect,
                                   [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
                                    SDNPVariadic]>;
 
@@ -81,10 +82,10 @@ def AlphaTCReturnBr : SDNode<"AlphaISD::TC_RETURN_BR", SDT_AlphaCallDirect,
 
 // Calls to __tls_get_addr in the general- and local-dynamic sequences.  The jsr
 // carries a lituse_tlsgd or lituse_tlsldm relocation so the linker can relax.
-def AlphaCallTlsgd : SDNode<"AlphaISD::CALL_TLSGD", SDTNone,
+def AlphaCallTlsgd : SDNode<"AlphaISD::CALL_TLSGD", SDT_AlphaCallDirect,
                             [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
                              SDNPVariadic]>;
-def AlphaCallTlsldm : SDNode<"AlphaISD::CALL_TLSLDM", SDTNone,
+def AlphaCallTlsldm : SDNode<"AlphaISD::CALL_TLSLDM", SDT_AlphaCallDirect,
                              [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
                               SDNPVariadic]>;
 
@@ -1181,55 +1182,43 @@ def JSR : MbrForm<0b01, (outs), (ins), "jsr $$26, ($$27)\n\tldgp $$29, 0($$26)",
   let Rb = 27;
 }
 
-// The call target of a direct jsr, carried only to attach relocations: the
-// 14-bit hint field is filled from it (R_ALPHA_HINT) and a lituse_jsr
-// relocation is emitted alongside.
-def calltarget : Operand<i64> {
-  let EncoderMethod = "getHintEncoding";
-}
+// The callee of a direct call.  It names the GOT slot the procedure value is
+// loaded from and, for a callee the linker cannot relax the call to, fills the
+// 14-bit branch-prediction hint (R_ALPHA_HINT).
+def calltarget : Operand<i64>;
 
-// A direct call: same as JSR but tagged with the callee symbol.
-let isCall = 1, Uses = [R27], Defs = [R26, R29], isCodeGenOnly = 1,
-    Size = 12 in
-def JSRd : MbrForm<0b01, (outs), (ins calltarget:$sym),
-                   "jsr $$26, ($$27)\n\tldgp $$29, 0($$26)", []> {
-  bits<14> sym;
-  let Ra = 26;
-  let Rb = 27;
-  let hint = sym;
+// A direct call.  The procedure value is loaded here rather than wherever the
+// address happened to be materialized: a linker may only delete the load if
+// every use of it is a call it has just turned into a branch, so each call
+// needs its own, exactly as gcc emits them.
+// Size is 4 (ldq) + 4 (jsr) + 8 (the ldgp expansion, see emitLdgp).
+let isCall = 1, Uses = [R29], Defs = [R26, R27, R29], isCodeGenOnly = 1,
+    isPseudo = 1, Size = 16 in {
+def JSRd : AlphaInst<(outs), (ins calltarget:$sym),
+                   "ldq $$27, $sym($$29)\t\t!literal\n\tjsr $$26, ($$27)"
+                   "\n\tldgp $$29, 0($$26)", []>;
+
+// A dso-local direct call, which takes only the lituse_jsr relocation: a hint
+// would pin the jsr and stop the linker relaxing it.
+def JSRdl : AlphaInst<(outs), (ins calltarget:$sym),
+                    "ldq $$27, $sym($$29)\t\t!literal\n\tjsr $$26, ($$27)"
+                    "\n\tldgp $$29, 0($$26)", []>;
+
+// The call to __tls_get_addr in a general- or local-dynamic sequence, whose
+// jsr carries a lituse_tlsgd or lituse_tlsldm instead.
+def JSRtlsgd : AlphaInst<(outs), (ins calltarget:$sym),
+                         "ldq $$27, $sym($$29)\t\t!literal"
+                         "\n\tjsr $$26, ($$27)\n\tldgp $$29, 0($$26)", []>;
+def JSRtlsldm : AlphaInst<(outs), (ins calltarget:$sym),
+                          "ldq $$27, $sym($$29)\t\t!literal"
+                          "\n\tjsr $$26, ($$27)\n\tldgp $$29, 0($$26)", []>;
 }
 def : Pat<(AlphaCallDirect tglobaladdr:$sym), (JSRd tglobaladdr:$sym)>;
 def : Pat<(AlphaCallDirect texternalsym:$sym), (JSRd texternalsym:$sym)>;
-
-// A dso-local direct call: only the lituse_jsr relocation, emitted in the code
-// emitter; no callee operand is needed since lituse references the text section.
-let isCall = 1, Uses = [R27], Defs = [R26, R29], isCodeGenOnly = 1,
-    Size = 12 in
-def JSRdl : MbrForm<0b01, (outs), (ins),
-                    "jsr $$26, ($$27)\n\tldgp $$29, 0($$26)",
-                    [(AlphaCallDirectLocal)]> {
-  let Ra = 26;
-  let Rb = 27;
-}
-
-// The jsr to __tls_get_addr in a general- or local-dynamic sequence.  Encoded
-// like JSR, but the code emitter attaches a lituse_tlsgd or lituse_tlsldm
-// relocation so the linker can relax the sequence.
-let isCall = 1, Uses = [R27], Defs = [R26, R29], isCodeGenOnly = 1,
-    Size = 12 in {
-def JSRtlsgd : MbrForm<0b01, (outs), (ins),
-                       "jsr $$26, ($$27)\n\tldgp $$29, 0($$26)",
-                       [(AlphaCallTlsgd)]> {
-  let Ra = 26;
-  let Rb = 27;
-}
-def JSRtlsldm : MbrForm<0b01, (outs), (ins),
-                        "jsr $$26, ($$27)\n\tldgp $$29, 0($$26)",
-                        [(AlphaCallTlsldm)]> {
-  let Ra = 26;
-  let Rb = 27;
-}
-}
+def : Pat<(AlphaCallDirectLocal tglobaladdr:$sym), (JSRdl tglobaladdr:$sym)>;
+def : Pat<(AlphaCallDirectLocal texternalsym:$sym), (JSRdl texternalsym:$sym)>;
+def : Pat<(AlphaCallTlsgd texternalsym:$sym), (JSRtlsgd texternalsym:$sym)>;
+def : Pat<(AlphaCallTlsldm texternalsym:$sym), (JSRtlsldm texternalsym:$sym)>;
 
 // A bare jsr word (no ldgp reload); the assembler emits it for `jsr $Ra, ($Rb)`
 // and the disassembler decodes a jsr word with no branch-prediction hint to it.
@@ -2092,8 +2081,6 @@ def : Pat<(brind GPRC:$r), (JMP GPRC:$r)>;
 // Tail call: jump to the procedure value in $27 without saving a return
 // address, so the callee returns straight to our caller.  The epilogue, which
 // tears down the frame and restores $26, is inserted before this terminator.
-// isCodeGenOnly, because its encoding is a jmp and the asm matcher and the
-// decoder would otherwise have two ways to spell the same word.
 let isCall = 1, isTerminator = 1, isReturn = 1, isBarrier = 1, Uses = [R27],
     isCodeGenOnly = 1 in
 def TCRETURN : MbrForm<0b00, (outs), (ins), "jmp $$31, ($$27), 0",
