@@ -12,6 +12,7 @@ include "AlphaFeatures.td"
 include "AlphaRegisterInfo.td"
 include "AlphaCallingConv.td"
 include "AlphaInstrInfo.td"
+include "AlphaSchedule.td"
 
 defm : RemapAllTargetPseudoPointerOperands<GPRC>;
 
@@ -25,14 +26,17 @@ def AlphaInstrInfo : InstrInfo;
 class Proc<string Name, list<SubtargetFeature> Features>
     : Processor<Name, NoItineraries, Features>;
 
-def : Proc<"generic", []>;
+// The out-of-order generations use the 21264 model; the generic CPU defaults to
+// it.  The in-order ones get models of their own below.
 def : Proc<"ev4",     []>;
 def : Proc<"ev45",    []>;
 def : Proc<"ev5",     []>;
 def : Proc<"ev56",    [FeatureBWX]>;
 def : Proc<"pca56",   [FeatureBWX, FeatureMVI]>;
-def : Proc<"ev6",     [FeatureBWX, FeatureMVI, FeatureFIX]>;
-def : Proc<"ev67",    [FeatureBWX, FeatureMVI, FeatureFIX, FeatureCIX]>;
+def : ProcessorModel<"generic", Alpha21264Model, []>;
+def : ProcessorModel<"ev6",     Alpha21264Model, [FeatureBWX, FeatureMVI, FeatureFIX]>;
+def : ProcessorModel<"ev67",    Alpha21264Model,
+                     [FeatureBWX, FeatureMVI, FeatureFIX, FeatureCIX]>;
 
 //===----------------------------------------------------------------------===//
 // Target declaration.
