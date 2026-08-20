@@ -38,6 +38,7 @@ define i32 @f(i32 %x) {
 declare dso_local i32 @h(i32)
 
 ; LARGE-LABEL: tail:
+; LARGE: ldq $27, h($29)
 ; LARGE: jmp $31, ($27), 0
 
 ; SMALL-LABEL: tail:
@@ -75,6 +76,33 @@ define i32 @interposable_tail(i32 %x) {
   %r = tail call i32 @preemptible(i32 %x)
   ret i32 %r
 }
+
+; A dso_local ifunc still has to go through the GOT: a bsr would branch to the
+; resolver rather than to what it returned.
+; SMALL-LABEL: call_ifunc:
+; SMALL: ldq $27, resolved($29)
+; SMALL-NOT: bsr
+define i32 @call_ifunc(i32 %x) {
+  %r = call i32 @resolved(i32 %x)
+  ret i32 %r
+}
+
+@resolved = dso_local ifunc i32 (i32), ptr @resolver
+define internal ptr @resolver() {
+  ret ptr null
+}
+
+; And an undefined weak symbol has no address to branch to; the GOT entry
+; supplies the zero it has to read as.
+; SMALL-LABEL: call_weak:
+; SMALL: ldq $27, maybe($29)
+; SMALL-NOT: bsr
+define i32 @call_weak(i32 %x) {
+  %r = call i32 @maybe(i32 %x)
+  ret i32 %r
+}
+
+declare extern_weak dso_local i32 @maybe(i32)
 
 ; The relocation is the point of the !samegp suffix, so check the object file:
 ; assembly output alone would not catch a branch emitted as a plain BRADDR.
