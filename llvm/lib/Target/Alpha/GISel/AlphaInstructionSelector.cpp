@@ -49,6 +49,10 @@ private:
   bool selectImpl(MachineInstr &I, CodeGenCoverage &CoverageInfo) const;
   bool selectLoadStore(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectICmp(MachineInstr &I, MachineRegisterInfo &MRI) const;
+  bool selectFCmp(MachineInstr &I, MachineRegisterInfo &MRI) const;
+  Register emitFCmpBit(MachineInstr &I, MachineRegisterInfo &MRI,
+                       unsigned Opc, Register LHS, Register RHS,
+                       Register Dst = Register()) const;
   bool selectConstant(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectSelect(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectFConstant(MachineInstr &I, MachineRegisterInfo &MRI) const;
@@ -430,6 +434,165 @@ bool AlphaInstructionSelector::selectICmp(MachineInstr &I,
   return true;
 }
 
+// A floating compare leaves 2.0 or 0.0 in a floating register, so the answer is
+// the bits of that moved into an integer register and shifted right by 62.
+Register AlphaInstructionSelector::emitFCmpBit(MachineInstr &I,
+                                               MachineRegisterInfo &MRI,
+                                               unsigned Opc, Register LHS,
+                                               Register RHS,
+                                               Register Dst) const {
+  MachineBasicBlock &MBB = *I.getParent();
+  Register FPRes = MRI.createVirtualRegister(&Alpha::FPRCRegClass);
+  MachineInstrBuilder Cmp =
+      BuildMI(MBB, I, I.getDebugLoc(), TII.get(Opc), FPRes)
+          .addUse(LHS)
+          .addUse(RHS);
+  constrainSelectedInstRegOperands(*Cmp, TII, TRI, RBI);
+
+  Register Bits = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  MachineInstrBuilder Move =
+      BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::MOVf2i), Bits)
+          .addUse(FPRes);
+  constrainSelectedInstRegOperands(*Move, TII, TRI, RBI);
+
+  Register Shifted = Dst ? Dst : MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  MachineInstrBuilder Shift =
+      BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::SRLi), Shifted)
+          .addUse(Bits)
+          .addImm(62);
+  constrainSelectedInstRegOperands(*Shift, TII, TRI, RBI);
+  return Shifted;
+}
+
+// There are only the equal, less-than and less-or-equal instructions: the
+// greater forms swap the operands, and a condition that admits an unordered
+// pair is its ordered opposite inverted.  ord and uno, and the two conditions
+// that separate equality from orderedness, need two compares combined.
+//
+// None of this holds a NaN at arm's length: cmpteq, cmptlt and cmptle signal
+// an invalid operation for one unless they carry the /su qualifier, which
+// -mieee supplies and the trap-mode machinery attaches.  What the sequences
+// below rely on is only that an ordered compare answers false for a NaN, which
+// is also what the SelectionDAG path expands ord and uno into.
+bool AlphaInstructionSelector::selectFCmp(MachineInstr &I,
+                                          MachineRegisterInfo &MRI) const {
+  auto Pred = static_cast<CmpInst::Predicate>(I.getOperand(1).getPredicate());
+  Register Dst = I.getOperand(0).getReg();
+  Register LHS = I.getOperand(2).getReg();
+  Register RHS = I.getOperand(3).getReg();
+  MachineBasicBlock &MBB = *I.getParent();
+
+  // ord(a,b) is a == a && b == b; uno is its inverse.  one(a,b) is a < b ||
+  // b < a, which is false for a NaN, and ueq is its inverse.
+  unsigned CombineOpc = 0;
+  bool CombineInvert = false;
+  switch (Pred) {
+  case CmpInst::FCMP_ORD:
+    CombineOpc = Alpha::AND;
+    break;
+  case CmpInst::FCMP_UNO:
+    CombineOpc = Alpha::AND;
+    CombineInvert = true;
+    break;
+  case CmpInst::FCMP_ONE:
+    CombineOpc = Alpha::BIS;
+    break;
+  case CmpInst::FCMP_UEQ:
+    CombineOpc = Alpha::BIS;
+    CombineInvert = true;
+    break;
+  default:
+    break;
+  }
+
+  if (CombineOpc) {
+    bool IsOrdered = CombineOpc == Alpha::AND;
+    Register A = emitFCmpBit(I, MRI, IsOrdered ? Alpha::CMPTEQ : Alpha::CMPTLT,
+                             LHS, IsOrdered ? LHS : RHS);
+    Register B = emitFCmpBit(I, MRI, IsOrdered ? Alpha::CMPTEQ : Alpha::CMPTLT,
+                             RHS, IsOrdered ? RHS : LHS);
+    Register CombineDst =
+        CombineInvert ? MRI.createVirtualRegister(&Alpha::GPRCRegClass) : Dst;
+    MachineInstrBuilder Combine =
+        BuildMI(MBB, I, I.getDebugLoc(), TII.get(CombineOpc), CombineDst)
+            .addUse(A)
+            .addUse(B);
+    constrainSelectedInstRegOperands(*Combine, TII, TRI, RBI);
+    if (CombineInvert) {
+      MachineInstrBuilder Xor =
+          BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::XORi), Dst)
+              .addUse(CombineDst)
+              .addImm(1);
+      constrainSelectedInstRegOperands(*Xor, TII, TRI, RBI);
+    }
+    I.eraseFromParent();
+    return true;
+  }
+
+  unsigned Opc;
+  bool Swap = false;
+  bool Invert = false;
+  switch (Pred) {
+  case CmpInst::FCMP_OEQ:
+    Opc = Alpha::CMPTEQ;
+    break;
+  case CmpInst::FCMP_UNE:
+    Opc = Alpha::CMPTEQ;
+    Invert = true;
+    break;
+  case CmpInst::FCMP_OLT:
+    Opc = Alpha::CMPTLT;
+    break;
+  case CmpInst::FCMP_OLE:
+    Opc = Alpha::CMPTLE;
+    break;
+  case CmpInst::FCMP_OGT:
+    Opc = Alpha::CMPTLT;
+    Swap = true;
+    break;
+  case CmpInst::FCMP_OGE:
+    Opc = Alpha::CMPTLE;
+    Swap = true;
+    break;
+  case CmpInst::FCMP_UGE:
+    Opc = Alpha::CMPTLT;
+    Invert = true;
+    break;
+  case CmpInst::FCMP_UGT:
+    Opc = Alpha::CMPTLE;
+    Invert = true;
+    break;
+  case CmpInst::FCMP_ULT:
+    Opc = Alpha::CMPTLE;
+    Swap = true;
+    Invert = true;
+    break;
+  case CmpInst::FCMP_ULE:
+    Opc = Alpha::CMPTLT;
+    Swap = true;
+    Invert = true;
+    break;
+  default:
+    // FCMP_TRUE and FCMP_FALSE do not reach instruction selection.
+    return false;
+  }
+
+  if (Swap)
+    std::swap(LHS, RHS);
+
+  Register Bit = emitFCmpBit(I, MRI, Opc, LHS, RHS, Invert ? Register() : Dst);
+  if (Invert) {
+    MachineInstrBuilder Xor =
+        BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::XORi), Dst)
+            .addUse(Bit)
+            .addImm(1);
+    constrainSelectedInstRegOperands(*Xor, TII, TRI, RBI);
+  }
+
+  I.eraseFromParent();
+  return true;
+}
+
 // cmovne leaves its destination alone when the condition is zero, so a select
 // is the false value in the destination and a conditional move of the true one
 // over it.
@@ -667,6 +830,8 @@ bool AlphaInstructionSelector::select(MachineInstr &I) {
     return selectLoadStore(I, MRI);
   case TargetOpcode::G_ICMP:
     return selectICmp(I, MRI);
+  case TargetOpcode::G_FCMP:
+    return selectFCmp(I, MRI);
   case TargetOpcode::G_CONSTANT:
     return selectConstant(I, MRI);
   case TargetOpcode::G_SELECT:
