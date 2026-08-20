@@ -50,6 +50,7 @@ private:
   bool selectImpl(MachineInstr &I, CodeGenCoverage &CoverageInfo) const;
   bool selectLoadStore(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectICmp(MachineInstr &I, MachineRegisterInfo &MRI) const;
+  bool selectConstant(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectFConstant(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectAluImm(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectNarrowArith(MachineInstr &I, MachineRegisterInfo &MRI) const;
@@ -513,6 +514,79 @@ bool AlphaInstructionSelector::selectICmp(MachineInstr &I,
   return true;
 }
 
+// lda carries a signed 16-bit displacement and ldah the same shifted left 16,
+// so a constant that fits in 32 bits is built from a pair of them; anything
+// wider goes in the constant pool.  A pattern covers the 16-bit case already.
+bool AlphaInstructionSelector::selectConstant(MachineInstr &I,
+                                              MachineRegisterInfo &MRI) const {
+  Register Dst = I.getOperand(0).getReg();
+  int64_t V = I.getOperand(1).getCImm()->getSExtValue();
+  MachineBasicBlock &MBB = *I.getParent();
+  MachineFunction &MF = *MBB.getParent();
+  const AlphaSubtarget &STI = MF.getSubtarget<AlphaSubtarget>();
+
+  // Emit a constant-materialization sequence, chaining the steps through fresh
+  // virtual registers so that only the last one writes Out.
+  auto emitSteps = [&](ArrayRef<Alpha::ConstantStep> Steps, Register Base,
+                       Register Out) {
+    Register Cur = Base;
+    for (auto [N, S] : enumerate(Steps)) {
+      Register Next = N + 1 == Steps.size()
+                          ? Out
+                          : MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+      MachineInstrBuilder MIB = emit(I, S.Opc, Next);
+      // sll takes its register operand first, ldah and lda their displacement.
+      if (S.Opc == Alpha::SLLi)
+        MIB.addUse(Cur).addImm(S.Imm);
+      else
+        MIB.addImm(S.Imm).addUse(Cur);
+      Cur = Next;
+    }
+  };
+
+  SmallVector<Alpha::ConstantStep, 8> Steps;
+  if (isInt<32>(V)) {
+    Alpha::buildConstant32Steps(static_cast<int32_t>(V), Steps);
+    emitSteps(Steps, Alpha::R31, Dst);
+    I.eraseFromParent();
+    return true;
+  }
+
+  // Wider than 32 bits.  -mbuild-constants asks for it to be built inline
+  // rather than fetched from the constant pool, because reaching the pool needs
+  // a global pointer: the dynamic loader runs before its own is established.
+  // The SelectionDAG path asks the same question in AlphaISelDAGToDAG.
+  if (STI.hasBuildConstants()) {
+    Alpha::buildConstantSteps(V, Steps);
+    emitSteps(Steps, Alpha::R31, Dst);
+    I.eraseFromParent();
+    return true;
+  }
+
+  // Otherwise load it from the constant pool, which is addressed from the
+  // global pointer.
+  MF.getInfo<AlphaMachineFunctionInfo>()->setUsesGP();
+  const Constant *C =
+      ConstantInt::get(Type::getInt64Ty(MF.getFunction().getContext()), V);
+  unsigned CPI = MF.getConstantPool()->getConstantPoolIndex(C, Align(8));
+
+  Register HighReg = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  MachineInstrBuilder High =
+      BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::LDAHg), HighReg)
+          .addConstantPoolIndex(CPI)
+          .addUse(Alpha::R29);
+  constrainSelectedInstRegOperands(*High, TII, TRI, RBI);
+
+  MachineInstrBuilder Load =
+      BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::LDQg), Dst)
+          .addConstantPoolIndex(CPI)
+          .addUse(HighReg);
+  constrainSelectedInstRegOperands(*Load, TII, TRI, RBI);
+
+  I.eraseFromParent();
+  return true;
+}
+
 // A floating-point constant lives in the constant pool, whose entries are
 // local and so addressed from the global pointer: ldah !gprelhigh, then the
 // load itself carries the !gprellow half.
@@ -905,6 +979,21 @@ bool AlphaInstructionSelector::selectInstr(MachineInstr &I) const {
     return true;
   }
 
+  // Zero lives in a register, so it needs no instruction at all -- but the
+  // imported `lda $r, 0($31)' pattern would take it first, and every consumer
+  // that could have read $31 directly (a store of zero, above all) would then
+  // read the materialised copy instead.
+  if (I.getOpcode() == TargetOpcode::G_CONSTANT &&
+      I.getOperand(1).getCImm()->isZero() &&
+      RBI.getRegBank(I.getOperand(0).getReg(), MRI, TRI)->getID() ==
+          Alpha::GPRRegBankID) {
+    Register Dst = I.getOperand(0).getReg();
+    emit(I, TargetOpcode::COPY, Dst).addUse(Alpha::R31);
+    RBI.constrainGenericRegister(Dst, Alpha::GPRCRegClass, MRI);
+    I.eraseFromParent();
+    return true;
+  }
+
   if (selectImpl(I, *CoverageInfo))
     return true;
 
@@ -931,6 +1020,8 @@ bool AlphaInstructionSelector::selectInstr(MachineInstr &I) const {
     return selectLoadStore(I, MRI);
   case TargetOpcode::G_ICMP:
     return selectICmp(I, MRI);
+  case TargetOpcode::G_CONSTANT:
+    return selectConstant(I, MRI);
   case TargetOpcode::G_FCONSTANT:
     return selectFConstant(I, MRI);
   case TargetOpcode::G_GLOBAL_VALUE: {

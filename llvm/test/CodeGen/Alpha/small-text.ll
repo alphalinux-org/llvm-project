@@ -2,6 +2,13 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu -mattr=+small-text < %s | FileCheck %s --check-prefix=SMALL
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu -mattr=+small-text -filetype=obj < %s \
 ; RUN:   | llvm-objdump -dr - | FileCheck %s --check-prefix=OBJ
+; RUN: llc -mtriple=alpha-unknown-linux-gnu -global-isel -global-isel-abort=1 < %s \
+; RUN:   | FileCheck %s --check-prefix=LARGE
+; RUN: llc -mtriple=alpha-unknown-linux-gnu -mattr=+small-text -global-isel \
+; RUN:   -global-isel-abort=1 < %s | FileCheck %s --check-prefix=SMALL
+; RUN: llc -mtriple=alpha-unknown-linux-gnu -mattr=+small-text -global-isel \
+; RUN:   -global-isel-abort=1 -filetype=obj < %s \
+; RUN:   | llvm-objdump -dr - | FileCheck %s --check-prefix=OBJ
 
 ; With -msmall-text a direct call is a single PC-relative branch: no procedure
 ; value is loaded through the GOT, the callee is not reached via jsr, and the
