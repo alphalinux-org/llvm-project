@@ -104,11 +104,11 @@ void AlphaVerifyInvariants::fail(const MachineFunction &MF,
 // 1. The load locked / store conditional window.
 
 static bool isLoadLocked(const MachineInstr &MI) {
-  return MI.getOpcode() == Alpha::LDQ_L;
+  return MI.getOpcode() == Alpha::LDL_L || MI.getOpcode() == Alpha::LDQ_L;
 }
 
 static bool isStoreConditional(const MachineInstr &MI) {
-  return MI.getOpcode() == Alpha::STQ_C;
+  return MI.getOpcode() == Alpha::STL_C || MI.getOpcode() == Alpha::STQ_C;
 }
 
 void AlphaVerifyInvariants::checkLLSCWindow(MachineFunction &MF) const {

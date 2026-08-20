@@ -42,3 +42,26 @@ define i32 @load32(ptr %p) {
   %v = load atomic i32, ptr %p monotonic, align 4
   ret i32 %v
 }
+
+; ldl sign-extends, so a zero-extended atomic i32 load needs the high half
+; cleared.  DAGCombiner::tryToFoldExtOfAtomicLoad folds the zext into the load,
+; which is what makes the extension type of the atomic load observable.
+; CHECK-LABEL: load32_zext:
+; CHECK:       ldl [[R:\$[0-9]+]], 0($16)
+; CHECK-NEXT:  zapnot [[R]], 15, $0
+; CHECK:       ret
+define i64 @load32_zext(ptr %p) {
+  %v = load atomic i32, ptr %p monotonic, align 4
+  %z = zext i32 %v to i64
+  ret i64 %z
+}
+
+; The sign-extending fold is the plain ldl.
+; CHECK-LABEL: load32_sext:
+; CHECK:       ldl $0, 0($16)
+; CHECK-NEXT:  ret
+define i64 @load32_sext(ptr %p) {
+  %v = load atomic i32, ptr %p monotonic, align 4
+  %s = sext i32 %v to i64
+  ret i64 %s
+}

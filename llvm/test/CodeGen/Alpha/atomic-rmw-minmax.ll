@@ -59,3 +59,36 @@ define i64 @nand(ptr %p, i64 %v) {
   %r = atomicrmw nand ptr %p, i64 %v monotonic
   ret i64 %r
 }
+
+; A sub-word unsigned compare is done on sign-extended operands, which is
+; correct because sign extension preserves the unsigned ordering of a byte:
+; it maps [0,127] to itself and [128,255] above it, the same order those two
+; halves have as unsigned bytes.  Without BWX the extension is a pair of
+; shifts rather than sextb.
+; CHECK-LABEL: umin_i8:
+; CHECK:       sll {{\$[0-9]+}}, 56,
+; CHECK:       cmpule
+; CHECK:       ldq_l
+; CHECK:       stq_c
+define i8 @umin_i8(ptr %p, i8 %v) {
+  %r = atomicrmw umin ptr %p, i8 %v monotonic
+  ret i8 %r
+}
+
+; CHECK-LABEL: umax_i16:
+; CHECK:       sll {{\$[0-9]+}}, 48,
+; CHECK:       cmpult
+; CHECK:       ldq_l
+; CHECK:       stq_c
+define i16 @umax_i16(ptr %p, i16 %v) {
+  %r = atomicrmw umax ptr %p, i16 %v monotonic
+  ret i16 %r
+}
+
+; CHECK-LABEL: min_i32:
+; CHECK:       ldl_l
+; CHECK:       stl_c
+define i32 @min_i32(ptr %p, i32 %v) {
+  %r = atomicrmw min ptr %p, i32 %v monotonic
+  ret i32 %r
+}
