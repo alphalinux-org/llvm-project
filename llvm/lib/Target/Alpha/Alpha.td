@@ -26,14 +26,14 @@ def AlphaInstrInfo : InstrInfo;
 class Proc<string Name, list<SubtargetFeature> Features>
     : Processor<Name, NoItineraries, Features>;
 
-// The out-of-order generations use the 21264 model; the generic CPU defaults to
-// it.  The in-order ones get models of their own below.
-def : Proc<"ev4",     []>;
-def : Proc<"ev45",    []>;
+// Each generation uses its own scheduling model; the generic CPU defaults to
+// the EV6 model.
+def : ProcessorModel<"generic", Alpha21264Model, []>;
+def : ProcessorModel<"ev4",     Alpha21064Model, []>;
+def : ProcessorModel<"ev45",    Alpha21064Model, []>;
 def : ProcessorModel<"ev5",     Alpha21164Model, []>;
 def : ProcessorModel<"ev56",    Alpha21164Model, [FeatureBWX]>;
 def : ProcessorModel<"pca56",   Alpha21164Model, [FeatureBWX, FeatureMVI]>;
-def : ProcessorModel<"generic", Alpha21264Model, []>;
 def : ProcessorModel<"ev6",     Alpha21264Model, [FeatureBWX, FeatureMVI, FeatureFIX]>;
 def : ProcessorModel<"ev67",    Alpha21264Model,
                      [FeatureBWX, FeatureMVI, FeatureFIX, FeatureCIX]>;
