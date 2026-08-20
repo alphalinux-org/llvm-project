@@ -37,6 +37,9 @@ public:
   virtual RelExpr getRelExpr(RelType type, const Symbol &s,
                              const uint8_t *loc) const = 0;
   virtual RelType getDynRel(RelType type) const { return 0; }
+  // Alpha reaches data and GOT entries with a 16-bit displacement from gp, so
+  // a large link needs several gp values, one per group of input files.
+  virtual uint64_t getGp(const InputFile *f) const { return 0; }
   virtual void writeGotPltHeader(uint8_t *buf) const {}
   virtual void writeGotHeader(uint8_t *buf) const {}
   virtual void writeGotPlt(uint8_t *buf, const Symbol &s) const {}
