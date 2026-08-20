@@ -1389,6 +1389,7 @@ class AtomicCASvt<ValueType vt>
   let MemoryVT = vt;
 }
 def ATOMIC_CMPXCHG_I64 : AtomicCAS<AtomicCASvt<i64>>;
+def ATOMIC_CMPXCHG_I32 : AtomicCAS<AtomicCASvt<i32>>;
 def ATOMIC_CMPXCHG_I16 : AtomicCAS<AtomicCASvt<i16>>;
 def ATOMIC_CMPXCHG_I8  : AtomicCAS<AtomicCASvt<i8>>;
 

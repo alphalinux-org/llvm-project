@@ -1280,6 +1280,10 @@ AlphaTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
     return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_CAS_LOOP,
                           /*NumScratch=*/2, /*NumDefs=*/1,
                           {0});
+  case Alpha::ATOMIC_CMPXCHG_I32:
+    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_CAS_LOOP,
+                          /*NumScratch=*/2, /*NumDefs=*/1,
+                          {1});
   default:
     break;
   }

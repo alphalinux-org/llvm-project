@@ -237,9 +237,8 @@ bool AlphaExpandAtomicPseudo::expandAtomicCmpXchg(
   Register Cmp = MI.getOperand(4).getReg();
   Register New = MI.getOperand(5).getReg();
   bool Is32 = MI.getOperand(6).getImm() != 0;
-  assert(!Is32 && "no longword load locked/store conditional yet");
-  unsigned LLOpc = Alpha::LDQ_L;
-  unsigned SCOpc = Alpha::STQ_C;
+  unsigned LLOpc = Is32 ? Alpha::LDL_L : Alpha::LDQ_L;
+  unsigned SCOpc = Is32 ? Alpha::STL_C : Alpha::STQ_C;
 
   SmallVector<MachineBasicBlock *, 3> Blocks;
   splitBlock(MBB, MI, Blocks, 3);
