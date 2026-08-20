@@ -27,6 +27,10 @@ using namespace llvm::jitlink;
 
 namespace {
 
+// st_other bits 7 and 3 say how a callee sets up its own global pointer, and
+// so whether a !samegp caller may skip the two-instruction gp load.
+enum { STO_ALPHA_NOPV = 0x80, STO_ALPHA_STD_GPLOAD = 0x88 };
+
 constexpr StringRef ELFGOTSymbolName = "_GLOBAL_OFFSET_TABLE_";
 
 Error buildTables_ELF_alpha(LinkGraph &G) {
@@ -200,6 +204,25 @@ private:
       break;
     case ELF::R_ALPHA_BRADDR:
       Kind = alpha::BranchPCRel21ToPLT;
+      break;
+    case ELF::R_ALPHA_BRSGP:
+      // A !samegp call leaves $27 unset and lands past the callee's gp-load
+      // prologue, whose length the callee advertises in st_other. Aiming a
+      // stub at it would run the stub from the middle, and branching past a
+      // prologue a callee never announced leaves gp wrong, so neither is
+      // guessed at -- which is how bfd and lld treat this relocation too.
+      switch ((*ObjSymbol)->st_other & STO_ALPHA_STD_GPLOAD) {
+      case STO_ALPHA_NOPV:
+        break;
+      case STO_ALPHA_STD_GPLOAD:
+        Addend += 8;
+        break;
+      default:
+        return make_error<JITLinkError>(
+            "!samegp relocation against symbol without .prologue: " +
+            *GraphSymbol->getName());
+      }
+      Kind = alpha::Branch21PCRel;
       break;
     case ELF::R_ALPHA_HINT:
       Kind = alpha::Hint14PCRel;
