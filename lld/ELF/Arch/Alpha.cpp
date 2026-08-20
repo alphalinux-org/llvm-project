@@ -52,15 +52,40 @@ using namespace lld::elf;
 enum { STO_ALPHA_NOPV = 0x80, STO_ALPHA_STD_GPLOAD = 0x88 };
 
 // The addend of an R_ALPHA_LITUSE says how the annotated instruction uses the
-// literal it was paired with. Only a call can become a direct branch.
-enum { LITUSE_ALPHA_JSR = 3 };
+// literal it was paired with: a call, or the call in a dynamic TLS sequence.
+enum { LITUSE_ALPHA_JSR = 3, LITUSE_ALPHA_TLSGD = 4, LITUSE_ALPHA_TLSLDM = 5 };
 
-// The instruction opcodes --relax has to recognize or produce, and the unop
-// (`ldq_u $31, 0($30)`) that replaces a load it deletes. jsr and jmp share an
-// opcode and are told apart by their function field.
-enum { OP_JSR = 0x1a, OP_LDQ = 0x29, OP_BR = 0x30, OP_BSR = 0x34 };
+// The instruction opcodes --relax has to recognize or produce. jsr and jmp
+// share an opcode and are told apart by their function field.
+enum {
+  OP_LDA = 0x08,
+  OP_LDAH = 0x09,
+  OP_JSR = 0x1a,
+  OP_LDQ = 0x29,
+  OP_BR = 0x30,
+  OP_BSR = 0x34
+};
 enum { FUNC_JMP = 0, FUNC_JSR = 1 };
-constexpr uint32_t INSN_UNOP = 0x2ffe0000;
+
+// Whole instructions --relax writes: the canonical no-op, the PALcode call that
+// reads the thread pointer into $0, and the add of a thread-pointer offset in
+// $16 to it, which together stand in for a call to __tls_get_addr.
+constexpr uint32_t INSN_UNOP = 0x2ffe0000;   // ldq_u $31, 0($30)
+constexpr uint32_t INSN_RDUNIQ = 0x0000009e; // call_pal rduniq
+// $16 here is deliberate and is not the `arg' register the first instruction
+// pair is rewritten with. The argument reaches __tls_get_addr in $16 whatever
+// register the offset was computed in: if a compiler hoisted the first pair out
+// of a loop and used another register, it left a move into $16 ahead of the
+// call, and that move is not part of the sequence being rewritten. So by this
+// point $16 holds the offset either way. bfd hardcodes 16 here for the same
+// reason (elf64_alpha_relax_tls_get_addr).
+constexpr uint32_t INSN_ADDQ_TP = 0x42000400; // addq $16, $0, $0
+
+// A memory-format instruction with a zero displacement, which a relocation at
+// the same offset fills in.
+static uint32_t memInsn(unsigned op, unsigned ra, unsigned rb) {
+  return (op << 26) | (ra << 21) | (rb << 16);
+}
 
 // The kinds of value a GOT entry can hold. Two kinds for the same symbol are
 // distinct entries.
@@ -460,10 +485,12 @@ uint64_t Alpha::getGotEntry(Symbol &sym, int64_t addend, GotKind kind) {
   return off;
 }
 
-// Alpha keeps all TLS GOT slots addressed through gp, and its GD/LD sequences
-// call __tls_get_addr through a separate R_ALPHA_LITERAL, so a GD or LD
-// relocation cannot be rewritten into IE or LE without also rewriting the
-// call. No TLS optimization is performed; every model uses its own GOT slots.
+// Alpha addresses every TLS GOT slot through gp, and its general- and
+// local-dynamic sequences call __tls_get_addr through a separate
+// R_ALPHA_LITERAL, so a GD or LD relocation cannot be rewritten into IE or LE
+// on its own. relaxTlsCall rewrites the whole five-instruction sequence at
+// once; without --relax, or where the rewrite does not apply, every model keeps
+// its own GOT slots.
 template <class ELFT, class RelTy>
 void Alpha::scanSectionImpl(InputSectionBase &sec, Relocs<RelTy> rels,
                             unsigned shard) {
@@ -499,6 +526,107 @@ void Alpha::scanSectionImpl(InputSectionBase &sec, Relocs<RelTy> rels,
   }
   // The candidate the R_ALPHA_LITUSE relocations being scanned belong to.
   int curLit = -1;
+  // Offsets of the relocations a rewritten TLS sequence has already consumed.
+  llvm::DenseSet<uint64_t> tlsRelaxed;
+
+  // Rewrite a general- or local-dynamic sequence into initial- or local-exec.
+  // gcc and clang both emit it as
+  //
+  //     lda  $16, x($gp)                !tlsgd
+  //     ldq  $27, __tls_get_addr($gp)   !literal
+  //     jsr  $26, ($27)                 !lituse_tlsgd
+  //     ldah $29, 0($26)                !gpdisp
+  //     lda  $29, 0($29)
+  //
+  // and the call can be replaced by reading the thread pointer directly:
+  //
+  //     ldah $16, x($31)                !tprelhi     (or ldq $16, x($gp)
+  //     !gottprel) lda  $16, x($16)                !tprello     (or unop)
+  //     call_pal rduniq
+  //     addq $16, $0, $0
+  //     unop
+  //
+  // Like bfd, this only applies in a non-PIC executable: everywhere else the
+  // thread-pointer offset is not a link-time constant and the module the symbol
+  // belongs to is not necessarily this one. Local exec needs the symbol to be
+  // non-preemptible as well; otherwise the offset still comes from the GOT, but
+  // through one entry instead of two plus a literal.
+  auto relaxTlsCall = [&](auto it, RelType type, Symbol &sym,
+                          int64_t addend) -> bool {
+    if (!canRelax || ctx.arg.isPic)
+      return false;
+    bool isGd = type == R_ALPHA_TLSGD;
+    // The literal that loads __tls_get_addr and the lituse that marks the call
+    // must follow immediately, as GNU as emits them.
+    auto lit = it, use = it;
+    if (++lit == rels.end() || ++(use = lit) == rels.end())
+      return false;
+    if (lit->getType(false) != R_ALPHA_LITERAL ||
+        use->getType(false) != R_ALPHA_LITUSE ||
+        rs.getAddend<ELFT>(*use, R_ALPHA_LITUSE) !=
+            (isGd ? LITUSE_ALPHA_TLSGD : LITUSE_ALPHA_TLSLDM))
+      return false;
+    // The gp reload after the call is what the last two instructions are.
+    uint64_t gpdispOff = use->r_offset + 4;
+    auto gpdisp = use;
+    while (++gpdisp != rels.end() && gpdisp->r_offset <= gpdispOff)
+      if (gpdisp->r_offset == gpdispOff &&
+          gpdisp->getType(false) == R_ALPHA_GPDISP)
+        break;
+    if (gpdisp == rels.end() || gpdisp->r_offset != gpdispOff ||
+        gpdisp->getType(false) != R_ALPHA_GPDISP)
+      return false;
+
+    // Rewriting in place must not reorder the register lifetimes, so the
+    // instructions have to appear in the order the relocations do.
+    uint64_t p0 = it->r_offset, p1 = lit->r_offset, p2 = use->r_offset,
+             p3 = gpdispOff,
+             p4 = p3 + rs.getAddend<ELFT>(*gpdisp, R_ALPHA_GPDISP);
+    if (!(p0 < p1 && p1 < p2 && p2 < p3) || p4 + 4 > sec.content().size() ||
+        p0 + 4 > sec.content().size())
+      return false;
+
+    // The register the sequence computes its argument in. A compiler may hoist
+    // part of the sequence and use something other than $16, moving it into
+    // place before the call, so only the first pair may use this register.
+    unsigned arg = (read32le(sec.content().data() + p0) >> 21) & 31;
+
+    // Local exec needs a link-time thread-pointer offset, and needs the two
+    // instructions to be adjacent so the offset can be split across them.
+    if (!sym.isPreemptible && p0 + 4 == p1) {
+      // A local-dynamic sequence resolves to the module's own TLS block, which
+      // is this executable's, so its offset is that of the block itself.
+      RelExpr expr = isGd ? R_TPREL : RE_ALPHA_TPREL_BASE;
+      Symbol *target = isGd ? &sym : ctx.dummySym;
+      int64_t off = isGd ? addend : 0;
+      sec.addReloc({RE_ALPHA_RELAX_INSN, R_ALPHA_NONE, p0,
+                    memInsn(OP_LDAH, arg, 31), &sym});
+      sec.addReloc({expr, R_ALPHA_TPRELHI, p0, off, target});
+      sec.addReloc({RE_ALPHA_RELAX_INSN, R_ALPHA_NONE, p1,
+                    memInsn(OP_LDA, arg, arg), &sym});
+      sec.addReloc({expr, R_ALPHA_TPRELLO, p1, off, target});
+    } else if (isGd) {
+      // Initial exec: one GOT entry holding the thread-pointer offset.
+      sec.addReloc({RE_ALPHA_RELAX_INSN, R_ALPHA_NONE, p0,
+                    memInsn(OP_LDQ, arg, 29), &sym});
+      sec.addReloc({RE_ALPHA_GOT, R_ALPHA_GOTTPREL, p0,
+                    int64_t(getGotEntry(sym, addend, GK_TpOff)), &sym});
+      sec.addReloc({RE_ALPHA_RELAX_INSN, R_ALPHA_NONE, p1, INSN_UNOP, &sym});
+    } else {
+      return false;
+    }
+
+    sec.addReloc({RE_ALPHA_RELAX_INSN, R_ALPHA_NONE, p2, INSN_RDUNIQ, &sym});
+    sec.addReloc({RE_ALPHA_RELAX_INSN, R_ALPHA_NONE, p3, INSN_ADDQ_TP, &sym});
+    sec.addReloc({RE_ALPHA_RELAX_INSN, R_ALPHA_NONE, p4, INSN_UNOP, &sym});
+
+    // The literal, the lituse, the gp reload and any hint on the call are all
+    // gone with the call itself.
+    tlsRelaxed.insert(p1);
+    tlsRelaxed.insert(p2);
+    tlsRelaxed.insert(p3);
+    return true;
+  };
 
   // All of a file's code shares one gp, so a partition can only be closed at a
   // file boundary. Close it whenever what is left of it cannot hold everything
@@ -531,6 +659,10 @@ void Alpha::scanSectionImpl(InputSectionBase &sec, Relocs<RelTy> rels,
         rs.maybeReportUndefined(cast<Undefined>(sym), offset))
       continue;
     int64_t addend = rs.getAddend<ELFT>(*it, type);
+
+    // Everything a rewritten TLS sequence covers has already been dealt with.
+    if (!tlsRelaxed.empty() && tlsRelaxed.contains(offset))
+      continue;
 
     // An R_ALPHA_LITUSE annotates the instruction that uses the literal loaded
     // for the R_ALPHA_LITERAL it follows, so anything else in between ends the
@@ -615,10 +747,14 @@ void Alpha::scanSectionImpl(InputSectionBase &sec, Relocs<RelTy> rels,
                     int64_t(getGotEntry(sym, addend, GK_DtpOff)), &sym});
       continue;
     case R_ALPHA_TLSGD:
+      if (relaxTlsCall(it, type, sym, addend))
+        continue;
       sec.addReloc({RE_ALPHA_GOT, type, offset,
                     int64_t(getGotEntry(sym, addend, GK_DynTls)), &sym});
       continue;
     case R_ALPHA_TLSLDM:
+      if (relaxTlsCall(it, type, sym, addend))
+        continue;
       // The symbol of a TLSLDM relocation is ignored: the result is always the
       // current module, so one entry per partition suffices.
       sec.addReloc({RE_ALPHA_GOT, type, offset,
@@ -779,7 +915,8 @@ bool Alpha::relaxOnce(int pass) const {
     if (dropLoad && relaxed == c.jsrOffsets.size()) {
       Relocation &r = c.sec->relocations[relocIndex.find(c.litOffset)->second];
       ++dropped[uint64_t(r.addend)];
-      r.expr = RE_ALPHA_RELAX_NOP;
+      r.expr = RE_ALPHA_RELAX_INSN;
+      r.addend = INSN_UNOP;
     }
   }
   flush();
@@ -898,8 +1035,10 @@ void Alpha::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
   // A relaxed call replaces the instruction rather than patching a field, so it
   // is keyed on the expression; the type stays the one the result needs.
   switch (rel.expr) {
-  case RE_ALPHA_RELAX_NOP:
-    write32le(loc, INSN_UNOP);
+  case RE_ALPHA_RELAX_INSN:
+    // A whole replacement instruction. Any ordinary relocation at this offset
+    // is applied after it and fills in the immediate.
+    write32le(loc, uint32_t(val));
     return;
   case RE_ALPHA_RELAX_JSR: {
     // bsr keeps the return-address register the jsr named in Ra, and pushes the

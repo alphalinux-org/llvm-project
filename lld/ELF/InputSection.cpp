@@ -846,9 +846,13 @@ uint64_t InputSectionBase::getRelocTargetVA(Ctx &ctx, const Relocation &r,
     return ctx.in.got->getVA() + a - ctx.target->getGp(file);
   case RE_ALPHA_RELAX_JSR:
     return r.sym->getVA(ctx, a) - p;
-  case RE_ALPHA_RELAX_NOP:
-    // The instruction is overwritten wholesale; there is no value to compute.
-    return 0;
+  case RE_ALPHA_RELAX_INSN:
+    // The addend is the replacement instruction, not a value to add.
+    return a;
+  case RE_ALPHA_TPREL_BASE:
+    // Like R_TPREL, but of the TLS block itself: the symbol is a placeholder
+    // whose address is zero.
+    return getTlsTpOffset(ctx, *r.sym) + a;
   case R_GOTPLTONLY_PC:
     return ctx.in.gotPlt->getVA() + a - p;
   case R_GOTREL:
