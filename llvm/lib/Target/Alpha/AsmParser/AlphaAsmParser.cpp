@@ -407,6 +407,18 @@ ParseStatus AlphaAsmParser::parseDirective(AsmToken DirectiveID) {
     getParser().eatToEndOfStatement();
     return ParseStatus::Success;
   }
+  // `.eflag <n>` sets flag bits in the ECOFF procedure descriptor; the asm
+  // printer emits `.eflag 48' for -mieee-conformant, so the integrated
+  // assembler has to read back what it writes.  The ELF object carries no
+  // procedure descriptor for the bits to land in, so they are accepted and
+  // dropped, as GNU as does for an ELF target.
+  if (ID == ".eflag") {
+    int64_t Flags;
+    if (getParser().parseAbsoluteExpression(Flags))
+      return ParseStatus::Failure;
+    getParser().eatToEndOfStatement();
+    return ParseStatus::Success;
+  }
   // `.usepv sym, std|no` sets the STO_ALPHA_STD_GPLOAD / STO_ALPHA_NOPV bit on
   // sym so the linker can optimize same-gp calls (R_ALPHA_BRSGP).  Used by
   // hand-written assembly that defines functions without .ent/.prologue.

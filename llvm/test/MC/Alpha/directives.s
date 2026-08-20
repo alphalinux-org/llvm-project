@@ -11,6 +11,7 @@ foo:
 	.prologue 1
 	.mask 0x4000000, -16
 	.fmask 0x0, 0
+	.eflag 48
 	ret ($26)
 	.end foo
 
