@@ -147,6 +147,80 @@ multiclass AlphaInstRW {
 }
 
 //===----------------------------------------------------------------------===//
+// 21164 (EV5): quad-issue, in-order.  Integer pipes E0 and E1 (shift, store,
+// and multiply are E0 only); floating-point add pipe FA and multiply pipe FM.
+// The 21164PC (PCA56) shares this core and adds the motion-video instructions,
+// which issue to E0 with a two-cycle latency (21164PC HRM, Table 2-9); the base
+// 21164 has no MVI, so the Wr_IMVI latency below only affects PCA56.
+//===----------------------------------------------------------------------===//
+
+def Alpha21164Model : SchedMachineModel {
+  let IssueWidth = 4;
+  let MicroOpBufferSize = 0;  // In-order.
+  let LoadLatency = 2;
+  let MispredictPenalty = 5;
+  let CompleteModel = 1;
+}
+
+let SchedModel = Alpha21164Model in {
+  def EV5_E0 : ProcResource<1>;
+  def EV5_E1 : ProcResource<1>;
+  def EV5_FA : ProcResource<1>;  // FP add / divide.
+  def EV5_FM : ProcResource<1>;  // FP multiply.
+  def EV5_E  : ProcResGroup<[EV5_E0, EV5_E1]>;  // Either integer pipe.
+  def EV5_Mul  : ProcResource<1>;  // Non-pipelined integer multiplier (on E0).
+  def EV5_FDiv : ProcResource<1>;  // Non-pipelined FP divider (on FA).
+
+  def : WriteRes<Wr_IALU,   [EV5_E]>  { let Latency = 1; }
+  def : WriteRes<Wr_ILog,   [EV5_E]>  { let Latency = 1; }
+  def : WriteRes<Wr_ICmp,   [EV5_E]>  { let Latency = 1; }
+  def : WriteRes<Wr_ICmov,  [EV5_E]>  { let Latency = 2; }
+  def : WriteRes<Wr_IShift, [EV5_E0]> { let Latency = 1; }
+  // mulq/umulh occupy E0 for one cycle and the multiplier for the reuse window.
+  def : WriteRes<Wr_IMul,   [EV5_E0, EV5_Mul]> {
+    let Latency = 12; let ReleaseAtCycles = [1, 8];
+  }
+  def : WriteRes<Wr_IMulH,  [EV5_E0, EV5_Mul]> {
+    let Latency = 14; let ReleaseAtCycles = [1, 8];
+  }
+  def : WriteRes<Wr_IMVI,   [EV5_E0]> { let Latency = 2; }
+  def : WriteRes<Wr_ILoad,  [EV5_E]>  { let Latency = 2; }
+  def : WriteRes<Wr_IStore, [EV5_E0]> { let Latency = 1; }
+  def : WriteRes<Wr_FtoI,   [EV5_E]>  { let Latency = 2; }
+  def : WriteRes<Wr_ItoF,   [EV5_E]>  { let Latency = 2; }
+  def : WriteRes<Wr_FAdd,   [EV5_FA]> { let Latency = 4; }
+  def : WriteRes<Wr_FMul,   [EV5_FM]> { let Latency = 4; }
+  def : WriteRes<Wr_FCmov,  [EV5_FA]> { let Latency = 4; }
+  def : WriteRes<Wr_FDivS,  [EV5_FA, EV5_FDiv]> {
+    let Latency = 15; let ReleaseAtCycles = [1, 15];
+  }
+  def : WriteRes<Wr_FDivT,  [EV5_FA, EV5_FDiv]> {
+    let Latency = 22; let ReleaseAtCycles = [1, 22];
+  }
+  // Square root needs the FIX extension (ev6), so it is never issued here.
+  def : WriteRes<Wr_FSqrtS, [EV5_FA]> { let Latency = 18; }
+  def : WriteRes<Wr_FSqrtT, [EV5_FA]> { let Latency = 30; }
+  def : WriteRes<Wr_FLoad,  [EV5_E]>  { let Latency = 2; }
+  def : WriteRes<Wr_FStore, [EV5_E0]> { let Latency = 1; }
+  def : WriteRes<Wr_Br,     [EV5_E1]> { let Latency = 1; }
+  def : WriteRes<Wr_JSR,    [EV5_E1]> { let Latency = 1; }
+  def : WriteRes<Wr_Fpcr,   [EV5_FM]> { let Latency = 4; }
+  def : WriteRes<Wr_Misc,   [EV5_E0]> { let Latency = 2; }
+  def : ReadAdvance<Rd_FStData, 0>;  // No store bypass distinction on the EV5.
+  // A logic or compare result forwarded to a branch/cmov test operand has an
+  // effective latency of zero (21164/21164PC special bypass).
+  def : ReadAdvance<Rd_ITest, 1, [Wr_ILog, Wr_ICmp]>;
+  def : ReadAdvance<Rd_StData, 0>;  // No store-data bypass on the EV5.
+  // The multiplier cannot take an integer bypass: a fresh add/logic/shift/
+  // compare result (latency 1) reaches it at 3 rather than 1.  Loads and
+  // motion-video ops (latency 2) also feed it late, modeled with the same delay.
+  def : ReadAdvance<Rd_IMulOp, -2,
+                    [Wr_IALU, Wr_ILog, Wr_IShift, Wr_ICmp, Wr_ILoad, Wr_IMVI]>;
+
+  defm : AlphaInstRW;
+}
+
+//===----------------------------------------------------------------------===//
 // 21264/21364 (EV6/EV7): four-way issue, out of order.  The Ebox has four
 // integer pipes in two clusters, each with an upper (U) and lower (L)
 // subcluster; the Fbox has add and multiply pipes.

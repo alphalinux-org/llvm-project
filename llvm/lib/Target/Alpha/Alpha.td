@@ -30,9 +30,9 @@ class Proc<string Name, list<SubtargetFeature> Features>
 // it.  The in-order ones get models of their own below.
 def : Proc<"ev4",     []>;
 def : Proc<"ev45",    []>;
-def : Proc<"ev5",     []>;
-def : Proc<"ev56",    [FeatureBWX]>;
-def : Proc<"pca56",   [FeatureBWX, FeatureMVI]>;
+def : ProcessorModel<"ev5",     Alpha21164Model, []>;
+def : ProcessorModel<"ev56",    Alpha21164Model, [FeatureBWX]>;
+def : ProcessorModel<"pca56",   Alpha21164Model, [FeatureBWX, FeatureMVI]>;
 def : ProcessorModel<"generic", Alpha21264Model, []>;
 def : ProcessorModel<"ev6",     Alpha21264Model, [FeatureBWX, FeatureMVI, FeatureFIX]>;
 def : ProcessorModel<"ev67",    Alpha21264Model,
