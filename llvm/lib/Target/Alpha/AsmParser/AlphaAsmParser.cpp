@@ -750,6 +750,7 @@ bool AlphaAsmParser::parseInstruction(ParseInstructionInfo &Info,
                         .Case("tprelhi", Alpha::fixup_alpha_tprelhi)
                         .Case("tprello", Alpha::fixup_alpha_tprello)
                         .Case("gottprel", Alpha::fixup_alpha_gottprel)
+                        .Case("gotdtprel", Alpha::fixup_alpha_gotdtprel)
                         .Case("tlsgd", Alpha::fixup_alpha_tlsgd)
                         .Case("tlsldm", Alpha::fixup_alpha_tlsldm)
                         .Case("dtprelhi", Alpha::fixup_alpha_dtprelhi)
