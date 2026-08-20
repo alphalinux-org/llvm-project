@@ -14,15 +14,18 @@
 #define LLVM_LIB_TARGET_ALPHA_MCTARGETDESC_ALPHAMCTARGETDESC_H
 
 #include "llvm/Support/DataTypes.h"
+#include <memory>
 
 namespace llvm {
 class Target;
 class MCCodeEmitter;
 class MCContext;
 class MCInstrInfo;
+class MCObjectTargetWriter;
 
 MCCodeEmitter *createAlphaMCCodeEmitter(const MCInstrInfo &MCII,
                                         MCContext &Ctx);
+std::unique_ptr<MCObjectTargetWriter> createAlphaELFObjectWriter(uint8_t OSABI);
 } // end namespace llvm
 
 // Defines symbolic names for Alpha registers.
