@@ -1101,6 +1101,16 @@ void RelocScan::processAux(RelExpr expr, RelType type, uint64_t offset,
     // * If a library definition gets preempted to the executable, it will have
     //   the wrong ebx value.
     if (sym.isFunc()) {
+      // Alpha has no PLT: a call loads the callee's address out of the ordinary
+      // GOT and jumps to it, so there is no entry whose address could stand in
+      // for the function's.
+      if (ctx.arg.emachine == EM_ALPHA) {
+        auto diag = Err(ctx);
+        diag << "cannot create a canonical PLT entry for " << &sym
+             << "; recompile with -fPIC";
+        printLocation(diag, *sec, sym, offset);
+        return;
+      }
       if (ctx.arg.pie && ctx.arg.emachine == EM_386) {
         auto diag = Err(ctx);
         diag << "symbol '" << &sym

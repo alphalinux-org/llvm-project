@@ -13,6 +13,13 @@
 // of .got, so a single GOT of up to 64KB is addressable with a signed 16-bit
 // displacement.
 //
+// A call also goes through the GOT: the caller loads the callee's address with
+// R_ALPHA_LITERAL and jumps to it. The PLT therefore exists only to support
+// lazy binding -- R_ALPHA_JMP_SLOT relocates the .got slot rather than a
+// .got.plt slot, and the PLT stub is what the slot points at until the first
+// call resolves it. We bind eagerly and emit no PLT at all, so a preemptible
+// callee simply gets R_ALPHA_GLOB_DAT on its GOT entry.
+//
 //===----------------------------------------------------------------------===//
 
 #include "InputFiles.h"
@@ -55,6 +62,7 @@ public:
   RelExpr getRelExpr(RelType type, const Symbol &s,
                      const uint8_t *loc) const override;
   RelType getDynRel(RelType type) const override;
+  int64_t getImplicitAddend(const uint8_t *buf, RelType type) const override;
   void finalizeRelocScan() override;
   void scanSection(InputSectionBase &sec, unsigned shard) override;
   template <class ELFT, class RelTy>
@@ -87,6 +95,12 @@ Alpha::Alpha(Ctx &ctx) : TargetInfo(ctx) {
   tlsGotRel = R_ALPHA_TPREL64;
   gotEntrySize = 8;
 
+  // On Alpha a call loads the callee's address from the ordinary GOT with
+  // R_ALPHA_LITERAL and jumps to it, so the PLT exists only as a lazy-binding
+  // trampoline: R_ALPHA_JMP_SLOT relocates the .got slot, not a .got.plt slot.
+  // We bind eagerly instead and emit no PLT at all, which needs no .got.plt.
+  gotPltHeaderEntriesNum = 0;
+
   // Alpha Linux runs with 8KB pages, but the ABI reserves 64KB of alignment
   // between segments, matching bfd's ELF_MAXPAGESIZE for elf64-alpha.
   defaultCommonPageSize = 8192;
@@ -112,7 +126,9 @@ RelExpr Alpha::getRelExpr(RelType type, const Symbol &s,
     return R_PC;
   case R_ALPHA_BRADDR:
   case R_ALPHA_BRSGP:
-    return R_PLT_PC;
+    // There is no PLT (see below), so a branch cannot reach a preemptible
+    // symbol. process() reports that as an error.
+    return R_PC;
   case R_ALPHA_HINT:
     // The hint only steers the branch predictor for an indirect jsr; a wrong
     // value costs performance, never correctness. A call to a preemptible
@@ -152,6 +168,29 @@ RelExpr Alpha::getRelExpr(RelType type, const Symbol &s,
   }
 }
 
+// Alpha writes the addend of a dynamic relocation into the place it relocates
+// as well as into the relocation itself, so the addend has to be readable back
+// out of it -- an assertions build checks that the two agree.
+int64_t Alpha::getImplicitAddend(const uint8_t *buf, RelType type) const {
+  switch (type) {
+  case R_ALPHA_NONE:
+  case R_ALPHA_JMP_SLOT:
+    return 0;
+  case R_ALPHA_REFLONG:
+    return SignExtend64<32>(read32(ctx, buf));
+  case R_ALPHA_REFQUAD:
+  case R_ALPHA_GLOB_DAT:
+  case R_ALPHA_RELATIVE:
+  case R_ALPHA_TPREL64:
+  case R_ALPHA_DTPMOD64:
+  case R_ALPHA_DTPREL64:
+    return read64(ctx, buf);
+  default:
+    InternalErr(ctx, buf) << "cannot read addend for relocation " << type;
+    return 0;
+  }
+}
+
 RelType Alpha::getDynRel(RelType type) const {
   if (type == R_ALPHA_REFQUAD)
     return type;
@@ -183,24 +222,54 @@ uint64_t Alpha::getGotEntry(Symbol &sym, int64_t addend, GotKind kind) {
   GotSection &got = *ctx.in.got;
   uint64_t off = allocGot(kind == GK_DynTls || kind == GK_TlsIndex ? 2 : 1);
   it->second = off;
+  bool localInExe = !sym.isPreemptible && !ctx.arg.shared;
 
   switch (kind) {
   case GK_Addr:
-    got.addConstant({R_ABS, symbolicRel, off, addend, &sym});
+    if (sym.isPreemptible) {
+      // No dynamic relocation can express symbol+addend, which is why bfd only
+      // ever forms such an entry for a symbol it can resolve itself.  The
+      // scanner rejects that case before getting here, where the relocation it
+      // came from is still known and can be named.
+      assert(!addend && "preemptible literal with an addend reached the GOT");
+      ctx.in.relaDyn->addSymbolReloc(gotRel, got, off, sym);
+    } else if (ctx.arg.isPic) {
+      ctx.in.relaDyn->addRelativeReloc(relativeRel, got, off, sym, addend,
+                                       symbolicRel, R_ABS);
+    } else {
+      got.addConstant({R_ABS, symbolicRel, off, addend, &sym});
+    }
     break;
   case GK_TpOff:
-    got.addConstant({R_TPREL, symbolicRel, off, addend, &sym});
+    if (localInExe)
+      got.addConstant({R_TPREL, symbolicRel, off, addend, &sym});
+    else if (sym.isPreemptible)
+      ctx.in.relaDyn->addSymbolReloc(tlsGotRel, got, off, sym, addend);
+    else
+      // addAddendOnlyRelocIfNonPreemptible, but carrying the addend: the
+      // entry is keyed on it, so sym+N needs N in the slot.
+      ctx.in.relaDyn->addReloc(/*isAgainstSymbol=*/false, tlsGotRel, got, off,
+                               sym, addend, R_ABS, symbolicRel);
     break;
   case GK_DynTls:
     // The module index, then the offset of the symbol within that module's TLS
     // block. In an executable the module index is always 1.
-    got.addConstant({R_ADDEND, symbolicRel, off, 1, &sym});
-    got.addConstant({R_ABS, tlsOffsetRel, off + 8, addend, &sym});
+    if (localInExe)
+      got.addConstant({R_ADDEND, symbolicRel, off, 1, &sym});
+    else
+      ctx.in.relaDyn->addSymbolReloc(tlsModuleIndexRel, got, off, sym);
+    if (sym.isPreemptible)
+      ctx.in.relaDyn->addSymbolReloc(tlsOffsetRel, got, off + 8, sym, addend);
+    else
+      got.addConstant({R_ABS, tlsOffsetRel, off + 8, addend, &sym});
     break;
   case GK_TlsIndex:
     // Only the module index matters; the second slot stays zero and the caller
     // adds the symbol's dtp offset with R_ALPHA_DTPREL*.
-    got.addConstant({R_ADDEND, symbolicRel, off, 1, ctx.dummySym});
+    if (ctx.arg.shared)
+      ctx.in.relaDyn->addReloc({tlsModuleIndexRel, &got, off});
+    else
+      got.addConstant({R_ADDEND, symbolicRel, off, 1, ctx.dummySym});
     break;
   case GK_Max:
     llvm_unreachable("not a GOT entry kind");
@@ -232,6 +301,15 @@ void Alpha::scanSectionImpl(InputSectionBase &sec, Relocs<RelTy> rels,
     // These consume a GOT entry. Allocate it now and carry its offset within
     // .got in the addend; RE_ALPHA_GOT turns that into a gp displacement.
     case R_ALPHA_LITERAL:
+      // A GOT entry the dynamic linker fills in holds the symbol's address and
+      // nothing else; no dynamic relocation can express symbol+addend.  bfd
+      // only ever forms such an entry for a symbol it resolves itself.
+      if (addend && sym.isPreemptible) {
+        Err(ctx) << getErrorLoc(ctx, sec.content().data() + offset)
+                 << "R_ALPHA_LITERAL against preemptible symbol '" << &sym
+                 << "' with a non-zero addend";
+        continue;
+      }
       sec.addReloc({RE_ALPHA_GOT, type, offset,
                     int64_t(getGotEntry(sym, addend, GK_Addr)), &sym});
       continue;
@@ -286,11 +364,6 @@ void Alpha::finalizeRelocScan() {
   // Every function establishes gp from .got, so gp has to be well defined even
   // in a link that needs no GOT entries. Keep .got from being discarded.
   ctx.in.got->hasGotOffRel.store(true, std::memory_order_relaxed);
-
-  // The PLT and the dynamic relocation forms are not implemented yet, so
-  // refuse to emit output that would need them rather than emit it wrong.
-  if (ctx.arg.isPic || !ctx.sharedFiles.empty())
-    Err(ctx) << "Alpha does not support dynamic linking yet";
 }
 
 // Patch the 16-bit immediate field of a single instruction.
