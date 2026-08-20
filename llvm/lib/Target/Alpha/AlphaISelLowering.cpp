@@ -718,6 +718,8 @@ const char *AlphaTargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "AlphaISD::STQ_U";
   case AlphaISD::SAFE_USTORE:
     return "AlphaISD::SAFE_USTORE";
+  case AlphaISD::USTORE:
+    return "AlphaISD::USTORE";
   case AlphaISD::OTS_CALL:
     return "AlphaISD::OTS_CALL";
   }
@@ -807,30 +809,24 @@ SDValue AlphaTargetLowering::LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
   SDValue Chain = ST->getChain();
   SDValue Ptr = ST->getBasePtr();
   SDValue Val = ST->getValue();
+  // Both forms below carry the store's memory operand, so they have to be built
+  // as memory nodes: instruction selection reads it back off the node to give
+  // it to the instruction it builds.
+  SDVTList VTs = DAG.getVTList(MVT::Other);
+  SDValue Ops[] = {Chain, Val, Ptr, DAG.getConstant(Bytes, dl, MVT::i64)};
+
   // With -msafe-partial, update each spanned quadword with a lock-based loop
-  // (emitted by the custom inserter) so the read-modify-write is atomic.  The
-  // node carries the store's memory operand, so it has to be built as a memory
-  // node: the expansion reads it back off the node to put on the ldq_l and
-  // stq_c it builds, and casting the result of getNode to MemSDNode is
-  // undefined behaviour -- there is nothing behind it to read.
+  // (emitted by the custom inserter) so the read-modify-write is atomic.
   if (Subtarget.hasSafePartial())
-    return DAG.getMemIntrinsicNode(
-        AlphaISD::SAFE_USTORE, dl, DAG.getVTList(MVT::Other),
-        {Chain, Val, Ptr, DAG.getConstant(Bytes, dl, MVT::i64)}, MemVT,
-        ST->getMemOperand());
+    return DAG.getMemIntrinsicNode(AlphaISD::SAFE_USTORE, dl, VTs, Ops, MemVT,
+                                   ST->getMemOperand());
   // A misaligned store reads the one or two quadwords the field falls in,
   // splices the field into them and writes them back.  That has to stay
   // indivisible -- one instruction, and then one bundle: two such stores can
   // fall in one quadword, and if one's reads are hoisted above the other's
-  // write-backs the field written first is lost.  The node carries the store's
-  // memory operand, so it has to be built as a memory node: instruction
-  // selection reads it back off the node to give it to the instruction it
-  // builds, and casting the result of getNode to MemSDNode is undefined
-  // behaviour -- there is nothing behind it to read.
-  return DAG.getMemIntrinsicNode(
-      AlphaISD::USTORE, dl, DAG.getVTList(MVT::Other),
-      {Chain, Val, Ptr, DAG.getConstant(Bytes, dl, MVT::i64)}, MemVT,
-      ST->getMemOperand());
+  // write-backs the field written first is lost.
+  return DAG.getMemIntrinsicNode(AlphaISD::USTORE, dl, VTs, Ops, MemVT,
+                                 ST->getMemOperand());
 }
 
 // f32 = bitcast i32.  The i32 source occupies the low 32 bits of an integer
