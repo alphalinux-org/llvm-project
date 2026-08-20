@@ -10,8 +10,11 @@
 ; is the point of the test: without it an unlegalizable function quietly falls
 ; back to SelectionDAG and the gap stays invisible.
 ;
-; The second run line is ev67, where sqrt is an instruction rather than an
-; expansion, so both sides of that rule are covered.
+; The second run line is ev67, where ctpop/ctlz/cttz, sqrt and the
+; register-to-register bitcast are instructions rather than expansions, so both
+; sides of those rules are covered.  The base run line asserts the absence of
+; each of those instructions, which is what makes the two prefixes mean
+; something: without it the BASE checks would pass on ev67 output too.
 ;
 ; A switch dense enough to become a jump table is deliberately absent: the
 ; dispatch is the gp-relative sequence LowerBR_JT builds and the selector has
@@ -74,6 +77,41 @@ define double @fsqrt(double %x) {
   ret double %r
 }
 
+; ev67 has all three counting instructions; everywhere else they are the
+; shift-and-multiply expansions, whose tail is the multiply by 0x0101..01 and a
+; shift down by 56.
+; CHECK-LABEL: counts:
+; BASE:      srl $16, 1,
+; BASE:      mulq
+; BASE:      srl {{\$[0-9]+}}, 56,
+; EV67:      ctlz $16,
+; EV67:      ctpop $16,
+; EV67:      cttz $16,
+define i64 @counts(i64 %x) {
+  %a = call i64 @llvm.ctpop.i64(i64 %x)
+  %b = call i64 @llvm.ctlz.i64(i64 %x, i1 false)
+  %c = call i64 @llvm.cttz.i64(i64 %x, i1 false)
+  %d = add i64 %a, %b
+  %e = add i64 %d, %c
+  ret i64 %e
+}
+
+; The byte swap is four shift-mask-or pairs, and the abs that consumes it is the
+; branchless sra/addq/xor form.
+; CHECK-LABEL: bswap_abs:
+; CHECK:      sll $16, 56,
+; CHECK-NEXT: srl $16, 56,
+; CHECK:      sra [[R:\$[0-9]+]], 63, [[S:\$[0-9]+]]
+; CHECK-NEXT: addq [[R]], [[S]], [[R]]
+; CHECK-NEXT: xor [[R]], [[S]], $0
+; CHECK-NEXT: ret
+define i64 @bswap_abs(i64 %x) {
+  %a = call i64 @llvm.bswap.i64(i64 %x)
+  %b = call i64 @llvm.abs.i64(i64 %a, i1 false)
+  ret i64 %b
+}
+
+; The overflow bit is dead, so only the addq survives.
 ; CHECK-LABEL: overflow:
 ; CHECK:      addq $16, $17, $0
 ; CHECK-NEXT: ret
@@ -104,4 +142,9 @@ define i64 @wide_i128(i64 %a, i64 %b) {
 
 declare double @llvm.fabs.f64(double)
 declare double @llvm.sqrt.f64(double)
+declare i64 @llvm.ctpop.i64(i64)
+declare i64 @llvm.ctlz.i64(i64, i1)
+declare i64 @llvm.cttz.i64(i64, i1)
+declare i64 @llvm.bswap.i64(i64)
+declare i64 @llvm.abs.i64(i64, i1)
 declare {i64, i1} @llvm.uadd.with.overflow.i64(i64, i64)
