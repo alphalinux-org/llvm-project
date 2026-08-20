@@ -291,11 +291,12 @@ constexpr uint64_t PointerSize = 8;
 extern const char NullPointerContent[PointerSize];
 
 inline Symbol &createAnonymousPointer(LinkGraph &G, Section &PointerSection,
-                                      Symbol *InitialTarget = nullptr) {
+                                      Symbol *InitialTarget = nullptr,
+                                      uint64_t InitialAddend = 0) {
   auto &B = G.createContentBlock(PointerSection, NullPointerContent,
                                  orc::ExecutorAddr(), 8, 0);
   if (InitialTarget)
-    B.addEdge(Pointer64, 0, *InitialTarget, 0);
+    B.addEdge(Pointer64, 0, *InitialTarget, InitialAddend);
   return G.addAnonymousSymbol(B, 0, PointerSize, false, false);
 }
 
@@ -332,7 +333,15 @@ public:
   bool visitEdge(LinkGraph &G, Block *B, Edge &E) {
     if (E.getKind() != RequestGOTAndTransformToGPRel16)
       return false;
-    E.setTarget(getEntryForTarget(G, E.getTarget()));
+    // The entry has to hold the target plus the addend, and the edge is then
+    // just the displacement of that entry from gp.  An assembler turns a
+    // reference to a local symbol into a section symbol and an addend, so
+    // !literal routinely names sym+N; leaving the addend on the edge would add
+    // it to the displacement instead, indexing off the GOT slot as though the
+    // slot were the object.  lld keys its entries on the addend for this
+    // reason, and errors when a preemptible symbol needs one.
+    E.setTarget(getEntryForTargetAndAddend(G, E.getTarget(), E.getAddend()));
+    E.setAddend(0);
     E.setKind(GPRel16);
     return true;
   }
@@ -342,6 +351,26 @@ public:
   }
 
 private:
+  // TableManager's map is keyed on the target's name, which is no key at all
+  // for the anonymous symbol an assembler produces for a local target, and
+  // carries no addend.  Anything it cannot distinguish is kept here instead,
+  // keyed on the symbol itself as lld keys its entries.
+  Symbol &getEntryForTargetAndAddend(LinkGraph &G, Symbol &Target,
+                                     int64_t Addend) {
+    if (Addend == 0 && Target.hasName())
+      return getEntryForTarget(G, Target);
+    auto Key = std::make_pair(&Target, Addend);
+    auto It = AddendEntries.find(Key);
+    if (It == AddendEntries.end())
+      It = AddendEntries
+               .insert({Key, &createAnonymousPointer(G, getGOTSection(G),
+                                                     &Target, Addend)})
+               .first;
+    return *It->second;
+  }
+
+  DenseMap<std::pair<Symbol *, int64_t>, Symbol *> AddendEntries;
+
   Section &getGOTSection(LinkGraph &G) {
     if (!GOTSection)
       GOTSection = &G.createSection(getSectionName(),
