@@ -51,6 +51,7 @@ private:
   bool selectLoadStore(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectICmp(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectConstant(MachineInstr &I, MachineRegisterInfo &MRI) const;
+  bool selectSelect(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectFConstant(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectAluImm(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectNarrowArith(MachineInstr &I, MachineRegisterInfo &MRI) const;
@@ -509,6 +510,35 @@ bool AlphaInstructionSelector::selectICmp(MachineInstr &I,
   if (Invert) {
     emit(I, Alpha::XORi, Dst).addUse(CmpDst).addImm(1);
   }
+
+  I.eraseFromParent();
+  return true;
+}
+
+// cmovne leaves its destination alone when the condition is zero, so a select
+// is the false value in the destination and a conditional move of the true one
+// over it.
+bool AlphaInstructionSelector::selectSelect(MachineInstr &I,
+                                            MachineRegisterInfo &MRI) const {
+  Register Dst = I.getOperand(0).getReg();
+  Register Cond = I.getOperand(1).getReg();
+  Register True = I.getOperand(2).getReg();
+  Register False = I.getOperand(3).getReg();
+
+  // Choosing between two floating values is fcmovne, which tests a floating
+  // register against zero; the 0/1 condition is moved across as it is, its bits
+  // being zero or not zero either way.
+  if (RBI.getRegBank(Dst, MRI, TRI)->getID() == Alpha::FPRRegBankID) {
+    Register Moved = MRI.createVirtualRegister(&Alpha::FPRCRegClass);
+    emit(I, Alpha::MOVi2f, Moved).addUse(Cond);
+
+    emit(I, Alpha::FCMOVNE, Dst).addUse(False).addUse(Moved).addUse(True);
+
+    I.eraseFromParent();
+    return true;
+  }
+
+  emit(I, Alpha::CMOVNE, Dst).addUse(False).addUse(Cond).addUse(True);
 
   I.eraseFromParent();
   return true;
@@ -1022,6 +1052,8 @@ bool AlphaInstructionSelector::selectInstr(MachineInstr &I) const {
     return selectICmp(I, MRI);
   case TargetOpcode::G_CONSTANT:
     return selectConstant(I, MRI);
+  case TargetOpcode::G_SELECT:
+    return selectSelect(I, MRI);
   case TargetOpcode::G_FCONSTANT:
     return selectFConstant(I, MRI);
   case TargetOpcode::G_GLOBAL_VALUE: {

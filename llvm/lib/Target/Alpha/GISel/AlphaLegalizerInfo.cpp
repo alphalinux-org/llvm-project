@@ -176,6 +176,38 @@ AlphaLegalizerInfo::AlphaLegalizerInfo(const AlphaSubtarget &ST) {
       .unsupportedIf(NoFPRegs)
       .legalFor({{s64, s32}, {s32, s64}});
 
+  // A conditional move leaves its destination alone when the condition is zero,
+  // so the false value is what the destination already holds.
+  // A 32-bit choice is legal as it stands: cmovne and fcmovne both move whole
+  // registers and care nothing for the width of what is in them.  Widening it
+  // would put a float through a pair of integer registers and cost a round trip
+  // through memory at each end.
+  //
+  // clampScalar moves a type outside the range to the nearest end and leaves
+  // one inside it alone, so an s40 select -- inside [s32, s64] and legal for
+  // neither -- would pass straight through to a selector with nothing to
+  // select.  Rounding up to the next power of two afterwards sends it to s64.
+  //
+  // The condition is a whole quadword and nothing narrower: there is no i1 on
+  // this machine, so a boolean condition is widened by the clamp below rather
+  // than made legal in its own right.  There would be no narrowing to be had
+  // even if it were -- LegalizerHelper::narrowScalarSelect refuses every
+  // operand but the destination -- so a rule that clamped the condition back
+  // down to s1 would report legal here and fail one step later.
+  //
+  // Nothing in the selector has to know about this.  cmovne's own pattern is
+  // written on an i64 condition, so the condition as it stands is what the
+  // imported patterns match; selectSelect exists for the floating bank, where
+  // there is no pattern to match.  A widened condition is zero-extended and
+  // not any-extended -- the target's boolean contents are ZeroOrOne -- so
+  // testing the whole register is testing the truth value, which is the same
+  // thing the SelectionDAG path relies on.
+  getActionDefinitionsBuilder(G_SELECT)
+      .legalFor({{s32, s64}, {s64, s64}, {p0, s64}})
+      .clampScalar(0, s32, s64)
+      .widenScalarToNextPow2(0, 32)
+      .clampScalar(1, s64, s64);
+
   // The memory intrinsics become libcalls, as they do on the SelectionDAG
   // path.
   getActionDefinitionsBuilder({G_MEMCPY, G_MEMMOVE, G_MEMSET}).libcall();

@@ -1,0 +1,67 @@
+# RUN: llc -mtriple=alpha-unknown-linux-gnu -run-pass=instruction-select \
+# RUN:   -global-isel-abort=1 -verify-machineinstrs %s -o - | FileCheck %s
+
+# A G_SELECT's condition is always a whole quadword: there is no i1 on this
+# machine, so G_SELECT is legal only for an s64 condition and the legalizer
+# widens anything narrower, masking the low bit when the value came from a
+# truncate (see legalize.mir).  A condition that is already 0 or 1 -- a
+# compare's result -- is widened for free, which is what lets the imported
+# cmov patterns, all written on an i64 condition, match at all.
+#
+# The two banks take different routes through the selector, which is why this
+# asks the selection pass on its own rather than compiling a function.  An
+# integer choice is selected by the imported cmovne pattern; a floating one
+# matches no pattern and is what selectSelect is for.
+#
+# It is a lock rather than a detector: what makes the widened form legal is a
+# rule in the legalizer, and this is what says the selector can select what that
+# rule now lets through.  -global-isel-abort=1 is the half that has teeth.
+
+---
+name:            wide_cond
+legalized:       true
+regBankSelected: true
+tracksRegLiveness: true
+registers:
+  - { id: 0, class: gpr }
+  - { id: 1, class: gpr }
+  - { id: 2, class: gpr }
+  - { id: 3, class: gpr }
+body:             |
+  bb.0:
+    liveins: $r16, $r17, $r18
+    ; CHECK-LABEL: name: wide_cond
+    ; CHECK: CMOVNE
+    %0:gpr(s64) = COPY $r16
+    %1:gpr(s64) = COPY $r17
+    %2:gpr(s64) = COPY $r18
+    %3:gpr(s64) = G_SELECT %0(s64), %1, %2
+    $r0 = COPY %3(s64)
+    RET implicit $r0
+...
+---
+# A widened condition choosing between two floating values goes the same way it
+# does under SelectionDAG: into a floating register as it stands, where fcmovne
+# reads it as a value that is zero or is not.
+name:            wide_cond_fp
+legalized:       true
+regBankSelected: true
+tracksRegLiveness: true
+registers:
+  - { id: 0, class: gpr }
+  - { id: 1, class: fpr }
+  - { id: 2, class: fpr }
+  - { id: 3, class: fpr }
+body:             |
+  bb.0:
+    liveins: $r16, $f16, $f17
+    ; CHECK-LABEL: name: wide_cond_fp
+    ; CHECK: MOVi2f
+    ; CHECK: FCMOVNE
+    %0:gpr(s64) = COPY $r16
+    %1:fpr(s64) = COPY $f16
+    %2:fpr(s64) = COPY $f17
+    %3:fpr(s64) = G_SELECT %0(s64), %1, %2
+    $f0 = COPY %3(s64)
+    RET implicit $f0
+...

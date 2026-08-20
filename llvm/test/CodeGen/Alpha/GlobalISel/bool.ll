@@ -31,3 +31,14 @@ t:
 f:
   ret i64 0
 }
+
+; The xor of two booleans is itself a low bit, so cmovlbs tests it in place and
+; the mask that would precede a cmovne is not needed.
+; CHECK-LABEL: select_bool:
+; CHECK:      xor $16, {{\$[0-9]+}}, [[X:\$[0-9]+]]
+; CHECK-NEXT: cmovlbs [[X]],
+define i64 @select_bool(i1 signext %a, i1 signext %b, i64 %x, i64 %y) {
+  %c = xor i1 %a, %b
+  %r = select i1 %c, i64 %x, i64 %y
+  ret i64 %r
+}

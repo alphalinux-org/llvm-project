@@ -9,8 +9,12 @@
 # it.
 
 ---
-# A 32-bit select is legal as it stands: cmovne moves a whole register, so
-# there is nothing to widen and the truncations feeding it stay put.
+# A 32-bit select is legal in its value operands: cmovne moves a whole
+# register, so there is nothing to widen and the s32 truncations feeding it
+# stay put.  The condition is a different matter -- there is no s1 on this
+# machine, so it is widened to a whole register, and the zero-extension of the
+# truncate it came from is the `and %0, 1' below.  The selector folds that back
+# into cmovlbs (see select.ll), so the mask costs nothing.
 name:            select_s32
 legalized:       false
 tracksRegLiveness: true
@@ -18,8 +22,8 @@ body:             |
   bb.0:
     liveins: $r16, $r17, $r18
     ; CHECK-LABEL: name: select_s32
-    ; CHECK: %[[C:[0-9]+]]:_(s1) = G_TRUNC
-    ; CHECK: {{%[0-9]+}}:_(s32) = G_SELECT %[[C]](s1), %{{[0-9]+}}, %{{[0-9]+}}
+    ; CHECK: %[[C:[0-9]+]]:_(s64) = G_AND
+    ; CHECK: {{%[0-9]+}}:_(s32) = G_SELECT %[[C]](s64), %{{[0-9]+}}, %{{[0-9]+}}
     %0:_(s64) = COPY $r16
     %1:_(s1) = G_TRUNC %0(s64)
     %2:_(s64) = COPY $r17
@@ -171,3 +175,78 @@ body:             |
     G_STORE %2(s32), %3(p0) :: (store (s32))
     RET
 ...
+
+---
+# A select of a type that is not a power of two but sits inside the range
+# clampScalar was given.  clampScalar moves a type *outside* its range to the
+# nearest end and leaves one inside it alone, so without a rounding step this
+# would pass through untouched and reach a selector with nothing to select;
+# rounding up to the next power of two afterwards is what sends it to s64.
+name:            select_s40
+legalized:       false
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $r16, $r17, $r18
+    ; CHECK-LABEL: name: select_s40
+    ; CHECK: {{%[0-9]+}}:_(s64) = G_SELECT
+    ; CHECK-NOT: (s40) = G_SELECT
+    %0:_(s64) = COPY $r16
+    %1:_(s1) = G_TRUNC %0(s64)
+    %2:_(s64) = COPY $r17
+    %3:_(s40) = G_TRUNC %2(s64)
+    %4:_(s64) = COPY $r18
+    %5:_(s40) = G_TRUNC %4(s64)
+    %6:_(s40) = G_SELECT %1(s1), %3, %5
+    %7:_(s64) = G_ANYEXT %6(s40)
+    $r0 = COPY %7(s64)
+    RET implicit $r0
+...
+
+---
+# A condition wider than a boolean.  It arrives this way when whatever produced
+# it was itself widened, and there is nothing to be done about that here:
+# LegalizerHelper::narrowScalarSelect refuses every operand but the
+# destination, so a rule that clamped the condition back to s1 would report
+# legal and fail one step later.  The quadword form is legal instead, and it
+# needs nothing new in the selector: cmovne's own pattern is written on an i64
+# condition, so the imported patterns match it.
+name:            select_cond_s64
+legalized:       false
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $r16, $r17, $r18
+    ; CHECK-LABEL: name: select_cond_s64
+    ; CHECK-NOT: failedISel: true
+    ; CHECK: {{%[0-9]+}}:_(s64) = G_SELECT {{%[0-9]+}}(s64)
+    %0:_(s64) = COPY $r16
+    %1:_(s64) = COPY $r17
+    %2:_(s64) = COPY $r18
+    %3:_(s64) = G_SELECT %0(s64), %1, %2
+    $r0 = COPY %3(s64)
+    RET implicit $r0
+...
+---
+# A condition that is neither a boolean nor a quadword is widened to one.  The
+# extension is a zero extension and not an any extension: the target's boolean
+# contents are ZeroOrOne, so the bits above the low one are known to be zero
+# rather than merely ignored.
+name:            select_cond_s32
+legalized:       false
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $r16, $r17, $r18
+    ; CHECK-LABEL: name: select_cond_s32
+    ; CHECK-NOT: failedISel: true
+    ; CHECK: {{%[0-9]+}}:_(s64) = G_SELECT {{%[0-9]+}}(s64)
+    %0:_(s64) = COPY $r16
+    %1:_(s32) = G_TRUNC %0(s64)
+    %2:_(s64) = COPY $r17
+    %3:_(s64) = COPY $r18
+    %4:_(s64) = G_SELECT %1(s32), %2, %3
+    $r0 = COPY %4(s64)
+    RET implicit $r0
+...
+
