@@ -20,6 +20,15 @@
 // call resolves it. We bind eagerly and emit no PLT at all, so a preemptible
 // callee simply gets R_ALPHA_GLOB_DAT on its GOT entry.
 //
+// Because the displacement is only 16 bits, one gp reaches just 64KB of GOT.
+// Larger links therefore need more than one gp: input files are grouped into
+// partitions, each partition gets its own region of .got and its own gp, and a
+// symbol referenced from two partitions gets an entry in each. This mirrors
+// bfd's multi-GOT: bfd assigns a GOT per input file and then merges adjacent
+// ones while they fit, and we do the same thing in one pass, measuring each
+// file as we reach it and starting a new partition when it will not fit in what
+// is left of the current one.
+//
 //===----------------------------------------------------------------------===//
 
 #include "InputFiles.h"
@@ -51,8 +60,8 @@ enum GotKind : uint32_t {
 
 // A GOT entry is identified by the symbol, the addend (the assembler turns
 // references to local symbols into a section symbol plus an addend, so
-// R_ALPHA_LITERAL routinely needs an entry holding S + A), and the kind of
-// value it holds.
+// R_ALPHA_LITERAL routinely needs an entry holding S + A), the kind of value it
+// holds, and the partition it belongs to.
 using GotKey = std::pair<Symbol *, std::pair<int64_t, uint32_t>>;
 
 namespace {
@@ -71,15 +80,28 @@ public:
   void relocate(uint8_t *loc, const Relocation &rel,
                 uint64_t val) const override;
 
+  uint64_t getGp(const InputFile *f) const override;
+
 private:
+  unsigned gotDemand(InputFile *f) const;
   uint64_t allocGot(unsigned slots);
   uint64_t getGotEntry(Symbol &sym, int64_t addend, GotKind kind);
 
-  // gp is defined to be 0x8000 bytes past the start of .got, so it reaches
-  // [gp - 32768, gp + 32767] and no further.
+  // gp is defined to be 0x8000 bytes past the start of its GOT partition, so
+  // the partition spans [gp - 32768, gp + 32767].
   static constexpr uint64_t gpBias = 0x8000;
+  static constexpr unsigned maxEntriesPerPart = 0x10000 / 8;
 
   llvm::DenseMap<GotKey, uint64_t> gotEntries;
+  llvm::DenseMap<const InputFile *, uint64_t> partOfFile;
+
+  const InputFile *curFile = nullptr;
+  // Whether curFile has already been reported as needing more GOT than one gp
+  // reaches, in which case its partition is expected to overflow.
+  bool curFileOverflows = false;
+  uint32_t curPart = 0;
+  uint64_t curPartBase = 0;
+  unsigned curPartEntries = 0;
   uint64_t gotSize = 0;
 };
 } // namespace
@@ -197,11 +219,102 @@ RelType Alpha::getDynRel(RelType type) const {
   return R_ALPHA_NONE;
 }
 
+uint64_t Alpha::getGp(const InputFile *f) const {
+  auto it = partOfFile.find(f);
+  uint64_t base = it == partOfFile.end() ? 0 : it->second;
+  return ctx.in.got->getVA() + base + gpBias;
+}
+
+// The GOT entry a relocation asks for: how many slots it occupies and, in
+// `kind`, which of a symbol's entries it is. This mirrors the allocating cases
+// of scanSectionImpl, at the larger size wherever scanning has a choice -- a
+// TLSGD sequence relaxed to initial exec needs one slot rather than two.
+static unsigned gotSlotsFor(RelType type, GotKind &kind) {
+  switch (type) {
+  case R_ALPHA_LITERAL:
+    kind = GK_Addr;
+    return 1;
+  case R_ALPHA_GOTTPREL:
+    kind = GK_TpOff;
+    return 1;
+  case R_ALPHA_TLSGD:
+    kind = GK_DynTls;
+    return 2;
+  case R_ALPHA_TLSLDM:
+    kind = GK_TlsIndex;
+    return 2;
+  default:
+    return 0;
+  }
+}
+
+template <class ELFT, class RelTy>
+static void addGotDemand(Ctx &ctx, InputSectionBase &sec, Relocs<RelTy> rels,
+                         DenseSet<GotKey> &keys, unsigned &slots) {
+  for (const RelTy &rel : rels) {
+    GotKind kind;
+    unsigned n = gotSlotsFor(rel.getType(false), kind);
+    if (!n)
+      continue;
+    // Without an addend in the relocation there is nothing cheap to tell two
+    // references to the same symbol apart by, so count them separately.
+    if constexpr (!RelTy::HasAddend) {
+      slots += n;
+      continue;
+    } else {
+      // TLSLDM ignores both the symbol and the addend: one entry per partition
+      // answers for the whole module. getGotEntry keys every other kind on the
+      // addend, so distinct addends against one symbol have to be counted
+      // separately here too.
+      int64_t addend = kind == GK_TlsIndex ? 0 : elf::getAddend<ELFT>(rel);
+      Symbol *sym = kind == GK_TlsIndex
+                        ? ctx.dummySym
+                        : &sec.getFile<ELFT>()->getSymbol(rel.getSymbol(false));
+      if (keys.insert({sym, {addend, kind}}).second)
+        slots += n;
+    }
+  }
+}
+
+// An upper bound on the GOT entries scanning `f` can allocate: the distinct
+// entries its relocations ask for. An entry it shares with a file already in
+// the partition is counted a second time here, which only closes a partition
+// sooner than it strictly has to.
+unsigned Alpha::gotDemand(InputFile *f) const {
+  DenseSet<GotKey> keys;
+  unsigned slots = 0;
+  // The same sections scanRelocations will hand to scanSection.
+  for (InputSectionBase *s : cast<ELFFileBase>(f)->getSections()) {
+    if (!s || s->kind() != SectionBase::Regular || !s->isLive() ||
+        !(s->flags & SHF_ALLOC))
+      continue;
+    const RelsOrRelas<ELF64LE> rels = s->relsOrRelas<ELF64LE>();
+    if (rels.areRelocsCrel())
+      addGotDemand<ELF64LE>(ctx, *s, rels.crels, keys, slots);
+    else if (rels.areRelocsRel())
+      addGotDemand<ELF64LE>(ctx, *s, rels.rels, keys, slots);
+    else
+      addGotDemand<ELF64LE>(ctx, *s, rels.relas, keys, slots);
+  }
+  return slots;
+}
+
+// Reserve consecutive GOT slots in the current partition and return the byte
+// offset of the first one within .got.
 uint64_t Alpha::allocGot(unsigned slots) {
   uint64_t off = gotSize;
   for (unsigned i = 0; i != slots; ++i)
     ctx.in.got->reserveEntry();
   gotSize += 8 * slots;
+  curPartEntries += slots;
+  // The partition was chosen with room for everything gotDemand said this file
+  // could ask for, so short of a file too large for any partition -- already
+  // reported by now -- overflowing it means the two have drifted apart. Say so
+  // rather than emit a binary whose displacements silently do not reach.
+  if (curPartEntries > maxEntriesPerPart && !curFileOverflows &&
+      curPartEntries - slots <= maxEntriesPerPart)
+    InternalErr(ctx, nullptr)
+        << "GOT demand of " << curFile << " was undercounted";
   return off;
 }
 
@@ -214,7 +327,7 @@ uint64_t Alpha::allocGot(unsigned slots) {
 // the offset of x+8 rather than of x. Relocation scanning is serialized for
 // Alpha, so no locking is needed here.
 uint64_t Alpha::getGotEntry(Symbol &sym, int64_t addend, GotKind kind) {
-  GotKey key{&sym, {addend, kind}};
+  GotKey key{&sym, {addend, curPart * GK_Max + kind}};
   auto [it, inserted] = gotEntries.try_emplace(key, 0);
   if (!inserted)
     return it->second;
@@ -287,6 +400,28 @@ void Alpha::scanSectionImpl(InputSectionBase &sec, Relocs<RelTy> rels,
   RelocScan rs(ctx, &sec, shard);
   sec.relocations.reserve(rels.size());
 
+  // All of a file's code shares one gp, so a partition can only be closed at a
+  // file boundary. Close it whenever what is left of it cannot hold everything
+  // the file about to be scanned might ask for.
+  if (sec.file != curFile) {
+    curFile = sec.file;
+    unsigned need = gotDemand(sec.file);
+    // No arrangement of partitions can help a file that needs more than one gp
+    // reaches; give it an empty partition anyway and keep going.
+    curFileOverflows = need > maxEntriesPerPart;
+    if (curFileOverflows) {
+      Err(ctx) << "input file " << curFile
+               << " needs more than 64KB of GOT; split it into smaller objects";
+      need = maxEntriesPerPart;
+    }
+    if (curPartEntries + need > maxEntriesPerPart) {
+      ++curPart;
+      curPartBase = gotSize;
+      curPartEntries = 0;
+    }
+    partOfFile[curFile] = curPartBase;
+  }
+
   for (auto it = rels.begin(); it != rels.end(); ++it) {
     RelType type = it->getType(false);
     uint32_t symIdx = it->getSymbol(false);
@@ -323,7 +458,7 @@ void Alpha::scanSectionImpl(InputSectionBase &sec, Relocs<RelTy> rels,
       continue;
     case R_ALPHA_TLSLDM:
       // The symbol of a TLSLDM relocation is ignored: the result is always the
-      // current module, so one entry answers for all of them.
+      // current module, so one entry per partition suffices.
       sec.addReloc({RE_ALPHA_GOT, type, offset,
                     int64_t(getGotEntry(*ctx.dummySym, 0, GK_TlsIndex)), &sym});
       continue;
@@ -477,17 +612,12 @@ void Alpha::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
   case R_ALPHA_GPRELLOW:
     writeImm16(loc, val);
     break;
-  // The GOT entry's displacement from gp. One gp reaches 64KB of GOT, and
-  // nothing here arranges for a second one yet.
+  // The GOT entry's displacement from the gp of the file being relocated.
   case R_ALPHA_LITERAL:
   case R_ALPHA_TLSGD:
   case R_ALPHA_TLSLDM:
   case R_ALPHA_GOTTPREL:
-    if (!isInt<16>(val)) {
-      Err(ctx) << getErrorLoc(ctx, loc)
-               << "GOT displacement out of range; multi-GOT is not implemented";
-      break;
-    }
+    checkInt(ctx, loc, val, 16, rel);
     writeImm16(loc, val);
     break;
   case R_ALPHA_GPDISP:

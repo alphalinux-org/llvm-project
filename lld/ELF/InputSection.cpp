@@ -837,13 +837,13 @@ uint64_t InputSectionBase::getRelocTargetVA(Ctx &ctx, const Relocation &r,
   case RE_ALPHA_GPDISP:
     // The addend is the distance from the ldah to its paired lda, not a value
     // to be added, so it is not part of the expression.
-    return ctx.in.got->getVA() + 0x8000 - p;
+    return ctx.target->getGp(file) - p;
   case RE_ALPHA_GPREL:
-    return r.sym->getVA(ctx, a) - (ctx.in.got->getVA() + 0x8000);
+    return r.sym->getVA(ctx, a) - ctx.target->getGp(file);
   case RE_ALPHA_GOT:
     // The addend is the offset of the GOT entry within .got, assigned while
     // scanning, not a value to be added to the symbol.
-    return ctx.in.got->getVA() + a - (ctx.in.got->getVA() + 0x8000);
+    return ctx.in.got->getVA() + a - ctx.target->getGp(file);
   case R_GOTPLTONLY_PC:
     return ctx.in.gotPlt->getVA() + a - p;
   case R_GOTREL:
