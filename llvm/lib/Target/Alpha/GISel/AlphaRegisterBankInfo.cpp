@@ -221,6 +221,14 @@ AlphaRegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
   case G_FDIV:
     OperandsMapping = &Alpha::ValueMappings[Alpha::FPR3OpsIdx];
     break;
+  case G_FCMP:
+    // The answer is an integer, the values compared are not, and the predicate
+    // carries no register.
+    OperandsMapping =
+        getOperandsMapping({&Alpha::ValueMappings[Alpha::GPR3OpsIdx], nullptr,
+                            &Alpha::ValueMappings[Alpha::FPR3OpsIdx],
+                            &Alpha::ValueMappings[Alpha::FPR3OpsIdx]});
+    break;
   case G_CONSTANT:
   case G_FRAME_INDEX:
   case G_GLOBAL_VALUE:

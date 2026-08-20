@@ -168,6 +168,13 @@ AlphaLegalizerInfo::AlphaLegalizerInfo(const AlphaSubtarget &ST) {
       .unsupportedIf(NoFPRegs)
       .legalFor({s32, s64});
 
+  // A floating compare leaves its answer in an integer register, the way an
+  // integer compare does.
+  getActionDefinitionsBuilder(G_FCMP)
+      .unsupportedIf(NoFPRegs)
+      .legalFor({{s64, s32}, {s64, s64}})
+      .clampScalar(0, s64, s64);
+
   getActionDefinitionsBuilder(G_FCONSTANT)
       .unsupportedIf(NoFPRegs)
       .legalFor({s32, s64});
