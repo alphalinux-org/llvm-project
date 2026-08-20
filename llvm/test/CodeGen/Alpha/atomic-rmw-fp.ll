@@ -16,6 +16,15 @@ define double @fadd_f64(ptr %p, double %v) {
   ret double %r
 }
 
+; CHECK-LABEL: fsub_f32:
+; CHECK:       subs
+; CHECK:       ldl_l
+; CHECK:       stl_c
+define float @fsub_f32(ptr %p, float %v) {
+  %r = atomicrmw fsub ptr %p, float %v monotonic
+  ret float %r
+}
+
 ; CHECK-LABEL: fmax_f64:
 ; CHECK:       ldq_l
 ; CHECK:       stq_c

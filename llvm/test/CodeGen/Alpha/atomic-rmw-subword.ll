@@ -8,8 +8,10 @@
 ; CHECK:       [[LOOP:\.LBB[0-9_]+]]:
 ; CHECK-NEXT:  ldq_l {{\$[0-9]+}}, 0([[A]])
 ; CHECK-NEXT:  extbl {{\$[0-9]+}}, $16, [[F:\$[0-9]+]]
-; The returned old value is sign-extended, next to the extract whose result it
-; reads: the loop is built after register allocation, so nothing sinks it out.
+; The returned old value is sign-extended.  This runs without BWX, so that is
+; a shift up to the top of the register and back down rather than sextb.  It
+; sits inside the loop, next to the extract whose result it reads: the loop is
+; built after register allocation, so nothing sinks it out afterwards.
 ; CHECK-NEXT:  sll [[F]], 56, $0
 ; CHECK-NEXT:  sra $0, 56, $0
 ; CHECK-NEXT:  addq [[F]], $17,
