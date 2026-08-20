@@ -1289,10 +1289,19 @@ AlphaTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
   MachineFunction &MF = *MBB->getParent();
   const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
   const DebugLoc &DL = MI.getDebugLoc();
-  int FI =
-      MF.getFrameInfo().CreateStackObject(8, Align(8), /*isSpillSlot=*/false);
   Register Dst = MI.getOperand(0).getReg();
   Register Src = MI.getOperand(1).getReg();
+
+  // The store and its load are adjacent, so one slot serves every move in the
+  // function rather than the frame growing by eight bytes per bitcast (and per
+  // sitofp/fptosi, which are built on these).
+  auto *FuncInfo = MF.getInfo<AlphaMachineFunctionInfo>();
+  int FI = FuncInfo->getBitcastSlotIndex();
+  if (FI == -1) {
+    FI =
+        MF.getFrameInfo().CreateStackObject(8, Align(8), /*isSpillSlot=*/false);
+    FuncInfo->setBitcastSlotIndex(FI);
+  }
 
   unsigned StoreOpc, LoadOpc;
   switch (MI.getOpcode()) {
