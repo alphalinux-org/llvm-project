@@ -43,6 +43,8 @@ public:
 
   bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
                        const char *ExtraCode, raw_ostream &O) override;
+  bool PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNo,
+                             const char *ExtraCode, raw_ostream &O) override;
 
 private:
   MCOperand lowerOperand(const MachineOperand &MO) const;
@@ -131,6 +133,20 @@ bool AlphaAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
   default:
     return AsmPrinter::PrintAsmOperand(MI, OpNo, ExtraCode, O);
   }
+}
+
+bool AlphaAsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI,
+                                            unsigned OpNo,
+                                            const char *ExtraCode,
+                                            raw_ostream &O) {
+  if (ExtraCode && ExtraCode[0])
+    return true;
+  // An inline-asm memory operand is (base register, displacement), printed as
+  // the usual `disp($base)`.
+  const MachineOperand &Disp = MI->getOperand(OpNo + 1);
+  O << (Disp.isImm() ? Disp.getImm() : 0) << '('
+    << AlphaInstPrinter::getRegisterName(MI->getOperand(OpNo).getReg()) << ')';
+  return false;
 }
 
 extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeAlphaAsmPrinter() {
