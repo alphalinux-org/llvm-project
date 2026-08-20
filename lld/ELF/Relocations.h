@@ -87,10 +87,10 @@ enum RelExpr {
   RE_AARCH64_PAGE_PC,
   RE_AARCH64_TLSDESC_PAGE,
   RE_AARCH64_AUTH,
-  // gp (= .got + 0x8000) relative to the ldah of a gp-load pair.
+  // The gp of the file being relocated, relative to the ldah of a gp-load pair.
   RE_ALPHA_GPDISP,
-  // Relative to gp: a symbol's address, or the address of a GOT entry whose
-  // offset within .got is carried in the addend.
+  // Relative to the gp of the file being relocated: a symbol's address, or the
+  // address of a GOT entry whose offset within .got is carried in the addend.
   RE_ALPHA_GPREL,
   RE_ALPHA_GOT,
   RE_ARM_PCA,
