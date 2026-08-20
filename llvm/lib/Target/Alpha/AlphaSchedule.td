@@ -147,6 +147,73 @@ multiclass AlphaInstRW {
 }
 
 //===----------------------------------------------------------------------===//
+// 21064 (EV4): dual-issue, in-order.
+//===----------------------------------------------------------------------===//
+
+def Alpha21064Model : SchedMachineModel {
+  let IssueWidth = 2;
+  let MicroOpBufferSize = 0;  // In-order.
+  let LoadLatency = 3;
+  let MispredictPenalty = 5;
+  let CompleteModel = 1;
+}
+
+let SchedModel = Alpha21064Model in {
+  def EV4_Ebox : ProcResource<1>;  // Integer operate.
+  def EV4_Abox : ProcResource<1>;  // Load/store.
+  def EV4_Fbox : ProcResource<1>;  // Floating-point operate.
+  def EV4_Mul  : ProcResource<1>;  // Non-pipelined integer multiplier.
+  def EV4_FDiv : ProcResource<1>;  // Non-pipelined FP divider.
+
+  def : WriteRes<Wr_IALU,   [EV4_Ebox]> { let Latency = 1; }
+  def : WriteRes<Wr_ILog,   [EV4_Ebox]> { let Latency = 1; }
+  def : WriteRes<Wr_ICmp,   [EV4_Ebox]> { let Latency = 2; }
+  def : WriteRes<Wr_ICmov,  [EV4_Ebox]> { let Latency = 2; }
+  def : WriteRes<Wr_IShift, [EV4_Ebox]> { let Latency = 2; }
+  def : WriteRes<Wr_IMul,   [EV4_Ebox, EV4_Mul]> {
+    let Latency = 23; let ReleaseAtCycles = [1, 23];
+  }
+  def : WriteRes<Wr_IMulH,  [EV4_Ebox, EV4_Mul]> {
+    let Latency = 23; let ReleaseAtCycles = [1, 23];
+  }
+  def : WriteRes<Wr_IMVI,   [EV4_Ebox]> { let Latency = 2; }
+  def : WriteRes<Wr_ILoad,  [EV4_Abox]> { let Latency = 3; }
+  def : WriteRes<Wr_IStore, [EV4_Abox]> { let Latency = 1; }
+  def : WriteRes<Wr_FtoI,   [EV4_Abox]> { let Latency = 3; }
+  def : WriteRes<Wr_ItoF,   [EV4_Abox]> { let Latency = 3; }
+  def : WriteRes<Wr_FAdd,   [EV4_Fbox]> { let Latency = 6; }
+  def : WriteRes<Wr_FMul,   [EV4_Fbox]> { let Latency = 6; }
+  def : WriteRes<Wr_FCmov,  [EV4_Fbox]> { let Latency = 6; }
+  def : WriteRes<Wr_FDivS,  [EV4_Fbox, EV4_FDiv]> {
+    let Latency = 34; let ReleaseAtCycles = [1, 34];
+  }
+  def : WriteRes<Wr_FDivT,  [EV4_Fbox, EV4_FDiv]> {
+    let Latency = 63; let ReleaseAtCycles = [1, 63];
+  }
+  // Square root needs the FIX extension (ev6), so it is never issued here; these
+  // keep the model complete.
+  def : WriteRes<Wr_FSqrtS, [EV4_Fbox]> { let Latency = 33; }
+  def : WriteRes<Wr_FSqrtT, [EV4_Fbox]> { let Latency = 63; }
+  def : WriteRes<Wr_FLoad,  [EV4_Abox]> { let Latency = 3; }
+  def : WriteRes<Wr_FStore, [EV4_Abox]> { let Latency = 1; }
+  def : WriteRes<Wr_Br,     [EV4_Ebox]> { let Latency = 1; }
+  def : WriteRes<Wr_JSR,    [EV4_Ebox]> { let Latency = 3; }
+  def : WriteRes<Wr_Fpcr,   [EV4_Fbox]> { let Latency = 6; }
+  def : WriteRes<Wr_Misc,   [EV4_Abox]> { let Latency = 1; }
+  def : ReadAdvance<Rd_FStData, 0>;  // No store bypass distinction on the EV4.
+  // A compare forwarded to a branch test operand is one cycle instead of two.
+  def : ReadAdvance<Rd_ITest, 1, [Wr_ICmp]>;
+  // Store-data bypass: an integer add/logic/shift/compare/cmov result used as
+  // store data forwards with an effective latency of zero (the advance is
+  // clamped, so the latency-1 and latency-2 producers all reach zero).
+  def : ReadAdvance<Rd_StData, 2,
+                    [Wr_IALU, Wr_ILog, Wr_IShift, Wr_ICmp, Wr_ICmov]>;
+  def : ReadAdvance<Rd_IMulOp, 0>;  // Multiply-operand delay not modeled here.
+
+  defm : AlphaInstRW;
+}
+
+//===----------------------------------------------------------------------===//
 // 21164 (EV5): quad-issue, in-order.  Integer pipes E0 and E1 (shift, store,
 // and multiply are E0 only); floating-point add pipe FA and multiply pipe FM.
 // The 21164PC (PCA56) shares this core and adds the motion-video instructions,
