@@ -6,6 +6,7 @@ tablegen(LLVM AlphaGenAsmWriter.inc -gen-asm-writer)
 tablegen(LLVM AlphaGenCallingConv.inc -gen-callingconv)
 tablegen(LLVM AlphaGenDAGISel.inc -gen-dag-isel)
 tablegen(LLVM AlphaGenInstrInfo.inc -gen-instr-info)
+tablegen(LLVM AlphaGenMCCodeEmitter.inc -gen-emitter)
 tablegen(LLVM AlphaGenRegisterInfo.inc -gen-register-info)
 tablegen(LLVM AlphaGenSubtargetInfo.inc -gen-subtarget)
 

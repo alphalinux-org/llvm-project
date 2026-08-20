@@ -17,6 +17,12 @@
 
 namespace llvm {
 class Target;
+class MCCodeEmitter;
+class MCContext;
+class MCInstrInfo;
+
+MCCodeEmitter *createAlphaMCCodeEmitter(const MCInstrInfo &MCII,
+                                        MCContext &Ctx);
 } // end namespace llvm
 
 // Defines symbolic names for Alpha registers.
