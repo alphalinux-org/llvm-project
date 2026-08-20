@@ -95,6 +95,12 @@ AlphaLegalizerInfo::AlphaLegalizerInfo(const AlphaSubtarget &ST) {
   getActionDefinitionsBuilder({G_FADD, G_FSUB, G_FMUL, G_FDIV})
       .legalFor({s32, s64});
 
+  // A floating compare leaves its answer in an integer register, the way an
+  // integer compare does.
+  getActionDefinitionsBuilder(G_FCMP)
+      .legalFor({{s1, s32}, {s1, s64}, {s64, s32}, {s64, s64}})
+      .clampScalar(0, s64, s64);
+
   getActionDefinitionsBuilder(G_FCONSTANT).legalFor({s32, s64});
 
   getActionDefinitionsBuilder({G_FPEXT, G_FPTRUNC})
