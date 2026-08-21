@@ -326,6 +326,11 @@ AlphaTargetLowering::getConstraintType(StringRef Constraint) const {
       if (Subtarget.hasNoFPRegs())
         break;
       return C_RegisterClass;
+    case 'v': // $0
+    case 'a': // $24
+    case 'b': // $25
+    case 'c': // $27
+      return C_Register;
     case 'I': // Unsigned 8-bit constant.
     case 'J': // The constant zero.
     case 'K': // Signed 16-bit constant.
@@ -411,6 +416,15 @@ AlphaTargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
     switch (Constraint[0]) {
     case 'r':
       return std::make_pair(0U, &Alpha::GPRCRegClass);
+    // Single fixed integer registers, matching GCC's alpha constraints.
+    case 'v':
+      return std::make_pair((unsigned)Alpha::R0, &Alpha::GPRCRegClass);
+    case 'a':
+      return std::make_pair((unsigned)Alpha::R24, &Alpha::GPRCRegClass);
+    case 'b':
+      return std::make_pair((unsigned)Alpha::R25, &Alpha::GPRCRegClass);
+    case 'c':
+      return std::make_pair((unsigned)Alpha::R27, &Alpha::GPRCRegClass);
     case 'f':
       // Nothing to bind to under -mno-fp-regs; see getConstraintType.
       if (Subtarget.hasNoFPRegs())
