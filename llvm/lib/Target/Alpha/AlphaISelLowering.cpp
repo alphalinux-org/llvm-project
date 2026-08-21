@@ -188,6 +188,28 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   computeRegisterProperties(STI.getRegisterInfo());
 }
 
+bool AlphaTargetLowering::decomposeMulByConstant(LLVMContext &Context, EVT VT,
+                                                 SDValue C) const {
+  // Only the 64-bit multiply is a candidate; narrower multiplies are promoted
+  // to it.
+  if (VT != MVT::i64)
+    return false;
+
+  const APInt &Imm = cast<ConstantSDNode>(C)->getAPIntValue();
+
+  // x * 3 is a single s4subq (4x - x); an isel pattern handles it, so keep it
+  // as a multiply here rather than splitting it into a shift and subtract.
+  if (Imm == 3)
+    return false;
+
+  // Split when the constant, after removing trailing zeros, is one away from a
+  // power of two: the DAGCombiner then emits (shl x, N) +/- x, which folds into
+  // an s4addq/s8addq/s8subq when N is 2 or 3.
+  APInt MulC = Imm.abs();
+  MulC.lshrInPlace(MulC.countr_zero());
+  return (MulC - 1).isPowerOf2() || (MulC + 1).isPowerOf2();
+}
+
 TargetLowering::ConstraintType
 AlphaTargetLowering::getConstraintType(StringRef Constraint) const {
   if (Constraint.size() == 1 && Constraint[0] == 'f')

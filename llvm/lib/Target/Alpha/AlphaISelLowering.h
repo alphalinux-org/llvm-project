@@ -230,6 +230,11 @@ public:
     return !Val.isDenormal();
   }
 
+  // The multiplier is slow, so split a multiply by a constant of the form
+  // 2^N +/- 1 (or a shifted such value) into a shift and an add/subtract.
+  bool decomposeMulByConstant(LLVMContext &Context, EVT VT,
+                              SDValue C) const override;
+
   SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
                                bool IsVarArg,
                                const SmallVectorImpl<ISD::InputArg> &Ins,
