@@ -863,6 +863,10 @@ defm : GprelFold<tglobaladdr>;
 let Defs = [R0], hasSideEffects = 1, isCodeGenOnly = 1 in
 def RDUNIQ : PalForm<0x9e, (outs), (ins), "call_pal 0x9e", []>;
 
+// Write the thread pointer from $0 via the wrunique PALcall.
+let Uses = [R0], hasSideEffects = 1, isCodeGenOnly = 1 in
+def WRUNIQ : PalForm<0x9f, (outs), (ins), "call_pal 0x9f", []>;
+
 //===----------------------------------------------------------------------===//
 // PALcode calls (assembler support).
 //===----------------------------------------------------------------------===//

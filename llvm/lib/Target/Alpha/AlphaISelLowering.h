@@ -363,6 +363,8 @@ private:
   SDValue LowerBR_JT(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerDivRem(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerMULHS(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerINTRINSIC_WO_CHAIN(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerINTRINSIC_VOID(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerVASTART(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerVAARG(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerVACOPY(SDValue Op, SelectionDAG &DAG) const;
