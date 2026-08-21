@@ -33,5 +33,6 @@ void accepted(int i, int *p) {
   asm volatile("" ::"N"(-256));
   asm volatile("" ::"O"(-255));
   asm volatile("" ::"f"(1.0));
+  asm volatile("" ::"a"(i), "b"(i), "c"(i), "v"(i));
   asm volatile("" ::"Q"(*p), "U"(*p));
 }
