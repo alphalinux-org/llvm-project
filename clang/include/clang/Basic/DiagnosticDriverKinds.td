@@ -500,6 +500,13 @@ def warn_drv_unused_x : Warning<
 def warn_drv_empty_joined_argument : Warning<
   "joined argument expects additional value: '%0'">,
   InGroup<UnusedCommandLineArgument>;
+def warn_drv_alpha_ieee_conformant_needs_modes : Warning<
+  "'%0' marks the object IEEE conformant but the arithmetic will not be: it "
+  "needs -mtrap-precision=i and -mfp-trap-mode=su or -mfp-trap-mode=sui">,
+  InGroup<UnusedCommandLineArgument>;
+def warn_drv_alpha_fp_completion_needs_trap_precision : Warning<
+  "fp software completion requires -mtrap-precision=i">,
+  InGroup<UnusedCommandLineArgument>;
 def warn_drv_diagnostics_hotness_requires_pgo : Warning<
   "argument '%0' requires profile-guided optimization information">,
   InGroup<UnusedCommandLineArgument>;
