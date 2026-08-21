@@ -35,6 +35,12 @@ def FeatureBuildConstants
     : SubtargetFeature<"build-constants", "HasBuildConstants", "true",
                        "Materialize wide constants inline instead of loading "
                        "them from the constant pool">;
+
+// Gather small, locally-defined globals into .sdata/.sbss near the global
+// pointer.  This is gcc's -msmall-data; the default is -mlarge-data.  It is a
+// placement decision only -- addressing does not key on it.
+def FeatureSmallData : SubtargetFeature<"small-data", "HasSmallData", "true",
+    "Place small globals in .sdata and .sbss">;
 // Pre-BWX byte/word store variants: plain read-modify-write vs. lock-based.
 def UnsafeBWStore
     : Predicate<"!Subtarget->hasBWX() && !Subtarget->hasSafeBWA()">;

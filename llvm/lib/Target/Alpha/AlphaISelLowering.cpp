@@ -833,7 +833,13 @@ SDValue AlphaTargetLowering::LowerGlobalAddress(SDValue Op,
   // rather than loading it from the GOT.  Only a symbol the GOT entry itself
   // has to answer for stays there.  This is not just a saving of one
   // instruction: a gp reaches 64KB of GOT, i.e. 8192 entries, and spending one
-  // on every local string constant overflows that on a large link.
+  // on every local string constant overflows that on a large link.  Being in a
+  // small section is about where the object is placed, not about whether its
+  // address can be formed from gp: a preemptible definition still goes in
+  // .sdata under -msmall-data, but its address is whatever the dynamic linker
+  // picks, so it is reached through the GOT -- gcc does exactly this, emitting
+  // `.sbss' placement together with an `!literal' load for a
+  // default-visibility global built -fPIC -msmall-data.
   if (isGprelAddressable(*N->getGlobal())) {
     SDValue GP = DAG.getRegister(Alpha::R29, MVT::i64);
     SDValue Hi = DAG.getNode(AlphaISD::GPREL_HI, DL, MVT::i64, TGA, GP);
