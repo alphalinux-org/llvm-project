@@ -77,6 +77,10 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
   setOperationAction(ISD::VASTART, MVT::Other, Custom);
   setOperationAction(ISD::VAARG, MVT::Other, Custom);
   setOperationAction(ISD::VACOPY, MVT::Other, Custom);
+  // llvm.alpha.set_thread_pointer writes the PALcode unique value (wrunique),
+  // and llvm.thread_pointer reads it (rduniq).
+  setOperationAction(ISD::INTRINSIC_VOID, MVT::Other, Custom);
+  setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::Other, Custom);
   setOperationAction(ISD::VAEND, MVT::Other, Expand);
 
   // Global addresses are loaded from the GOT; constant pools are GP-relative.
@@ -739,6 +743,41 @@ void AlphaTargetLowering::ReplaceNodeResults(SDNode *N,
   }
 }
 
+SDValue AlphaTargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op,
+                                                     SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  switch (Op.getConstantOperandVal(0)) {
+  case Intrinsic::thread_pointer: {
+    // Read the thread pointer from the PALcode unique value (call_pal rduniq),
+    // whose result is fixed in $0.
+    SDValue RdUniq =
+        SDValue(DAG.getMachineNode(Alpha::RDUNIQ, DL, MVT::Glue), 0);
+    return DAG.getCopyFromReg(DAG.getEntryNode(), DL, Alpha::R0, MVT::i64,
+                              RdUniq);
+  }
+  default:
+    return SDValue();
+  }
+}
+
+SDValue AlphaTargetLowering::LowerINTRINSIC_VOID(SDValue Op,
+                                                 SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  switch (Op.getConstantOperandVal(1)) {
+  case Intrinsic::alpha_set_thread_pointer: {
+    // Move the new thread pointer into $0 and write it with the wrunique PAL
+    // call, mirroring the rduniq read.  The copy is glued to the call so the
+    // scheduler keeps them adjacent.
+    SDValue Copy = DAG.getCopyToReg(Op.getOperand(0), DL, Alpha::R0,
+                                    Op.getOperand(2), SDValue());
+    SDValue Ops[] = {Copy, Copy.getValue(1)};
+    return SDValue(DAG.getMachineNode(Alpha::WRUNIQ, DL, MVT::Other, Ops), 0);
+  }
+  default:
+    return SDValue();
+  }
+}
+
 SDValue AlphaTargetLowering::LowerOperation(SDValue Op,
                                             SelectionDAG &DAG) const {
   switch (Op.getOpcode()) {
@@ -752,6 +791,10 @@ SDValue AlphaTargetLowering::LowerOperation(SDValue Op,
       return DAG.getNode(ISD::MEMBARRIER, SDLoc(Op), MVT::Other,
                          Op.getOperand(0));
     return Op;
+  case ISD::INTRINSIC_WO_CHAIN:
+    return LowerINTRINSIC_WO_CHAIN(Op, DAG);
+  case ISD::INTRINSIC_VOID:
+    return LowerINTRINSIC_VOID(Op, DAG);
   case ISD::GlobalAddress:
     return LowerGlobalAddress(Op, DAG);
   case ISD::GlobalTLSAddress:
