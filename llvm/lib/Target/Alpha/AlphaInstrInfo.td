@@ -958,6 +958,16 @@ def MOVf2i : AlphaPseudo<(outs GPRC:$dst), (ins FPRC:$src), "# MOVf2i",
                          [(set i64:$dst, (bitconvert f64:$src))]>;
 }
 
+// The FIX extension (ev6) moves the raw bits directly between an integer and a
+// T_floating register, so the MOVi2f/MOVf2i custom inserter emits these instead
+// of the stack round trip.
+let Predicates = [HasFIX], hasSideEffects = 0 in {
+def ITOFT : FForm<0x14, 0x024, (outs FPRC:$Rc), (ins GPRC:$Ra),
+                  "itoft $Ra, $Rc", []> { let Rb = 31; }
+def FTOIT : FForm<0x1c, 0x070, (outs GPRC:$Rc), (ins FPRC:$Ra),
+                  "ftoit $Ra, $Rc", []> { let Rb = 31; }
+}
+
 // Signed integer/floating conversions: move the bits into a floating-point
 // register, then convert.  f32 results/inputs go through f64.
 def : Pat<(f64 (sint_to_fp GPRC:$x)), (CVTQT (MOVi2f GPRC:$x))>;
