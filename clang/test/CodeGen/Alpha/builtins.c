@@ -39,3 +39,10 @@ long test_insql(long x, long y) { return __builtin_alpha_insql(x, y); }
 // CHECK-LABEL: @test_mskwh
 // CHECK: call i64 @llvm.alpha.mskwh(i64 %{{.*}}, i64 %{{.*}})
 long test_mskwh(long x, long y) { return __builtin_alpha_mskwh(x, y); }
+
+// __builtin_set_thread_pointer keeps GCC's unprefixed spelling but is an Alpha
+// target builtin: no other target can lower it, so declaring it generically
+// would let it reach a back end that crashes selecting it.
+// CHECK-LABEL: @test_set_thread_pointer
+// CHECK: call void @llvm.alpha.set.thread.pointer(ptr %{{.*}})
+void test_set_thread_pointer(void *p) { __builtin_set_thread_pointer(p); }
