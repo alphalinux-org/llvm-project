@@ -93,3 +93,17 @@ let Features = "mvi" in {
   def __builtin_alpha_unpkbl : AlphaUnary;
   def __builtin_alpha_unpkbw : AlphaUnary;
 }
+
+//===----------------------------------------------------------------------===//
+// Thread pointer.
+//===----------------------------------------------------------------------===//
+
+// GCC spells the setter without a target prefix, so match it.  It is still a
+// target builtin: no other target implements it, and declaring it generically
+// would let it be called on a target that cannot lower it.  The getter,
+// __builtin_thread_pointer, is generic in Clang already.
+def __builtin_set_thread_pointer : TargetBuiltin {
+  let Spellings = ["__builtin_set_thread_pointer"];
+  let Prototype = "void(void*)";
+  let Attributes = [NoThrow];
+}
