@@ -100,6 +100,16 @@ def FeatureFPRoundChopped
     : SubtargetFeature<"fpround-chopped", "HasFPRoundChopped", "true",
                        "Round floating point toward zero (/c)">;
 
+// -mieee-conformant: mark the generated code as IEEE conformant with a
+// `.eflag 48' in each function prologue, which is what tells the loader to
+// enable software completion for the object.  gcc documents this as the
+// option's only effect, and alpha.cc does exactly that and nothing else -- it
+// implies no other option, and it is the user's job to also ask for
+// -mtrap-precision=i and -mfp-trap-mode=su or sui.
+def FeatureIEEEConformant
+    : SubtargetFeature<"ieee-conformant", "HasIEEEConformant", "true",
+                       "Mark the object as IEEE conformant (.eflag 48)">;
+
 // -mtrap-precision=i (and -mieee-conformant): follow each trapping
 // floating-point instruction with a trap barrier so an arithmetic trap is
 // precise to the instruction that raised it.

@@ -13,6 +13,7 @@
 
 #include "Alpha.h"
 #include "AlphaMachineFunctionInfo.h"
+#include "AlphaSubtarget.h"
 #include "AlphaTargetMachine.h"
 #include "MCTargetDesc/AlphaInstPrinter.h"
 #include "MCTargetDesc/AlphaMCTargetDesc.h"
@@ -104,6 +105,12 @@ void AlphaAsmPrinter::emitFunctionBodyStart() {
   if (OutStreamer->hasRawTextSupport()) {
     OutStreamer->emitRawText(Twine("\t.ent ") + CurrentFnSym->getName());
     OutStreamer->emitRawText(Twine("\t.prologue ") + (UsesGP ? "1" : "0"));
+    // -mieee-conformant sets PDSC_EXC_IEEE in the procedure descriptor, which
+    // is what asks the loader for IEEE-conformant math-library routines.  gcc
+    // emits this from alpha_start_function, per function and only in textual
+    // output, and documents it as the option's whole effect.
+    if (MF->getSubtarget<AlphaSubtarget>().hasIEEEConformant())
+      OutStreamer->emitRawText(StringRef("\t.eflag 48"));
   }
 }
 
