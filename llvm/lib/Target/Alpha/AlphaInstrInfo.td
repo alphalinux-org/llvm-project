@@ -681,6 +681,10 @@ def : Pat<(add GPRC:$Rb, immSExt16NotU8:$disp),
 // `not $x` is `ornot $31, $x` (0 OR ~x), avoiding an explicit -1.
 def : Pat<(not GPRC:$x), (ORNOT R31, GPRC:$x)>;
 
+// Negate is `subq $31, $x` (0 - x); keep the zero in the register file rather
+// than materializing it with an lda.
+def : Pat<(sub (i64 0), GPRC:$x), (SUBQ R31, GPRC:$x)>;
+
 //===----------------------------------------------------------------------===//
 // Global pointer and global addresses.
 //===----------------------------------------------------------------------===//
