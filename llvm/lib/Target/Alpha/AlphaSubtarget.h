@@ -84,6 +84,7 @@ public:
   bool hasBuildConstants() const { return HasBuildConstants; }
   bool hasNoFPRegs() const { return HasNoFPRegs; }
   bool hasTrapPrecisionInsn() const { return HasTrapPrecisionInsn; }
+  bool hasIEEEConformant() const { return HasIEEEConformant; }
   bool hasPreciseArithTraps() const { return HasPreciseArithTraps; }
 
   // Whether physical register PhysReg was reserved with -ffixed-$<n>.
