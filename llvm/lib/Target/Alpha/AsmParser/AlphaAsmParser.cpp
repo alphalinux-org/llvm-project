@@ -297,15 +297,32 @@ ParseStatus AlphaAsmParser::parseDirective(AsmToken DirectiveID) {
     StringRef Arch;
     if (getParser().parseIdentifier(Arch))
       return Error(Loc, "expected architecture name after .arch");
+    // These are the names GNU as's .arch takes.  Its cpu_types table
+    // (gas/config/tc-alpha.c) also holds chip numbers such as 21264, but those
+    // reach it only through the -m command line: .arch reads a symbol name, so
+    // a leading digit is rejected there, and we reject it too.
+    //
+    // What each name permits comes from that table.  Its CIX bit gates
+    // ctpop/ctlz/cttz and itoft/ftoit/sqrtt alike, so it maps to both of our
+    // features; its MAX bit is our MVI.  Note ev6 grants CIX there even though
+    // the 21264 chip has only the FIX half -- .arch says what the assembler
+    // will accept, not what the part implements, which is -mcpu's job.
     SmallVector<StringRef, 4> Feats;
-    if (Arch == "ev56")
+    if (Arch == "ev4" || Arch == "ev45" || Arch == "lca45" || Arch == "ev5" ||
+        Arch == "all") {
+      // Base ISA only.
+    } else if (Arch == "ev56") {
       Feats = {"bwx"};
-    else if (Arch == "pca56")
+    } else if (Arch == "pca56") {
       Feats = {"bwx", "mvi"};
-    else if (Arch == "ev6" || Arch == "ev67" || Arch == "ev68")
+    } else if (Arch == "ev6" || Arch == "ev67" || Arch == "ev68") {
       Feats = {"bwx", "cix", "fix", "mvi"};
-    else if (Arch != "ev4" && Arch != "ev45" && Arch != "ev5")
+    } else {
+      // GNU as warns and falls back to the base ISA here.  An error is more
+      // useful: the instructions the name was meant to enable would fail to
+      // assemble a line later anyway.
       return Error(Loc, "unknown Alpha architecture '" + Arch + "'");
+    }
     MCSubtargetInfo &STI = copySTI();
     // .arch replaces the instruction set rather than adding to it, so `.arch
     // ev4' after `.arch ev6' narrows, as it does in GNU as.  Clearing first is
