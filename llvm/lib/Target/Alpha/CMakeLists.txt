@@ -24,6 +24,7 @@ add_llvm_target(AlphaCodeGen
   AlphaRegisterInfo.cpp
   AlphaSubtarget.cpp
   AlphaTargetMachine.cpp
+  AlphaTargetObjectFile.cpp
 
   LINK_COMPONENTS
   AlphaDesc

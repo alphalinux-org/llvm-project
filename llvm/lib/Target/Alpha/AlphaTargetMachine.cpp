@@ -9,6 +9,7 @@
 #include "AlphaTargetMachine.h"
 #include "Alpha.h"
 #include "AlphaMachineFunctionInfo.h"
+#include "AlphaTargetObjectFile.h"
 #include "AlphaTargetTransformInfo.h"
 #include "TargetInfo/AlphaTargetInfo.h"
 #include "llvm/CodeGen/Passes.h"
@@ -40,7 +41,7 @@ AlphaTargetMachine::AlphaTargetMachine(const Target &T, const Triple &TT,
     : CodeGenTargetMachineImpl(T, TT.computeDataLayout(), TT, CPU, FS, Options,
                                getEffectiveRelocModel(JIT, RM),
                                getEffectiveCodeModel(CM, CodeModel::Small), OL),
-      TLOF(std::make_unique<TargetLoweringObjectFileELF>()) {
+      TLOF(std::make_unique<AlphaTargetObjectFile>()) {
   // Reconcile call-frame information across blocks so unwinding is correct at
   // any point, including within epilogues (see resetCFIToInitialState).
   setCFIFixup(true);

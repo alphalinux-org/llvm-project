@@ -79,6 +79,7 @@ public:
   bool hasPrefetch() const { return HasPrefetch; }
   bool hasPrefetchEvictNext() const { return HasPrefetchEvictNext; }
   bool hasSafeBWA() const { return HasSafeBWA; }
+  bool hasSmallData() const { return HasSmallData; }
   bool hasBuildConstants() const { return HasBuildConstants; }
   bool hasNoFPRegs() const { return HasNoFPRegs; }
 

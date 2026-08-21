@@ -1,4 +1,4 @@
-; RUN: llc -mtriple=alpha-unknown-linux-gnu -filetype=obj < %s \
+; RUN: llc -mtriple=alpha-unknown-linux-gnu -mattr=+small-data -filetype=obj < %s \
 ; RUN:   | llvm-readobj -r - | FileCheck %s
 
 ; A call establishes the GP (gpdisp), loads the callee address from the GOT
@@ -19,7 +19,8 @@ define i64 @call(i64 %x) {
   ret i64 %r
 }
 
-; A locally-defined global is addressed GP-relative (gprelhigh/gprellow).
+; A small, locally-defined global goes in .sdata and is addressed GP-relative
+; (gprelhigh/gprellow); a preemptible or external one stays in the GOT.
 
 ; CHECK: R_ALPHA_GPRELHIGH g
 ; CHECK: R_ALPHA_GPRELLOW g
