@@ -32,6 +32,14 @@ class AlphaInst<dag outs, dag ins, string asmstr, list<dag> pattern>
   bits<3> TrapClass = 0;
   let TSFlags{2-0} = TrapClass;
 
+  // Which field of this encoding a relocation can be written into, so the
+  // assembler can reject a specifier that does not fit one -- GNU as calls
+  // that "invalid relocation for field".  0 none, 1 the 16-bit memory
+  // displacement, 2 the 14-bit branch-prediction hint, 3 the 21-bit branch
+  // displacement.
+  bits<2> RelocField = 0;
+  let TSFlags{4-3} = RelocField;
+
   bits<6> Opcode = 0;
   let Inst{31-26} = Opcode;
 
@@ -96,6 +104,7 @@ class FForm<bits<6> opc, bits<11> func, dag outs, dag ins, string asmstr,
 // getMemEncoding (Rb << 16 | disp16).
 class MForm<bits<6> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
     : AlphaInst<outs, ins, asmstr, pattern> {
+  let RelocField = 1;
   bits<5> Ra;
   bits<21> addr;
   let Opcode = opc;
@@ -107,6 +116,7 @@ class MForm<bits<6> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
 // plus displacement written separately (lda/ldah and the relocated variants).
 class MFormD<bits<6> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
     : AlphaInst<outs, ins, asmstr, pattern> {
+  let RelocField = 1;
   bits<5> Ra;
   bits<5> Rb;
   bits<16> disp;
@@ -121,6 +131,7 @@ class MFormD<bits<6> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
 // of the address they are given).
 class MFormZ<bits<6> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
     : AlphaInst<outs, ins, asmstr, pattern> {
+  let RelocField = 1;
   bits<5> Ra;
   bits<5> base;
   let Opcode = opc;
@@ -133,6 +144,7 @@ class MFormZ<bits<6> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
 // fixup from the branch target.
 class BForm<bits<6> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
     : AlphaInst<outs, ins, asmstr, pattern> {
+  let RelocField = 3;
   bits<5> Ra;
   bits<21> target;
   let Opcode = opc;
@@ -144,6 +156,7 @@ class BForm<bits<6> opc, dag outs, dag ins, string asmstr, list<dag> pattern>
 // Rb (20-16, target), 2-bit sub-opcode (15-14), 14-bit hint (13-0).
 class MbrForm<bits<2> sub, dag outs, dag ins, string asmstr, list<dag> pattern>
     : AlphaInst<outs, ins, asmstr, pattern> {
+  let RelocField = 2;
   bits<5> Ra;
   bits<5> Rb;
   bits<14> hint = 0;

@@ -2,13 +2,15 @@
 # RUN:   | FileCheck %s
 
 ## !samegp is the only relocation specifier a branch displacement takes.  The
-## others name relocations that mean nothing in a 21-bit PC-relative field, and
-## taking whichever one was written as the fixup kind put it on the branch: this
-## assembled to a branch carrying R_ALPHA_LITERAL.
+## others fill a 16-bit memory displacement and mean nothing in a 21-bit
+## PC-relative field, so they are rejected the way GNU as rejects them; taking
+## whichever one was written as the fixup kind put it on the branch, and this
+## assembled to a branch carrying R_ALPHA_LITERAL.  The code emitter keeps a
+## check of its own for a specifier reaching it from anywhere but the parser.
 
 	.text
 	br $31, foo		!literal
-# CHECK: error: unsupported relocation specifier on a branch target
+# CHECK: error: invalid relocation for field
 
 	bsr $26, foo		!gpdisp
-# CHECK: error: unsupported relocation specifier on a branch target
+# CHECK: error: invalid relocation for field
