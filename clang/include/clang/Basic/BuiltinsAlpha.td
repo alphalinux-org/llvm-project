@@ -20,8 +20,13 @@ class AlphaBuiltin<string prototype> : TargetBuiltin {
   let Attributes = [NoThrow, Const];
 }
 
-class AlphaUnary  : AlphaBuiltin<"long int(long int)">;
-class AlphaBinary : AlphaBuiltin<"long int(long int, long int)">;
+// GCC declares every one of these with the *unsigned* DImode type -- its
+// alpha_init_builtins builds each prototype out of `alpha_dimode_u', which is
+// `type_for_mode (DImode, 1)'.  The distinction is visible in ordinary source:
+// a right shift of `__builtin_alpha_zapnot(-1, 0xff)' is logical in GCC and
+// would be arithmetic with a signed return type.
+class AlphaUnary  : AlphaBuiltin<"unsigned long int(unsigned long int)">;
+class AlphaBinary : AlphaBuiltin<"unsigned long int(unsigned long int, unsigned long int)">;
 
 //===----------------------------------------------------------------------===//
 // Base instruction set: always available.
@@ -55,12 +60,12 @@ def __builtin_alpha_msklh : AlphaBinary;
 def __builtin_alpha_mskqh : AlphaBinary;
 
 def __builtin_alpha_amask   : AlphaUnary;
-def __builtin_alpha_implver : AlphaBuiltin<"long int()">;
+def __builtin_alpha_implver : AlphaBuiltin<"unsigned long int()">;
 
 // rpcc reads a running counter, so it is not const.
 def __builtin_alpha_rpcc : TargetBuiltin {
   let Spellings = ["__builtin_alpha_rpcc"];
-  let Prototype = "long int()";
+  let Prototype = "unsigned long int()";
   let Attributes = [NoThrow];
 }
 

@@ -46,3 +46,20 @@ long test_mskwh(long x, long y) { return __builtin_alpha_mskwh(x, y); }
 // CHECK-LABEL: @test_set_thread_pointer
 // CHECK: call void @llvm.alpha.set.thread.pointer(ptr %{{.*}})
 void test_set_thread_pointer(void *p) { __builtin_set_thread_pointer(p); }
+
+// Each is declared with GCC's unsigned DImode type -- alpha_init_builtins
+// builds every prototype from `alpha_dimode_u', which is
+// `type_for_mode (DImode, 1)'.  A right shift of a result is therefore
+// logical; a signed declaration would make it arithmetic and disagree with
+// GCC on ordinary source.
+// CHECK-LABEL: @test_result_is_unsigned
+// CHECK: lshr i64
+// CHECK-NOT: ashr i64
+long test_result_is_unsigned(long x, long y) {
+  return __builtin_alpha_zapnot(x, y) >> 4;
+}
+
+// The same for the no-argument forms.
+// CHECK-LABEL: @test_implver_is_unsigned
+// CHECK: lshr i64
+long test_implver_is_unsigned(void) { return __builtin_alpha_implver() >> 4; }
