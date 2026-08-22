@@ -30,6 +30,16 @@
 	jmp $31, ($27), callee	!lituse_jsr!1
 	jmp $31, ($27), callee
 
+## The hint counts longwords from the instruction after the jump, but is
+## spelled as a byte offset -- so a written 4 is a hint field of 1, and the
+## disassembler spells it back the same way.  A value that is not a multiple of
+## four cannot be encoded as written; it is assembled with the low bits dropped
+## and a warning, as GNU as does (see paren-reg-forms.s).
+# CHECK-NEXT: jsr $26, ($27), 4
+# CHECK-NEXT: jmp $31, ($27), 8
+	jsr $26, ($27), 4
+	jmp $31, ($27), 8
+
 ## A plain number is a hint value, not a symbol, and needs no relocation.
 # CHECK-NEXT: jsr $26, ($27)
 # CHECK-NEXT: jmp $31, ($27), 0
