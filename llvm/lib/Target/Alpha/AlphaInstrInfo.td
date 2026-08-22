@@ -722,6 +722,16 @@ def CVTST_S : FP_r<0x16, 0x6ac, "cvtst/s", []>;
 let TrapClass = 1 in  // T-to-S convert is arithmetic: su / sui.
 def CVTTS : FP_r<0x16, 0x0ac, "cvtts", [(set f32:$Rc, (fpround f64:$Rb))]>;
 
+// The longword form of an integer held in a floating register: cvtlq widens
+// the longword in the T-format bits to a quadword and cvtql narrows it back.
+// Nothing selects either -- the compiler converts through memory or through
+// itofs/ftois -- but they are the two halves of the pre-FIX way of moving an
+// integer in and out of the floating file, and the platform's own libm is full
+// of them.  cvtql takes an integer-overflow qualifier and no rounding letter.
+def CVTLQ : FP_r<0x17, 0x010, "cvtlq", []>;
+let TrapClass = 6 in
+def CVTQL : FP_r<0x17, 0x030, "cvtql", []>;
+
 // Square root, from the FIX extension (ev6).
 let Predicates = [HasFIX], hasSideEffects = 0, TrapClass = 1 in {
 def SQRTS : FP_r<0x14, 0x08b, "sqrts", [(set f32:$Rc, (fsqrt f32:$Rb))]>;
@@ -777,6 +787,32 @@ def CMOVGE : OForm<0x11, 0x46, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
                    "cmovge $Ra, $Rb, $Rc", []>;
 def CMOVLE : OForm<0x11, 0x64, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
                    "cmovle $Ra, $Rb, $Rc", []>;
+
+// The trapping-on-overflow forms of the arithmetic instructions.  C leaves
+// signed overflow undefined and this compiler takes the wrapping answer, so
+// nothing selects one, but they exist and hand-written code uses them -- GCC's
+// -ftrapv emits exactly these.
+class ALUV_rr<bits<6> opc, bits<7> func, string mnem>
+    : OForm<opc, func, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
+            mnem # " $Ra, $Rb, $Rc", []>;
+def ADDLV : ALUV_rr<0x10, 0x40, "addl/v">;
+def SUBLV : ALUV_rr<0x10, 0x49, "subl/v">;
+def ADDQV : ALUV_rr<0x10, 0x60, "addq/v">;
+def SUBQV : ALUV_rr<0x10, 0x69, "subq/v">;
+def MULLV : ALUV_rr<0x13, 0x40, "mull/v">;
+def MULQV : ALUV_rr<0x13, 0x60, "mulq/v">;
+
+// The floating-point conditional moves other than fcmovne, which is the only
+// one a select is built out of.  cpyse copies the sign and the exponent.
+class FCMOV_cc<bits<11> func, string mnem>
+    : FForm<0x17, func, (outs FPRC:$Rc), (ins FPRC:$Ra, FPRC:$Rb),
+            mnem # " $Ra, $Rb, $Rc", []>;
+def FCMOVEQ : FCMOV_cc<0x02a, "fcmoveq">;
+def FCMOVLT : FCMOV_cc<0x02c, "fcmovlt">;
+def FCMOVGE : FCMOV_cc<0x02d, "fcmovge">;
+def FCMOVLE : FCMOV_cc<0x02e, "fcmovle">;
+def FCMOVGT : FCMOV_cc<0x02f, "fcmovgt">;
+def CPYSE : FCMOV_cc<0x022, "cpyse">;
 // Move the floating-point control register to/from a floating register.  The
 // operand is encoded in all three register fields.  These carry no pattern and
 // exist only so hand-written assembly (context save/restore) assembles.
@@ -2182,7 +2218,13 @@ def : InstAlias<"clr $dst", (BIS GPRC:$dst, R31, R31)>;
 def : InstAlias<"or $Ra, $Rb, $Rc", (BIS GPRC:$Rc, GPRC:$Ra, GPRC:$Rb)>;
 
 // Integer negate/sign-extend/complement, each with $31 as the first source.
+// The longword and trapping forms are spelled the same way; gcc emits negl
+// freely, so a disassembly of the platform's own libraries cannot be fed back
+// through this assembler without it.
+def : InstAlias<"negl $src, $dst", (SUBL GPRC:$dst, R31, GPRC:$src)>;
+def : InstAlias<"negl/v $src, $dst", (SUBLV GPRC:$dst, R31, GPRC:$src)>;
 def : InstAlias<"negq $src, $dst", (SUBQ GPRC:$dst, R31, GPRC:$src)>;
+def : InstAlias<"negq/v $src, $dst", (SUBQV GPRC:$dst, R31, GPRC:$src)>;
 def : InstAlias<"sextl $src, $dst", (ADDL GPRC:$dst, R31, GPRC:$src)>;
 def : InstAlias<"not $src, $dst", (ORNOT GPRC:$dst, R31, GPRC:$src)>;
 
@@ -2283,6 +2325,12 @@ def CMOVLBCi : BLit<0x11, 0x16, "cmovlbc">;
 def ORNOTi  : BLit<0x11, 0x28, "ornot">;
 def EQVi    : BLit<0x11, 0x48, "eqv">;
 def UMULHi  : BLit<0x13, 0x30, "umulh">;
+def ADDLVi  : BLit<0x10, 0x40, "addl/v">;
+def SUBLVi  : BLit<0x10, 0x49, "subl/v">;
+def ADDQVi  : BLit<0x10, 0x60, "addq/v">;
+def SUBQVi  : BLit<0x10, 0x69, "subq/v">;
+def MULLVi  : BLit<0x13, 0x40, "mull/v">;
+def MULQVi  : BLit<0x13, 0x60, "mulq/v">;
 let Predicates = [HasMVI] in {
 def MINSB8i : BLit<0x1c, 0x38, "minsb8">;
 def MINSW4i : BLit<0x1c, 0x39, "minsw4">;

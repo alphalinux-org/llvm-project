@@ -98,6 +98,11 @@ multiclass AlphaInstRW {
   def : InstRW<[Wr_IMul, Rd_IMulOp], (instrs MULQi)>;
   def : InstRW<[Wr_IMulH, Rd_IMulOp, Rd_IMulOp], (instrs UMULH)>;
   def : InstRW<[Wr_IMulH, Rd_IMulOp], (instrs UMULHi)>;
+  // The trapping-on-overflow forms run in the same units as the wrapping ones.
+  def : InstRW<[Wr_IALU], (instrs
+      ADDLV, ADDLVi, SUBLV, SUBLVi, ADDQV, ADDQVi, SUBQV, SUBQVi)>;
+  def : InstRW<[Wr_IMul, Rd_IMulOp, Rd_IMulOp], (instrs MULLV, MULQV)>;
+  def : InstRW<[Wr_IMul, Rd_IMulOp], (instrs MULLVi, MULQVi)>;
   // Split by arity so the source operands can carry Rd_IMVIOp, which the EV6
   // uses to model the cluster crossing from the multiplier.
   def : InstRW<[Wr_IMVI, Rd_IMVIOp], (instrs
@@ -123,9 +128,11 @@ multiclass AlphaInstRW {
       STT, STS, STTd, STTg, STTt, STSd, STSg, STSt)>;
   def : InstRW<[Wr_FAdd], (instrs
       ADDS, ADDT, SUBS, SUBT, CMPTUN, CMPTEQ, CMPTLE, CMPTLT,
-      CVTQS, CVTQT, CVTTQ, CVTTQn, CVTTS, CVTST, CPYS, CPYSN)>;
+      CVTQS, CVTQT, CVTTQ, CVTTQn, CVTTS, CVTST, CVTLQ, CVTQL,
+      CPYS, CPYSN, CPYSE)>;
   def : InstRW<[Wr_FMul], (instrs MULS, MULT)>;
-  def : InstRW<[Wr_FCmov], (instrs FCMOVNE)>;
+  def : InstRW<[Wr_FCmov], (instrs
+      FCMOVNE, FCMOVEQ, FCMOVLT, FCMOVGE, FCMOVLE, FCMOVGT)>;
   def : InstRW<[Wr_FDivS], (instrs DIVS)>;
   def : InstRW<[Wr_FDivT], (instrs DIVT)>;
   def : InstRW<[Wr_FSqrtS], (instrs SQRTS)>;
