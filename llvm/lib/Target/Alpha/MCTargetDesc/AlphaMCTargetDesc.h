@@ -120,12 +120,38 @@ inline unsigned getFPRoundFuncBits(unsigned Mode) {
 // AlphaInstrFormats.td.
 enum : unsigned { TrapClassMask = 0x7 };
 
+// Which field of an encoding a relocation can be written into.  The values
+// match RelocField in AlphaInstrFormats.td.
+enum : unsigned { RelocFieldShift = 3, RelocFieldMask = 0x3u << RelocFieldShift };
+enum : unsigned {
+  RelocFieldNone = 0,
+  RelocFieldDisp16 = 1,
+  RelocFieldHint14 = 2,
+  RelocFieldBranch21 = 3,
+};
+inline unsigned getRelocField(uint64_t TSFlags) {
+  return (TSFlags & RelocFieldMask) >> RelocFieldShift;
+}
+
 enum : unsigned {
   FPQualTrapMask = 0x7ff,
   FPQualRoundShift = 11,
   FPQualRoundMask = 0x3,
   FPQualPresent = 1u << 13,
+  // The use type of an R_ALPHA_LITUSE the assembler was asked for with a
+  // !lituse_* suffix.  That relocation names no operand -- only its addend
+  // matters, and it says which kind of use this is -- so it belongs to the
+  // instruction rather than to any field of it, and travels here.  0 is none.
+  LituseShift = 14,
+  LituseMask = 0x7u << LituseShift,
 };
+
+inline unsigned encodeLituse(unsigned UseType) {
+  return (UseType << LituseShift) & LituseMask;
+}
+inline unsigned getLituse(unsigned Flags) {
+  return (Flags & LituseMask) >> LituseShift;
+}
 
 inline unsigned encodeFPQual(unsigned TrapBits, unsigned RoundMode) {
   return FPQualPresent | (TrapBits & FPQualTrapMask) |

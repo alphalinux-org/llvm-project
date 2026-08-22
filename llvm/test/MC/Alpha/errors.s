@@ -53,6 +53,15 @@
 	lda $29, 0($29) !gpdisp!1
 # CHECK: [[#@LINE-1]]:27: error: !gpdisp!1 is already paired
 
+## A relocation goes into a field of the encoding, and the specifier is only
+## accepted where there is one that fits it.  GNU as reports both of these as
+## "invalid relocation for field": an operate instruction has no field at all,
+## and a 16-bit GP-relative displacement does not fit a jump's 14-bit hint.
+## Saying nothing and dropping what was written leaves an object without the
+## relocation the author asked for.
+	bis $1, $2, $3 !literal
+# CHECK: [[#@LINE-1]]:18: error: invalid relocation for field
+
 ## A floating-point qualifier suffix: the '/' has to be followed by one, and
 ## only an instruction with a trap/rounding field can carry one at all.
 	addt/ $f1, $f2, $f3

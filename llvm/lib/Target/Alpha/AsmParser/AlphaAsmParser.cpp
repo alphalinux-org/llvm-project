@@ -147,11 +147,17 @@ public:
 
   // Wrap the displacement/immediate in a relocation-specifier expression from a
   // trailing `!literal` / `!gprelhigh` / ... suffix.
-  void applySpecifier(unsigned Spec, MCContext &Ctx) {
+  // A relocation goes into a field, and only a memory displacement or an
+  // immediate is one.  Report a register or a token so the caller can say so
+  // rather than dropping what was written.
+  bool applySpecifier(unsigned Spec, MCContext &Ctx) {
     if (Kind == Memory)
       Mem.Off = MCSpecifierExpr::create(Mem.Off, Spec, Ctx);
     else if (Kind == Immediate)
       Imm.Val = MCSpecifierExpr::create(Imm.Val, Spec, Ctx);
+    else
+      return false;
+    return true;
   }
   // Same as applySpecifier but uses a caller-supplied expression as the base
   // instead of the operand's current expression.  Used for !gpdisp!N pairs
@@ -223,6 +229,19 @@ class AlphaAsmParser : public MCTargetAsmParser {
   // the mnemonic without it.  Set while parsing and consumed when matching:
   // most qualified operates are spelled `addt/su' with no def of their own, so
   // the match is retried against the base name with the qualifier recorded.
+  // The field a relocation specifier is written into, to be compared with the
+  // one the matched encoding has.  Every GOT-, GP- and TLS-relative specifier
+  // fills a 16-bit memory displacement; !samegp fills a 21-bit branch.
+  static unsigned specifierRelocField(unsigned Spec) {
+    if (Spec == Alpha::fixup_alpha_brsgp)
+      return Alpha::RelocFieldBranch21;
+    return Alpha::RelocFieldDisp16;
+  }
+
+  // The relocation specifier written on this instruction, checked against the
+  // field the matched encoding actually has once it is known.
+  unsigned PendingSpecifier = 0;
+  SMLoc PendingSpecifierLoc;
   unsigned PendingFPQual = 0;
   bool PendingFPQualIsV = false;
   StringRef PendingFPQualBase;
@@ -585,6 +604,7 @@ bool AlphaAsmParser::parseInstruction(ParseInstructionInfo &Info,
   // Alpha FP instructions can carry a qualifier suffix: divt/c, cvttq/c, etc.
   // The lexer splits "divt/c" into three tokens (divt, /, c), so we must
   // reassemble the full mnemonic before looking it up.
+  PendingSpecifier = 0;
   PendingFPQual = 0;
   PendingFPQualIsV = false;
   PendingFPQualBase = StringRef();
@@ -672,6 +692,7 @@ bool AlphaAsmParser::parseInstruction(ParseInstructionInfo &Info,
                         .Default(0);
     if (!Spec)
       return Error(getLexer().getLoc(), "unknown relocation name");
+    SMLoc SpecLoc = getLexer().getLoc();
     getParser().Lex(); // name
 
     // Parse the optional !seq sequence number used to pair !gpdisp relocations.
@@ -717,10 +738,15 @@ bool AlphaAsmParser::parseInstruction(ParseInstructionInfo &Info,
                          " is already paired; a sequence number names one "
                          "ldah/lda pair");
       }
-    } else {
-      static_cast<AlphaOperand &>(*Operands.back())
-          .applySpecifier(Spec, getContext());
+    } else if (!static_cast<AlphaOperand &>(*Operands.back())
+                    .applySpecifier(Spec, getContext())) {
+      // Nothing to write the relocation into.  GNU as calls this "invalid
+      // relocation for field"; saying nothing and dropping it leaves the
+      // caller with an object missing the relocation they asked for.
+      return Error(SpecLoc, "invalid relocation for field");
     }
+    PendingSpecifier = Spec;
+    PendingSpecifierLoc = SpecLoc;
   }
 
   if (getLexer().isNot(AsmToken::EndOfStatement))
@@ -1176,6 +1202,16 @@ bool AlphaAsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
       Result = R2;
       Flags = PendingFPQual;
     }
+  }
+  if (Result == Match_Success && PendingSpecifier) {
+    // A relocation has to fit the field it is written into, which is not known
+    // until the encoding is.  GNU as checks the same thing and reports it the
+    // same way: a !literal on an operate instruction has nowhere to go, and a
+    // 16-bit !gprelhigh does not fit the 14-bit hint field of a ret.
+    unsigned Have = Alpha::getRelocField(MII.get(Inst.getOpcode()).TSFlags);
+    unsigned Want = specifierRelocField(PendingSpecifier);
+    if (Have != Want)
+      return Error(PendingSpecifierLoc, "invalid relocation for field");
   }
   switch (Result) {
   case Match_Success:
