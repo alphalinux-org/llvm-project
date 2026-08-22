@@ -11,6 +11,7 @@
 #include "AlphaMCAsmInfo.h"
 #include "TargetInfo/AlphaTargetInfo.h"
 #include "llvm/MC/MCDwarf.h"
+#include "llvm/MC/MCInstrAnalysis.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
@@ -113,6 +114,36 @@ static MCAsmInfo *createAlphaMCAsmInfo(const MCRegisterInfo &MRI,
   return MAI;
 }
 
+// Where a branch goes, so a disassembler can name its target.  Without this,
+// llvm-objdump prints the raw displacement and nothing else -- it takes the
+// address from here to look the symbol up -- while binutils names the target
+// on every branch.
+namespace {
+class AlphaMCInstrAnalysis : public MCInstrAnalysis {
+public:
+  explicit AlphaMCInstrAnalysis(const MCInstrInfo *Info)
+      : MCInstrAnalysis(Info) {}
+
+  bool evaluateBranch(const MCInst &Inst, uint64_t Addr, uint64_t Size,
+                      uint64_t &Target) const override {
+    if (Inst.getNumOperands() == 0 ||
+        Info->get(Inst.getOpcode()).operands()[Inst.getNumOperands() - 1]
+                .OperandType != MCOI::OPERAND_PCREL)
+      return false;
+    const MCOperand &Op = Inst.getOperand(Inst.getNumOperands() - 1);
+    if (!Op.isImm())
+      return false;
+    // The displacement counts instructions from the one after the branch.
+    Target = Addr + Size + Op.getImm() * 4;
+    return true;
+  }
+};
+} // end anonymous namespace
+
+static MCInstrAnalysis *createAlphaMCInstrAnalysis(const MCInstrInfo *Info) {
+  return new AlphaMCInstrAnalysis(Info);
+}
+
 static MCInstrInfo *createAlphaMCInstrInfo() {
   MCInstrInfo *X = new MCInstrInfo();
   InitAlphaMCInstrInfo(X);
@@ -144,6 +175,7 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeAlphaTargetMC() {
   Target &T = getTheAlphaTarget();
   TargetRegistry::RegisterMCAsmInfo(T, createAlphaMCAsmInfo);
   TargetRegistry::RegisterMCInstrInfo(T, createAlphaMCInstrInfo);
+  TargetRegistry::RegisterMCInstrAnalysis(T, createAlphaMCInstrAnalysis);
   TargetRegistry::RegisterMCRegInfo(T, createAlphaMCRegisterInfo);
   TargetRegistry::RegisterMCSubtargetInfo(T, createAlphaMCSubtargetInfo);
   TargetRegistry::RegisterMCInstPrinter(T, createAlphaMCInstPrinter);

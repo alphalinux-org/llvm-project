@@ -78,6 +78,27 @@ void AlphaInstPrinter::printRegName(raw_ostream &O, MCRegister Reg) {
   O << getRegisterName(Reg);
 }
 
+// A branch displacement, in instructions from the one after the branch.  A
+// disassembler that knows where the instruction is prints the address it
+// reaches, as binutils does and as every other target here does; otherwise the
+// reader is left doing the arithmetic against a number that means nothing on
+// its own.
+void AlphaInstPrinter::printBranchTarget(const MCInst *MI, uint64_t Address,
+                                         int OpNum, raw_ostream &O) {
+  const MCOperand &Op = MI->getOperand(OpNum);
+  if (!Op.isImm()) {
+    printOperand(MI, OpNum, O);
+    return;
+  }
+  if (!PrintBranchImmAsAddress) {
+    O << Op.getImm();
+    return;
+  }
+  uint64_t Target = Address + 4 + Op.getImm() * 4;
+  Target &= 0xffffffffffffffffULL;
+  O << formatHex(Target);
+}
+
 void AlphaInstPrinter::printOperand(const MCInst *MI, int OpNum,
                                     raw_ostream &O) {
   const MCOperand &MO = MI->getOperand(OpNum);
