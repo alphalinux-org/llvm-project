@@ -3,13 +3,19 @@
 # RUN: not llc -mtriple=alpha-unknown-linux-gnu -mcpu=ev67 \
 # RUN:     -run-pass=alpha-verify-invariants %t/llsc.mir -o /dev/null 2>&1 \
 # RUN:   | FileCheck %s --check-prefix=B1
+# RUN: not llc -mtriple=alpha-unknown-linux-gnu -mcpu=ev67 -mattr=+no-fp-regs \
+# RUN:     -run-pass=alpha-verify-invariants %t/fp.mir -o /dev/null 2>&1 \
+# RUN:   | FileCheck %s --check-prefix=B3
 #
-# The input is accepted with the check turned off, so what the run above proves
-# is that the check fired -- not that the input is broken in some other way the
-# pipeline would have rejected anyway.
+# Each input is accepted with the check turned off, so what the runs above
+# prove is that the check fired -- not that the input is broken in some other
+# way the pipeline would have rejected anyway.
 # RUN: llc -mtriple=alpha-unknown-linux-gnu -mcpu=ev67 \
 # RUN:     -alpha-check-invariants=false \
 # RUN:     -run-pass=alpha-verify-invariants %t/llsc.mir -o /dev/null
+# RUN: llc -mtriple=alpha-unknown-linux-gnu -mcpu=ev67 -mattr=+no-fp-regs \
+# RUN:     -alpha-check-invariants=false \
+# RUN:     -run-pass=alpha-verify-invariants %t/fp.mir -o /dev/null
 
 # The properties AlphaVerifyInvariants checks.  Nothing the backend generates
 # violates any of them, so each input here is written by hand -- that is the
@@ -22,6 +28,10 @@
 # real hardware that clears the lock flag and the loop never terminates; qemu
 # does not model the lock flag, so no executing test can see it.
 # B1: LLVM ERROR: Alpha invariant B1 violated in function 'llsc': a memory access appears between a load locked and its store conditional
+
+# Second: a floating-point register touched under -mno-fp-regs, where the
+# whole point of the option is that there are none to save.
+# B3: LLVM ERROR: Alpha invariant B3 violated in function 'fp': floating-point register $f0 is touched under -mno-fp-regs
 
 #--- llsc.mir
 --- |
@@ -111,4 +121,88 @@ body:             |
     liveins: $r0
   
     RET implicit $r0
+...
+#--- fp.mir
+--- |
+  target datalayout = "e-m:e-p:64:64-i64:64-i128:128-n64-S128"
+  target triple = "alpha-unknown-linux-gnu"
+  
+  @g = external global i64
+  
+  define i64 @llsc(ptr %p) #0 {
+    %r = atomicrmw add ptr %p, i64 1 monotonic, align 8
+    ret i64 %r
+  }
+  
+  define double @fp(double %x) #0 {
+    ret double %x
+  }
+  
+  define i64 @gpuse() #0 {
+    ret i64 ptrtoint (ptr @g to i64)
+  }
+  
+  attributes #0 = { "target-cpu"="ev67" }
+...
+---
+name:            fp
+alignment:       1
+exposesReturnsTwice: false
+legalized:       false
+regBankSelected: false
+selected:        false
+failedISel:      false
+tracksRegLiveness: true
+hasWinCFI:       false
+noPhis:          true
+isSSA:           false
+noVRegs:         true
+hasFakeUses:     false
+callsEHReturn:   false
+callsUnwindInit: false
+hasEHContTarget: false
+hasEHScopes:     false
+hasEHFunclets:   false
+isOutlined:      false
+debugInstrRef:   false
+failsVerification: false
+tracksDebugUserValues: true
+registers:       []
+liveins:
+  - { reg: '$f16', virtual-reg: '' }
+  - { reg: '$r26', virtual-reg: '' }
+frameInfo:
+  isFrameAddressTaken: false
+  isReturnAddressTaken: false
+  hasStackMap:     false
+  hasPatchPoint:   false
+  stackSize:       0
+  offsetAdjustment: 0
+  maxAlignment:    1
+  adjustsStack:    false
+  hasCalls:        false
+  framePointerPolicy: none
+  stackProtector:  ''
+  functionContext: ''
+  maxCallFrameSize: 0
+  cvBytesOfCalleeSavedRegisters: 0
+  hasOpaqueSPAdjustment: false
+  hasVAStart:      false
+  hasMustTailInVarArgFunc: false
+  hasTailCall:     false
+  isCalleeSavedInfoValid: true
+  localFrameSize:  0
+fixedStack:      []
+stack:           []
+entry_values:    []
+callSites:       []
+debugValueSubstitutions: []
+constants:       []
+machineFunctionInfo: {}
+body:             |
+  bb.0 (%ir-block.0):
+    liveins: $f16, $r26
+  
+    $f0 = CPYS $f16, $f16
+    RET implicit $f0
 ...

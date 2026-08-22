@@ -312,6 +312,12 @@ AlphaTargetLowering::getConstraintType(StringRef Constraint) const {
     // Constraint letters match GCC's alpha back end.
     switch (Constraint[0]) {
     case 'f':
+      // Under -mno-fp-regs there is no floating-point register class to bind
+      // to.  Fall through to the generic handling, which rejects the operand
+      // with a diagnostic rather than reaching an assertion about copying to
+      // an illegal type.  gcc reports "impossible constraint in 'asm'" here.
+      if (Subtarget.hasNoFPRegs())
+        break;
       return C_RegisterClass;
     case 'I': // Unsigned 8-bit constant.
     case 'J': // The constant zero.
@@ -399,6 +405,9 @@ AlphaTargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
     case 'r':
       return std::make_pair(0U, &Alpha::GPRCRegClass);
     case 'f':
+      // Nothing to bind to under -mno-fp-regs; see getConstraintType.
+      if (Subtarget.hasNoFPRegs())
+        break;
       // Use a single-value-type register class so the operand's value type is
       // unambiguous (the shared FPRC would default to f32 and mishandle f64).
       // An integer bound to an FP register (e.g. loading the FPCR) is 64-bit,
@@ -1224,8 +1233,20 @@ SDValue AlphaTargetLowering::LowerFormalArguments(
       Stores.push_back(
           DAG.getStore(Chain, DL, IntVal, IntPtr,
                        MachinePointerInfo::getFixedStack(MF, IntFI, I * 8)));
-      Register FPReg = MF.addLiveIn(FPArgRegs[I], &Alpha::FPRCRegClass);
-      SDValue FPVal = DAG.getCopyFromReg(Chain, DL, FPReg, MVT::f64);
+      // With -mno-fp-regs there are no floating-point argument registers to
+      // read: the file is out of the register classes altogether, so f64 is an
+      // illegal type and a copy out of $f16 could not even be legalized.  A
+      // floating-point argument arrives in an integer register under that flag,
+      // so fill the floating-point save area from the integer registers too.
+      // gcc does the same thing in alpha_setup_incoming_varargs, where the
+      // register number the save area is filled from is
+      // `16 + cum + TARGET_FPREGS*32' -- the integer one when TARGET_FPREGS is
+      // zero.
+      SDValue FPVal = IntVal;
+      if (!Subtarget.hasNoFPRegs()) {
+        Register FPReg = MF.addLiveIn(FPArgRegs[I], &Alpha::FPRCRegClass);
+        FPVal = DAG.getCopyFromReg(Chain, DL, FPReg, MVT::f64);
+      }
       SDValue FPPtr =
           DAG.getMemBasePlusOffset(FpBase, TypeSize::getFixed(I * 8), DL);
       Stores.push_back(

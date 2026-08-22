@@ -81,3 +81,28 @@ define double @dsel(double %a, double %b, i64 %c) {
   %r = select i1 %p, double %a, double %b
   ret double %r
 }
+
+; A variadic function has no floating-point argument registers to save: the
+; register file is out of the target's register classes, so f64 is an illegal
+; type and a copy out of $f16 could not be legalized at all.  The
+; floating-point half of the save area is filled from the integer registers
+; instead, which is where a floating-point argument arrives under this flag.
+; GCC does the same, from the same register numbers.
+; NOFP-LABEL: vsave:
+; NOFP-DAG:   stq $18, 32($30)
+; NOFP-DAG:   stq $18, 80($30)
+; NOFP-DAG:   stq $19, 40($30)
+; NOFP-DAG:   stq $19, 88($30)
+; NOFP-DAG:   stq $20, 48($30)
+; NOFP-DAG:   stq $20, 96($30)
+; NOFP-DAG:   stq $21, 56($30)
+; NOFP-DAG:   stq $21, 104($30)
+; NOFP-NOT:   $f
+define i64 @vsave(i32 %n, ...) {
+  %ap = alloca [2 x i64], align 8
+  call void @llvm.va_start(ptr %ap)
+  %v = va_arg ptr %ap, i64
+  ret i64 %v
+}
+
+declare void @llvm.va_start(ptr)
