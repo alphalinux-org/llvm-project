@@ -62,10 +62,23 @@ void llvm::addNarrowedMemOperands(MachineInstrBuilder MIB,
     auto Flags = (MMO->getFlags() &
                   ~(MachineMemOperand::MOLoad | MachineMemOperand::MOStore)) |
                  Half;
+    // A ldq_l/stq_c pair on an already-aligned quadword touches exactly what
+    // the pseudo said it did, so it keeps the pseudo's operand and with it the
+    // object the access names.  A sub-word or misaligned one does not: the
+    // expansion masks the address down to the containing quadword and reads
+    // and writes all eight bytes of it.  Copying the pseudo's one-, two- or
+    // four-byte size and its unaligned pointer there would claim a narrower
+    // access than the one being made, at an address that is not the one
+    // touched -- a statement no later pass could act on.  Say the quadword
+    // instead, with the pointer unknown, since which object the masked address
+    // falls in is not decidable here.
+    bool WholeQuadword =
+        MMO->getSize() == LocationSize::precise(8) && MMO->getBaseAlign() >= 8;
     MIB.addMemOperand(MF.getMachineMemOperand(
-        MMO->getPointerInfo(), Flags, MMO->getSize(), MMO->getBaseAlign(),
-        MMO->getAAInfo(), MMO->getRanges(), MMO->getSyncScopeID(),
-        MMO->getSuccessOrdering(), MMO->getFailureOrdering()));
+        WholeQuadword ? MMO->getPointerInfo() : MachinePointerInfo(), Flags,
+        LocationSize::precise(8), Align(8), MMO->getAAInfo(), MMO->getRanges(),
+        MMO->getSyncScopeID(), MMO->getSuccessOrdering(),
+        MMO->getFailureOrdering()));
   }
 }
 

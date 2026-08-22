@@ -30,9 +30,12 @@
 ; EXPANDED-LABEL: name: two_stores
 ; EXPANDED:      BUNDLE
 ; EXPANDED-SAME: {
-; EXPANDED:        LDQ_U {{.*}} :: (load (s128), align 8)
+; Each piece says the one aligned quadword it touches, not the pair the pseudo
+; covered and not the misaligned field the source asked for: ldq_u and stq_u
+; mask the low three bits of the address in hardware.
+; EXPANDED:        LDQ_U {{.*}} :: (load (s64))
 ; EXPANDED-NOT:  }
-; EXPANDED:        STQ_U {{.*}} :: (store (s128), align 8)
+; EXPANDED:        STQ_U {{.*}} :: (store (s64))
 ; EXPANDED:      }
 define void @two_stores(ptr %p, ptr %q, i64 %a, i64 %b) {
   store i64 %a, ptr %p, align 1
@@ -45,8 +48,8 @@ define void @two_stores(ptr %p, ptr %q, i64 %a, i64 %b) {
 ; the access is not moved or duplicated.
 ; EXPANDED-LABEL: name: volatile_store
 ; EXPANDED:      BUNDLE
-; EXPANDED:        LDQ_U {{.*}} :: (volatile load (s128), align 8)
-; EXPANDED:        STQ_U {{.*}} :: (volatile store (s128), align 8)
+; EXPANDED:        LDQ_U {{.*}} :: (volatile load (s64))
+; EXPANDED:        STQ_U {{.*}} :: (volatile store (s64))
 define void @volatile_store(ptr %p, i64 %a) {
   store volatile i64 %a, ptr %p, align 1
   ret void
