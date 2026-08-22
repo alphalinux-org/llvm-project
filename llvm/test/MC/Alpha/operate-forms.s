@@ -140,3 +140,9 @@
 # CHECK: encoding: [0x83,0x0c,0x22,0x44]
 # DIS: cmovle $1, $2, $3
 	cmovle $1, $2, $3
+
+## And the fourth memory-format branch, which swaps to a coroutine.
+
+# CHECK: encoding: [0x00,0xc0,0x5b,0x6b]
+# DIS: jsr_coroutine $26, ($27)
+	jsr_coroutine $26, ($27)

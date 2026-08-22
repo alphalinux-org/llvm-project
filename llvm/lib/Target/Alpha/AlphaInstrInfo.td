@@ -1247,8 +1247,8 @@ def jsrtarget : Operand<i64> {
 
 // jsr $Ra, ($Rb), target: the three-operand form hand-written and GNU-generated
 // assembly uses.  The target does not change the encoding beyond the hint field
-// the relocations fill in, so nothing decodes to this form: a jsr word reaches
-// JSRr, and only when its hint field is zero.
+// the relocations fill in, so a jsr word whose hint field is zero decodes to
+// JSRr and one with a hint decodes to this form.
 let isCall = 1, isAsmParserOnly = 1 in
 def JSRt : MbrForm<0b01, (outs), (ins GPRC:$Ra, parenGPR:$Rb, jsrtarget:$sym),
                    "jsr $Ra, $Rb, $sym", []> {
@@ -2340,6 +2340,21 @@ def JMPb : MbrForm<0b00, (outs), (ins parenGPR:$Rb), "jmp $Rb", []> {
 }
 def JMPab : MbrForm<0b00, (outs), (ins GPRC:$Ra, parenGPR:$Rb), "jmp $Ra, $Rb",
                     []>;
+}
+
+// jsr_coroutine: the fourth sub-opcode of the memory-format branch, which
+// swaps to the address in $Rb and leaves the return address in $Ra.  Nothing
+// generates one, but the encoding exists and appears in hand-written code, so
+// the assembler and the disassembler both have to know it.
+let isCall = 1, isAsmParserOnly = 1 in {
+def JSRCO : MbrForm<0b11, (outs), (ins GPRC:$Ra, parenGPR:$Rb),
+                    "jsr_coroutine $Ra, $Rb", []>;
+def JSRCOh : MbrForm<0b11, (outs), (ins GPRC:$Ra, parenGPR:$Rb,
+                                        u14imm:$hintval),
+                     "jsr_coroutine $Ra, $Rb, $hintval", []> {
+  bits<14> hintval;
+  let hint = hintval;
+}
 }
 
 // andnot: an alias of bic (and with the complement of the second operand).

@@ -174,6 +174,36 @@ DecodeStatus AlphaDisassembler::getInstruction(MCInst &Instr, uint64_t &Size,
     return S;
   }
 
+  // The memory-format branches (opcode 0x1a) and the plain branch (0x30) have
+  // far more encodings than code generation ever emits: any link register, and
+  // any branch-prediction hint -- which is exactly what R_ALPHA_HINT writes
+  // into a call.  Only the shapes with those fields fixed carry patterns and
+  // so only those reach the decoder tables, which leaves an ordinary linked
+  // binary full of words the disassembler rejects: every relaxed call, every
+  // PLT entry, and the JITLink stub's own `br $27, .+4'.  Decode the general
+  // forms here.
+  if ((Insn >> 26) == 0x1a) {
+    unsigned Ra = (Insn >> 21) & 0x1f, Rb = (Insn >> 16) & 0x1f;
+    unsigned Sub = (Insn >> 14) & 0x3, Hint = Insn & 0x3fff;
+    static const unsigned Opc[4] = {Alpha::JMPt, Alpha::JSRt, Alpha::RETabh,
+                                    Alpha::JSRCOh};
+    Instr.setOpcode(Opc[Sub]);
+    Instr.addOperand(MCOperand::createReg(GPRDecoderTable[Ra]));
+    Instr.addOperand(MCOperand::createReg(GPRDecoderTable[Rb]));
+    // jsr and jmp name a predicted target, so their operand is a byte
+    // displacement the assembler divides by four; ret and jsr_coroutine take
+    // their field as written.  Printing the raw field for the first two would
+    // not reassemble to the word it came from.
+    Instr.addOperand(
+        MCOperand::createImm(Sub == 0 || Sub == 1 ? Hint * 4 : Hint));
+    return MCDisassembler::Success;
+  }
+  if ((Insn >> 26) == 0x30) {
+    Instr.setOpcode(Alpha::BRr);
+    Instr.addOperand(MCOperand::createReg(GPRDecoderTable[(Insn >> 21) & 0x1f]));
+    return decodeBranchTarget(Instr, Insn & 0x1fffff, Address, this);
+  }
+
   // A floating-point operate carries its trap and rounding qualifiers in the
   // function field, and only the unqualified encodings have a table entry.  So
   // an instruction assembled with -mieee -- including one this compiler
