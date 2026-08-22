@@ -166,14 +166,14 @@ public:
     case 'O': // Negated unsigned 8-bit constant.
       Info.setRequiresImmediate();
       return true;
-    // GCC also has 'G' and 'H' for floating-point constants and 'T' for a
-    // high-part relocation.  Nothing lowers those here, so they are rejected
-    // rather than accepted and handed to a back end with no case for them.
+    // GCC also has 'G' for the floating-point zero, 'W' for the vector zero
+    // and 'T' for a high-part symbol, all of which it marks @internal.
+    // Nothing lowers those here, so they are rejected rather than accepted and
+    // handed to a back end with no case for them.
     case 'Q': // A memory operand.
-    case 'U': // A memory address operand.
       Info.setAllowsMemory();
       return true;
-    case 'R': // A symbolic operand within one instruction of the referent.
+    case 'R': // A direct-call target: a symbol a bsr can reach.
       return true;
     }
     return false;

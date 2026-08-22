@@ -78,3 +78,27 @@ define void @useLNOPS(i64 %x) {
   call void asm sideeffect "sll $0, $1, $0", "r,S"(i64 %x, i64 63)
   ret void
 }
+
+; The memory letter `Q' is GCC's "a memory operand that is not an AND-based
+; reference to an unaligned location", which -- since nothing in this target
+; forms such a reference -- is every memory operand, so it prints as the
+; ordinary base-plus-displacement address.  Without a getInlineAsmMemConstraint
+; that says so, the operand reaches SelectionDAGBuilder as
+; ConstraintCode::Unknown and asserts.
+; CHECK-LABEL: useQ:
+; CHECK: ldq $0, 0($16)
+define i64 @useQ(ptr %p) {
+  %r = call i64 asm "ldq $0, $1", "=r,*Q"(ptr elementtype(i64) %p)
+  ret i64 %r
+}
+
+; `R' is GCC's direct_call_operand: a symbol a bsr can reach, passed through by
+; name rather than materialized into a register.
+; CHECK-LABEL: useR:
+; CHECK: bsr $26, ext
+define void @useR() {
+  call void asm sideeffect "bsr $$26, $0", "R"(ptr @ext)
+  ret void
+}
+
+declare void @ext()
