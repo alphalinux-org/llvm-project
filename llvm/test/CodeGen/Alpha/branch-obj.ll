@@ -4,10 +4,14 @@
 ; A local branch resolved during object emission must land on the right
 ; instruction.  The Alpha displacement is measured from the instruction after
 ; the branch (PC+4), so a backward branch to the loop header five instructions
-; earlier encodes -6, not -5.
+; earlier encodes -6, not -5 -- which is the difference between landing on the
+; header and landing one instruction past it.  The disassembler resolves the
+; displacement against the branch's own address, so the target is checked here
+; rather than the encoded number.
 
 ; CHECK-LABEL: <loopcount>:
-; CHECK:      bne {{\$[0-9]+}}, -6
+; CHECK:      [[HDR:[0-9a-f]+]]: {{.*}}bis $31, $2, $0
+; CHECK:      fa ff 7f f4 {{.*}}bne {{\$[0-9]+}}, 0x[[HDR]] <loopcount+0x[[HDR]]>
 define i64 @loopcount(i64 %n) {
 entry:
   br label %loop

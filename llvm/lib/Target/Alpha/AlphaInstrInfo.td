@@ -1878,6 +1878,10 @@ def RET : MbrForm<0b10, (outs), (ins), "ret", [(AlphaRet)]> {
 def brtarget : Operand<OtherVT> {
   let EncoderMethod = "getBranchTargetEncoding";
   let DecoderMethod = "decodeBranchTarget";
+  // OPERAND_PCREL is what has the printer given the instruction's address, so
+  // a disassembly can name where the branch goes rather than by how much.
+  let OperandType = "OPERAND_PCREL";
+  let PrintMethod = "printBranchTarget";
 }
 
 // Unconditional branch: `br $31, target` ($31 discards the saved PC).

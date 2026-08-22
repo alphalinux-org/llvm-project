@@ -104,11 +104,21 @@ static DecodeStatus decodeImm(MCInst &Inst, uint64_t Imm, uint64_t Address,
   return MCDisassembler::Success;
 }
 
-// A 21-bit signed PC-relative branch displacement in instruction units.
+// A 21-bit signed PC-relative branch displacement in instruction units.  Give
+// the target's address to the symbolizer so a disassembly names the callee the
+// way every other target's does, rather than printing the raw displacement and
+// leaving the reader to do the arithmetic.
 static DecodeStatus decodeBranchTarget(MCInst &Inst, uint64_t Imm,
                                        uint64_t Address,
                                        const MCDisassembler *Decoder) {
-  Inst.addOperand(MCOperand::createImm(SignExtend64<21>(Imm)));
+  int64_t Disp = SignExtend64<21>(Imm);
+  // The displacement counts instructions from the one after the branch.
+  uint64_t Target = Address + 4 + Disp * 4;
+  if (!Decoder->tryAddingSymbolicOperand(Inst, Disp, Address, /*IsBranch=*/true,
+                                         /*Offset=*/0, /*OpSize=*/0,
+                                         /*InstSize=*/4))
+    Inst.addOperand(MCOperand::createImm(Disp));
+  (void)Target;
   return MCDisassembler::Success;
 }
 
