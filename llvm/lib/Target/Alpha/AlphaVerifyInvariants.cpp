@@ -6,9 +6,9 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// A property of Alpha code that a FileCheck test cannot observe, checked over
-// the final machine function so that every function anything compiles becomes
-// a test of it.
+// Two properties of Alpha code that a FileCheck test cannot observe, checked
+// over the final machine function so that every function anything compiles
+// becomes a test of both.
 //
 //   1. No memory access, call or inline assembly appears between a load locked
 //      and its store conditional.  The Alpha Architecture Handbook (5.5.2)
@@ -17,6 +17,11 @@
 //      conditional fails every time round.  qemu does not model the lock flag,
 //      so no test running under emulation can see this: the first time it was
 //      found, it was as a hang on a 21264.
+//
+//   2. No floating-point register is touched under -mno-fp-regs.  The whole
+//      point of that option is that the kernel need not save the FP file for
+//      the process; one FP instruction anywhere makes the generated code
+//      wrong in a way that nothing in the output looks wrong.
 //
 // The precedent is CompleteModel, which makes a missing InstRW a TableGen
 // error and so keeps scheduling-model completeness true by construction rather
@@ -34,10 +39,12 @@
 
 #include "Alpha.h"
 #include "AlphaInstrInfo.h"
+#include "AlphaSubtarget.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
@@ -47,8 +54,8 @@ using namespace llvm;
 #define ALPHA_VERIFY_INVARIANTS_NAME "Alpha machine invariant verifier"
 
 // On by default wherever assertions are, which is what turns every existing
-// test into a test of the invariant.  A linear walk over the machine function
-// costs nothing next to the rest of an assertions build.
+// test into a test of both invariants.  Two linear walks over the machine
+// function cost nothing next to the rest of an assertions build.
 #ifdef NDEBUG
 static constexpr bool DefaultEnabled = false;
 #else
@@ -61,7 +68,7 @@ static cl::opt<bool> EnableVerify(
     // and every tool that links this target aborts at startup.
     "alpha-check-invariants", cl::Hidden, cl::init(DefaultEnabled),
     cl::desc("Check the Alpha invariants no test can observe: the load "
-             "locked / store conditional window"));
+             "locked / store conditional window and -mno-fp-regs"));
 
 namespace {
 
@@ -82,9 +89,12 @@ public:
   }
 
 private:
+  const AlphaSubtarget *STI = nullptr;
+
   void fail(const MachineFunction &MF, const MachineInstr &MI, StringRef Id,
             const Twine &What) const;
   void checkLLSCWindow(MachineFunction &MF) const;
+  void checkNoFPRegs(MachineFunction &MF) const;
 };
 
 } // end anonymous namespace
@@ -219,11 +229,45 @@ void AlphaVerifyInvariants::checkLLSCWindow(MachineFunction &MF) const {
 }
 
 //===----------------------------------------------------------------------===//
+// 2. -mno-fp-regs.
+
+void AlphaVerifyInvariants::checkNoFPRegs(MachineFunction &MF) const {
+  if (!STI->hasNoFPRegs())
+    return;
+  const TargetRegisterInfo &TRI = *STI->getRegisterInfo();
+  const auto &F4 = Alpha::F4RCRegClass;
+  const auto &F8 = Alpha::F8RCRegClass;
+  for (MachineBasicBlock &MBB : MF) {
+    for (MachineInstr &MI : MBB) {
+      if (MI.isDebugInstr())
+        continue;
+      for (const MachineOperand &MO : MI.operands()) {
+        if (!MO.isReg() || !MO.getReg())
+          continue;
+        Register R = MO.getReg();
+        if (!R.isPhysical())
+          continue;
+        if (F4.contains(R) || F8.contains(R)) {
+          std::string Name;
+          raw_string_ostream OS(Name);
+          OS << printReg(R, &TRI);
+          fail(MF, MI, "B3",
+               Twine("floating-point register ") + Name +
+                   " is touched under -mno-fp-regs");
+        }
+      }
+    }
+  }
+}
+
+//===----------------------------------------------------------------------===//
 
 bool AlphaVerifyInvariants::runOnMachineFunction(MachineFunction &MF) {
   if (!EnableVerify)
     return false;
+  STI = &MF.getSubtarget<AlphaSubtarget>();
   checkLLSCWindow(MF);
+  checkNoFPRegs(MF);
   return false;
 }
 
