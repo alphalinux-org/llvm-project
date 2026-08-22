@@ -14,6 +14,12 @@
 ; and with it the ordering, the volatility and the object the access names.
 ; That pass runs after register allocation, so this stops after it rather than
 ; after selection, where the loop is still one instruction.
+;
+; The operand also has to describe the access being made rather than the one
+; the pseudo asked for.  A sub-word or misaligned update masks the address down
+; to the containing quadword and reads and writes all eight bytes of it, so it
+; says the quadword and leaves the pointer unknown; an already-aligned
+; quadword touches exactly what the pseudo named and keeps it.
 
 ; CHECK-LABEL: name: rmw
 ; CHECK: LDQ_L {{.*}} :: (load monotonic (s64) from %ir.p)
@@ -33,16 +39,16 @@ define i64 @cas(ptr %p, i64 %c, i64 %n) {
 }
 
 ; CHECK-LABEL: name: subword_rmw
-; CHECK: LDQ_L {{.*}} :: (load monotonic (s8) from %ir.p)
-; CHECK: STQ_C {{.*}} :: (store monotonic (s8) into %ir.p)
+; CHECK: LDQ_L {{.*}} :: (load monotonic (s64)){{$}}
+; CHECK: STQ_C {{.*}} :: (store monotonic (s64)){{$}}
 define i8 @subword_rmw(ptr %p, i8 %v) {
   %r = atomicrmw add ptr %p, i8 %v seq_cst
   ret i8 %r
 }
 
 ; CHECK-LABEL: name: subword_cas
-; CHECK: LDQ_L {{.*}} :: (load monotonic monotonic (s8) from %ir.p)
-; CHECK: STQ_C {{.*}} :: (store monotonic monotonic (s8) into %ir.p)
+; CHECK: LDQ_L {{.*}} :: (load monotonic monotonic (s64)){{$}}
+; CHECK: STQ_C {{.*}} :: (store monotonic monotonic (s64)){{$}}
 define i8 @subword_cas(ptr %p, i8 %c, i8 %n) {
   %r = cmpxchg ptr %p, i8 %c, i8 %n seq_cst seq_cst
   %v = extractvalue { i8, i1 } %r, 0
@@ -52,8 +58,8 @@ define i8 @subword_cas(ptr %p, i8 %c, i8 %n) {
 ; -msafe-bwa turns a plain byte store into the same kind of loop, and the store
 ; being volatile has to survive into it.
 ; BWA-LABEL: name: safe_store
-; BWA: LDQ_L {{.*}} :: (volatile load (s8) from %ir.p)
-; BWA: STQ_C {{.*}} :: (volatile store (s8) into %ir.p)
+; BWA: LDQ_L {{.*}} :: (volatile load (s64)){{$}}
+; BWA: STQ_C {{.*}} :: (volatile store (s64)){{$}}
 define void @safe_store(ptr %p, i8 %v) {
   store volatile i8 %v, ptr %p
   ret void
@@ -62,10 +68,10 @@ define void @safe_store(ptr %p, i8 %v) {
 ; -msafe-partial does the same for a misaligned store, once per spanned
 ; quadword.
 ; PARTIAL-LABEL: name: partial_store
-; PARTIAL: LDQ_L {{.*}} :: (volatile load (s32) from %ir.p, align 1)
-; PARTIAL: STQ_C {{.*}} :: (volatile store (s32) into %ir.p, align 1)
-; PARTIAL: LDQ_L {{.*}} :: (volatile load (s32) from %ir.p, align 1)
-; PARTIAL: STQ_C {{.*}} :: (volatile store (s32) into %ir.p, align 1)
+; PARTIAL: LDQ_L {{.*}} :: (volatile load (s64)){{$}}
+; PARTIAL: STQ_C {{.*}} :: (volatile store (s64)){{$}}
+; PARTIAL: LDQ_L {{.*}} :: (volatile load (s64)){{$}}
+; PARTIAL: STQ_C {{.*}} :: (volatile store (s64)){{$}}
 define void @partial_store(ptr %p, i32 %v) {
   store volatile i32 %v, ptr %p, align 1
   ret void
