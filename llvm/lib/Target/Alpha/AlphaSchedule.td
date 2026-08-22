@@ -154,7 +154,7 @@ multiclass AlphaInstRW {
   def : InstRW<[Wr_IALU], (instrs COPY)>;
   def : InstRW<[Wr_JSR], (instrs JSRtlsgd, JSRtlsldm)>;
   def : InstRW<[Wr_FAdd], (instrs FPEXTST)>;
-  def : InstRW<[Wr_Misc], (instrs PREFR, PREFREN, PREFW, PREFWEN)>;
+  def : InstRW<[Wr_Misc], (instrs PREFR, PREFREN, PREFW)>;
   def : InstRW<[Wr_FtoI, Rd_FStData], (instrs FTOIT)>;
   def : InstRW<[Wr_ItoF], (instrs ITOFT)>;
 }
