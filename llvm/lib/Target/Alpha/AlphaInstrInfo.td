@@ -638,6 +638,7 @@ class CMPT_rr<bits<11> func, string mnem>
             mnem # " $Ra, $Rb, $Rc", []> {
   let TrapClass = 2;  // Compare: su only.
 }
+def CMPTUN : CMPT_rr<0x0a4, "cmptun">;
 def CMPTEQ : CMPT_rr<0x0a5, "cmpteq">;
 def CMPTLT : CMPT_rr<0x0a6, "cmptlt">;
 def CMPTLE : CMPT_rr<0x0a7, "cmptle">;

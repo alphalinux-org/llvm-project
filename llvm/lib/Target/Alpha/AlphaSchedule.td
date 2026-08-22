@@ -122,7 +122,7 @@ multiclass AlphaInstRW {
   def : InstRW<[Wr_FStore, Rd_FStData], (instrs
       STT, STS, STTd, STTg, STTt, STSd, STSg, STSt)>;
   def : InstRW<[Wr_FAdd], (instrs
-      ADDS, ADDT, SUBS, SUBT, CMPTEQ, CMPTLE, CMPTLT,
+      ADDS, ADDT, SUBS, SUBT, CMPTUN, CMPTEQ, CMPTLE, CMPTLT,
       CVTQS, CVTQT, CVTTQ, CVTTQn, CVTTS, CVTST, CPYS, CPYSN)>;
   def : InstRW<[Wr_FMul], (instrs MULS, MULT)>;
   def : InstRW<[Wr_FCmov], (instrs FCMOVNE)>;
