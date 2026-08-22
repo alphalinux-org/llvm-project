@@ -1048,10 +1048,23 @@ def LDS : MForm<0x22, (outs FPRC:$Ra), (ins memri:$addr), "lds $Ra, $addr",
 }
 
 // Software-directed prefetch: a load whose destination is R31 or F31 brings a
-// cache line in without producing a result (21264 HRM section 2.6).  ldl and
-// lds leave the line under the normal (evict-last) replacement pointer; ldq and
-// ldt set it to be evicted next, for data with no temporal locality.  lds/ldt
-// (to F31) request the line for write (prefetch with modify intent).
+// cache line in without producing a result.  The architecture gives exactly one
+// encoding to each of four hints, and the destination register is what selects
+// the hint: ldl to R31 is a normal prefetch (PREFETCH), ldq to R31 is a normal
+// prefetch marked for preferential eviction (PREFETCH_EN), lds to F31 asks for
+// the line with modify intent (PREFETCH_M), and ldt to F31 asks for both
+// (PREFETCH_MEN).
+//
+// PREFETCH_MEN is the one that is not universal: it is implemented on the 21364
+// alone, where the other three are on the 21264 as well.  A 21264 does not
+// reject the encoding, it just does not read modify intent out of it -- the
+// line arrives read-shared and the store that follows upgrades it -- so ldt to
+// F31 degrades to a normal prefetch there rather than to a fault.  That is what
+// makes it safe to emit unconditionally, which is what gcc does
+// (alpha.md:5412): gcc's -mcpu table stops at ev67 and has no 21364 to
+// condition on.  This target follows it.  A prefetch hint has no
+// architecturally visible effect, so the choice costs at most one bus
+// transaction on a 21264 and buys agreement with the platform's own compiler.
 let mayLoad = 1, hasSideEffects = 0, Ra = 31 in {
 def PREFR   : MForm<0x28, (outs), (ins memri:$addr), "ldl $$31, $addr", []>;
 def PREFREN : MForm<0x29, (outs), (ins memri:$addr), "ldq $$31, $addr", []>;
@@ -1060,10 +1073,12 @@ def PREFWEN : MForm<0x23, (outs), (ins memri:$addr), "ldt $$f31, $addr", []>;
 }
 
 // Select the prefetch flavor from the read/write and locality operands of the
-// llvm.prefetch intrinsic.  A normal prefetch (any locality) needs 21264-class
-// hardware; the evict-next hint for locality 0 needs the 21364, and otherwise
-// falls back to a normal prefetch.  On earlier processors no pattern matches and
-// the prefetch is dropped, since a load to R31/F31 there can fault.
+// llvm.prefetch intrinsic.  "No temporal locality" is read as "evict next":
+// the caller says the line is wanted once, and evict-next is how the
+// architecture spells that.  Each of the four combinations has its own
+// encoding, so the map is one to one.  On processors before the 21264 no
+// pattern matches and the prefetch is dropped, since a load to R31/F31 there
+// can fault.
 class PrefFrag<int Write, bit EvictNext>
     : PatFrag<(ops node:$ptr, node:$rw, node:$loc, node:$cache),
               (prefetch node:$ptr, node:$rw, node:$loc, node:$cache), [{
@@ -1073,10 +1088,10 @@ class PrefFrag<int Write, bit EvictNext>
 let Predicates = [HasPrefetch] in {
 def : Pat<(PrefFrag<0, 0> ADDRri:$addr, timm, timm, timm), (PREFR memri:$addr)>;
 def : Pat<(PrefFrag<1, 0> ADDRri:$addr, timm, timm, timm), (PREFW memri:$addr)>;
-}
-let Predicates = [HasPrefetchEvictNext], AddedComplexity = 10 in {
+let AddedComplexity = 10 in {
 def : Pat<(PrefFrag<0, 1> ADDRri:$addr, timm, timm, timm), (PREFREN memri:$addr)>;
 def : Pat<(PrefFrag<1, 1> ADDRri:$addr, timm, timm, timm), (PREFWEN memri:$addr)>;
+}
 }
 
 // An i32 load with don't-care high bits can use the sign-extending ldl; a

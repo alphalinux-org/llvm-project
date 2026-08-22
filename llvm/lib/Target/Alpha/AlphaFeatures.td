@@ -83,18 +83,15 @@ def FeatureFPRoundChopped
 
 // Software-directed prefetch (a load to R31/F31) is architecturally defined
 // only on the 21264 and later; on earlier processors such a load is an ordinary
-// load that can fault.  The evict-next hint (ldq/ldt to R31/F31) is defined only
-// on the 21364 and later; elsewhere those localities use a normal prefetch.
+// load that can fault.  Three of the four hints arrive with it, and the fourth
+// -- modify intent together with evict next, PREFETCH_MEN -- is implemented on
+// the 21364 alone.  One feature still covers them all, because a 21264 decodes
+// the PREFETCH_MEN encoding as an ordinary normal prefetch rather than
+// rejecting it: see the emission comment in AlphaInstrInfo.td.
 def FeaturePrefetch
     : SubtargetFeature<"prefetch", "HasPrefetch", "true",
                        "Support software-directed prefetch (21264 and later)">;
 def HasPrefetch : Predicate<"Subtarget->hasPrefetch()">;
-
-def FeaturePrefetchEvictNext
-    : SubtargetFeature<"prefetch-evict-next", "HasPrefetchEvictNext", "true",
-                       "Support the evict-next prefetch hint (21364 and later)",
-                       [FeaturePrefetch]>;
-def HasPrefetchEvictNext : Predicate<"Subtarget->hasPrefetchEvictNext()">;
 
 // -mieee: floating point traps are completed in software.
 def HasIEEE : Predicate<"Subtarget->hasIEEE()">;
