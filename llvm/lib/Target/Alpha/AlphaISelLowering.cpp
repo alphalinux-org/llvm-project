@@ -342,12 +342,26 @@ AlphaTargetLowering::getConstraintType(StringRef Constraint) const {
     case 'S': // Unsigned 6-bit constant.
       return C_Immediate;
     case 'Q': // Memory operand.
-    case 'R': // Symbolic operand.
-    case 'U': // Memory address operand.
       return C_Memory;
+    case 'R': // Symbolic operand -- a direct-call target.
+      return C_Other;
     }
   }
   return TargetLowering::getConstraintType(Constraint);
+}
+
+// GCC's `Q' is a memory operand that is not an AND-based reference to an
+// unaligned location -- which, since nothing in this target forms such a
+// reference, is every memory operand, so it is the ordinary
+// base-plus-displacement address `m' already describes.  Saying so is what
+// keeps the operand out of the generic implementation, which knows only
+// m/o/X/p and would answer ConstraintCode::Unknown for SelectionDAGBuilder to
+// assert on.
+InlineAsm::ConstraintCode
+AlphaTargetLowering::getInlineAsmMemConstraint(StringRef ConstraintCode) const {
+  if (ConstraintCode == "Q")
+    return InlineAsm::ConstraintCode::m;
+  return TargetLowering::getInlineAsmMemConstraint(ConstraintCode);
 }
 
 void AlphaTargetLowering::LowerAsmOperandForConstraint(
@@ -403,6 +417,32 @@ void AlphaTargetLowering::LowerAsmOperandForConstraint(
     if (Ok)
       Ops.push_back(
           DAG.getSignedTargetConstant(V, SDLoc(Op), Op.getValueType()));
+    return;
+  }
+  if (Constraint == "R") {
+    // A symbolic operand: the name of something a bsr can reach directly.  The
+    // asm printer prints a global address or an external symbol by name, so
+    // pass the reference through as a target operand rather than materializing
+    // its address into a register.
+    if (auto *GA = dyn_cast<GlobalAddressSDNode>(Op)) {
+      Ops.push_back(DAG.getTargetGlobalAddress(GA->getGlobal(), SDLoc(Op),
+                                               Op.getValueType(),
+                                               GA->getOffset()));
+      return;
+    }
+    if (auto *ES = dyn_cast<ExternalSymbolSDNode>(Op)) {
+      Ops.push_back(
+          DAG.getTargetExternalSymbol(ES->getSymbol(), Op.getValueType()));
+      return;
+    }
+    if (auto *BA = dyn_cast<BlockAddressSDNode>(Op)) {
+      Ops.push_back(DAG.getTargetBlockAddress(BA->getBlockAddress(),
+                                              Op.getValueType(),
+                                              BA->getOffset()));
+      return;
+    }
+    // Anything else is not a symbol; leaving Ops empty reports the operand as
+    // invalid for the constraint.
     return;
   }
   TargetLowering::LowerAsmOperandForConstraint(Op, Constraint, Ops, DAG);
