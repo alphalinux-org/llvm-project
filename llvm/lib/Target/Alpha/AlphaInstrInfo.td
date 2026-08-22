@@ -369,11 +369,18 @@ class ALU_riL<bits<6> opc, bits<7> func, string mnem, SDPatternOperator node>
              mnem # " $Ra, $lit, $Rc",
              [(set i64:$Rc, (sext_inreg (node i64:$Ra, immUExt8:$lit), i32))]>;
 
+class ALU_ri_nopat<bits<6> opc, bits<7> func, string mnem>
+    : OFormL<opc, func, (outs GPRC:$Rc), (ins GPRC:$Ra, u8imm:$lit),
+             mnem # " $Ra, $lit, $Rc", []>;
+
 def ADDQi : ALU_ri<0x10, 0x20, "addq", add>;
-def SUBQi : ALU_ri<0x10, 0x29, "subq", sub>;
 def MULQi : ALU_ri<0x13, 0x20, "mulq", mul>;
 def ADDLi : ALU_riL<0x10, 0x00, "addl", add>;
-def SUBLi : ALU_riL<0x10, 0x09, "subl", sub>;
+// The subtract-a-constant forms carry no pattern: DAGCombine canonicalizes
+// `sub x, C' to `add x, -C' before instruction selection, so one would never
+// be matched.  They exist for hand-written assembly.
+def SUBQi : ALU_ri_nopat<0x10, 0x29, "subq">;
+def SUBLi : ALU_ri_nopat<0x10, 0x09, "subl">;
 def MULLi : ALU_riL<0x13, 0x00, "mull", mul>;
 def ANDi  : ALU_ri<0x11, 0x00, "and",  and>;
 def BISi  : ALU_ri<0x11, 0x20, "bis",  or>;
@@ -657,6 +664,19 @@ def : Pat<(f64 (fpextend f32:$Rb)), (CVTST $Rb)>;
 
 // Materialize a small signed constant with `lda $Rc, imm($31)`.
 def : Pat<(i64 immSExt16:$imm), (LDA immSExt16:$imm, R31)>;
+
+// lda computes $Rb + sext16(disp) with no side effects, so it is an add of any
+// constant the 16-bit displacement holds.  Without this, every x + C outside
+// the 8-bit operate literal costs a materialization and an addq, and an extra
+// short-lived register, where GCC uses the one lda.  DAGCombine has already
+// turned every constant subtract into an add of the negation, so this covers
+// x - C as well.  The predicate excludes what ADDQi already folds, so the two
+// patterns do not compete.
+def immSExt16NotU8 : ImmLeaf<i64, [{
+  return isInt<16>(Imm) && !isUInt<8>(Imm);
+}]>;
+def : Pat<(add GPRC:$Rb, immSExt16NotU8:$disp),
+          (LDA immSExt16NotU8:$disp, GPRC:$Rb)>;
 
 // `not $x` is `ornot $31, $x` (0 OR ~x), avoiding an explicit -1.
 def : Pat<(not GPRC:$x), (ORNOT R31, GPRC:$x)>;
