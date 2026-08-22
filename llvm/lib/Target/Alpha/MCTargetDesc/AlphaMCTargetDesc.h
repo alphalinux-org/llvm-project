@@ -49,6 +49,8 @@ inline StringRef getFPTrapSuffix(unsigned TrapClass, bool IEEE, bool Inexact,
           // codegen selects outright under -mieee -- so there is no suffix to
           // merge into a function field that already carries 0x200 there.
     return StringRef();
+  case 6: // Quadword-to-longword: integer overflow, and no inexact form.
+    return IEEE ? "sv" : (TrapU ? "v" : StringRef());
   default:
     return StringRef();
   }

@@ -37,6 +37,12 @@
 # operate instruction with $31 / $f31.
 # CHECK: subq $31, $1, $2
         negq    $1, $2
+# CHECK: subl $31, $1, $2
+        negl    $1, $2
+# CHECK: subl/v $31, $1, $2
+        negl/v  $1, $2
+# CHECK: subq/v $31, $1, $2
+        negq/v  $1, $2
 # CHECK: addl $31, $1, $2
         sextl   $1, $2
 # CHECK: ornot $31, $1, $2

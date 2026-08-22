@@ -206,6 +206,9 @@ DecodeStatus AlphaDisassembler::getInstruction(MCInst &Instr, uint64_t &Size,
       // The rounding letter comes out of the function field, so the base
       // encoding's own round-to-nearest bits go back in.
       {(Insn & ~(0x7ffu << 5)) | ((Func & ~0x7c0u) << 5) | (0x080u << 5), RM},
+      // cvtql has no rounding field: those bits are part of what it is, and
+      // the qualifier it takes is a trap mode only.
+      {(Insn & ~(0x7ffu << 5)) | ((Func & ~0x700u) << 5), Alpha::FPRoundNormal},
   };
   MCInst Bare;
   unsigned TrapClass = 0;
