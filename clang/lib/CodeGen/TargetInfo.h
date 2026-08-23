@@ -290,6 +290,24 @@ public:
   virtual bool isNoProtoCallVariadic(const CodeGen::CallArgList &args,
                                      const FunctionNoProtoType *fnType) const;
 
+  /// Whether a complex value passed as an unnamed argument is split into its
+  /// two halves, each classified as an argument of the element type in its own
+  /// right, before the ABI classifies anything.  This is GCC's
+  /// TARGET_SPLIT_COMPLEX_ARG, which `expand_call' applies to the actual
+  /// argument, and it is observable only when the halves are not passed the
+  /// way the pair would have been: on Alpha an unnamed 32-bit float goes by
+  /// reference, so a split _Complex float occupies two argument slots and two
+  /// pointers to two caller-made copies -- which no single ABIArgInfo
+  /// describes, since every indirect kind yields exactly one pointer.
+  ///
+  /// Splitting the call argument instead of inventing that kind is what GCC
+  /// does, and it keeps the knowledge in the one place that has both halves in
+  /// hand.  The callee's side of such an argument is the target's EmitVAArg,
+  /// which is free to read the two slots back.
+  virtual bool shouldSplitComplexVariadicArg(QualType Ty) const {
+    return false;
+  }
+
   /// Gets the linker options necessary to link a dependent library on this
   /// platform.
   virtual void getDependentLibraryOption(llvm::StringRef Lib,
