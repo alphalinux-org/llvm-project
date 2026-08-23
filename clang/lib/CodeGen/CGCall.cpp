@@ -5030,6 +5030,26 @@ static bool isObjCMethodWithTypeParams(const ObjCMethodDecl *method) {
 #endif
 
 /// EmitCallArgs - Emit call arguments for a function.
+/// Replace each complex argument at or after \p First with its real and
+/// imaginary halves, as two arguments of the element type, for a target that
+/// passes an unnamed complex value that way.
+static void splitComplexVariadicArgs(CodeGenFunction &CGF, CallArgList &Args,
+                                     size_t First) {
+  const TargetCodeGenInfo &TI = CGF.CGM.getTargetCodeGenInfo();
+  for (size_t I = First; I < Args.size(); ++I) {
+    const auto *CT = Args[I].Ty->getAs<ComplexType>();
+    if (!CT || !TI.shouldSplitComplexVariadicArg(Args[I].Ty))
+      continue;
+    RValue RV = Args[I].getRValue(CGF);
+    assert(RV.isComplex() && "complex argument was not emitted as one");
+    QualType EltTy = CT->getElementType();
+    Args[I] = CallArg(RValue::get(RV.getComplexVal().first), EltTy);
+    Args.insert(Args.begin() + I + 1,
+                CallArg(RValue::get(RV.getComplexVal().second), EltTy));
+    ++I;
+  }
+}
+
 void CodeGenFunction::EmitCallArgs(
     CallArgList &Args, PrototypeWrapper Prototype,
     llvm::iterator_range<CallExpr::const_arg_iterator> ArgRange,
@@ -5090,6 +5110,10 @@ void CodeGenFunction::EmitCallArgs(
            "Extra arguments in non-variadic function!");
 #endif
   }
+
+  // Everything from here on is an unnamed argument, which matters to the
+  // complex split below.
+  unsigned NumNamedArgs = ArgTypes.size();
 
   // If we still have any arguments, emit them using the type of the argument.
   for (auto *A : llvm::drop_begin(ArgRange, ArgTypes.size()))
@@ -5175,6 +5199,15 @@ void CodeGenFunction::EmitCallArgs(
     // Reverse the writebacks to match the MSVC ABI.
     Args.reverseWritebacks();
   }
+
+  // Split a complex unnamed argument into its two halves if the target passes
+  // one that way (GCC's TARGET_SPLIT_COMPLEX_ARG).  This is done here, on the
+  // evaluated argument list and before the list is classified, for the same
+  // reason GCC does it in expand_call: each half is then an argument in its own
+  // right, and a target whose halves go by reference gets the two slots and the
+  // two pointers it wants without any ABIArgInfo kind having to describe them.
+  if (IsVariadic)
+    splitComplexVariadicArgs(*this, Args, CallArgsStart + NumNamedArgs);
 }
 
 namespace {
