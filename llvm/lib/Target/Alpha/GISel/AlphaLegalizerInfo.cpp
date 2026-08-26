@@ -109,9 +109,38 @@ AlphaLegalizerInfo::AlphaLegalizerInfo(const AlphaSubtarget &ST) {
       .clampScalar(0, s64, s64)
       .lower();
 
+  // Every entry here once had an s64 destination, and maxScalar is a ceiling
+  // only -- so an extension *to* s32, which is what a `sext i8 to i32` feeding
+  // a 32-bit store produces, matched no entry and was never widened up either.
+  // Pinning the destination at s64 with clampScalar does not work: widenScalar
+  // has no case for widening the destination of an extension, so the rule
+  // would ask for something the helper cannot do and fail one step later.
+  //
+  // Declare the narrow destination legal instead.  It is: a register is a
+  // quadword whatever the type says, the selector switches on the *source*
+  // width alone, and sign-extending a byte into a whole register leaves the
+  // low 32 bits holding exactly the s32 value.
   getActionDefinitionsBuilder({G_SEXT, G_ZEXT, G_ANYEXT})
-      .legalFor({{s64, s1}, {s64, s8}, {s64, s16}, {s64, s32}})
+      .legalFor({{s64, s1}, {s64, s8}, {s64, s16}, {s64, s32},
+                 {s32, s1}, {s32, s8}, {s32, s16}})
       .maxScalar(0, s64);
+
+  // An extending load had no rule at all, and an opcode with no rules has an
+  // empty rule set that verify() accepts vacuously -- so nothing here was
+  // checking it, and it is reachable: lowering a non-power-of-two load (an
+  // i40 at -O0) produces a G_ZEXTLOAD from an s32.
+  //
+  // The selector has no counterpart for either opcode.  `.lower()` looks like
+  // the answer and is not: lowerLoad splits a load, and for a byte-sized,
+  // power-of-two, naturally aligned extending load -- which is exactly this
+  // one -- it has nothing to split and returns UnableToLegalize, so the rule
+  // would fail one step further on.  Say unsupported and hand the function to
+  // the SelectionDAG path, as for the atomics below.
+  //
+  // Selecting these directly is the improvement to make here: ldl already
+  // sign-extends a longword, and ldbu/ldwu zero-extend a byte and a word
+  // where there is BWX.  That is selector work, not a legalizer rule.
+  getActionDefinitionsBuilder({G_ZEXTLOAD, G_SEXTLOAD}).unsupported();
 
   getActionDefinitionsBuilder(G_TRUNC).alwaysLegal();
 
@@ -165,9 +194,15 @@ AlphaLegalizerInfo::AlphaLegalizerInfo(const AlphaSubtarget &ST) {
   // registers and care nothing for the width of what is in them.  Widening it
   // would put a float through a pair of integer registers and cost a round trip
   // through memory at each end.
+  //
+  // clampScalar moves a type outside the range to the nearest end and leaves
+  // one inside it alone, so an s40 select -- inside [s32, s64] and legal for
+  // neither -- passed straight through to a selector with nothing to select.
+  // Rounding up to the next power of two afterwards sends it to s64.
   getActionDefinitionsBuilder(G_SELECT)
       .legalFor({{s32, s1}, {s64, s1}, {p0, s1}})
-      .clampScalar(0, s32, s64);
+      .clampScalar(0, s32, s64)
+      .widenScalarToNextPow2(0, 32);
 
   // There is no unsigned conversion instruction; both directions are built out
   // of the signed one.
