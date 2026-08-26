@@ -127,3 +127,44 @@ body:             |
     $f0 = COPY %2(s64)
     RET implicit $f0
 ...
+
+---
+# A misaligned access.  The rule names the natural alignment, so an align-1
+# quadword load does not match it and is unsupported: Alpha has no instruction
+# that loads a datum straddling two quadwords, and the ldq_u/extql/extqh pair
+# the SelectionDAG path builds for it is not something the legalizer here
+# reproduces.  Every entry in that rule once named one byte, which declared
+# this legal and sent it to a selector written to refuse it -- the failure
+# surfaced as `cannot select` rather than as this.
+#
+# The aligned case below is the accept side: a rule that had simply been made
+# unsupported for every alignment would pass the first half of this and lose
+# ordinary loads entirely.
+name:            load_misaligned
+legalized:       false
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $r16
+    ; CHECK-LABEL: name: load_misaligned
+    ; CHECK: failedISel: true
+    ; CHECK: G_LOAD
+    %0:_(p0) = COPY $r16
+    %1:_(s64) = G_LOAD %0(p0) :: (load (s64), align 1)
+    $r0 = COPY %1(s64)
+    RET implicit $r0
+...
+---
+name:            load_aligned
+legalized:       false
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $r16
+    ; CHECK-LABEL: name: load_aligned
+    ; CHECK-NOT: failedISel: true
+    %0:_(p0) = COPY $r16
+    %1:_(s64) = G_LOAD %0(p0) :: (load (s64))
+    $r0 = COPY %1(s64)
+    RET implicit $r0
+...

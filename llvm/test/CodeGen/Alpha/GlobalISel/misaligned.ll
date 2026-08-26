@@ -13,3 +13,20 @@ define void @store_misaligned_i16(ptr %p, i16 %v) {
   store i16 %v, ptr %p, align 1
   ret void
 }
+
+; The load side of the same thing.  It reads both quadwords the datum can fall
+; in and splices the halves together; an ldq alone would fault or read the
+; wrong bytes.  This was reaching the selector and failing there, because every
+; alignment in the legalizer's load rule was written as one byte -- see
+; legalize-unsupported.mir.
+
+; CHECK-LABEL: load_misaligned_i64:
+; CHECK:      ldq_u
+; CHECK:      extql
+; CHECK:      ldq_u
+; CHECK:      extqh
+; CHECK:      bis
+define i64 @load_misaligned_i64(ptr %p) {
+  %v = load i64, ptr %p, align 1
+  ret i64 %v
+}

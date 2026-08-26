@@ -77,12 +77,35 @@ AlphaLegalizerInfo::AlphaLegalizerInfo(const AlphaSubtarget &ST) {
       // sts move a 32-bit float directly and convert the S_floating format on
       // the way.  Without it every float load widened to s64, landed in a
       // general register and had to reach $f0 through the stack.
+      //
+      // The fourth field is the alignment, in bits, at or above which the
+      // access is legal, and it must be the natural one.  Every entry here
+      // once read 8 -- one byte -- which declared a quadword load from a
+      // one-byte-aligned address legal, because `isCompatible` accepts any
+      // alignment at or above what the rule names.  Alpha has no such access:
+      // the datum can straddle two quadwords, and the SelectionDAG path lowers
+      // it to the ldq_u/extql/extqh pair `LowerLOAD` builds, or for a store to
+      // the `USTORE` pseudo and its custom inserter.  GlobalISel runs neither,
+      // and `selectLoadStore` refuses the misaligned case for exactly that
+      // reason -- so the rule sent the selector something it is written to
+      // reject, and `-global-isel-abort=1` reported `cannot select`.
       .legalForTypesWithMemDesc({{s64, p0, s8, 8},
-                                 {s64, p0, s16, 8},
-                                 {s64, p0, s32, 8},
-                                 {s64, p0, s64, 8},
-                                 {s32, p0, s32, 8},
-                                 {p0, p0, s64, 8}})
+                                 {s64, p0, s16, 16},
+                                 {s64, p0, s32, 32},
+                                 {s64, p0, s64, 64},
+                                 {s32, p0, s32, 32},
+                                 {p0, p0, s64, 64}})
+      // What is left is a misaligned access, and it goes to the SelectionDAG
+      // path whole rather than to `.lower()`, which would split it into byte
+      // accesses and is much worse than the two-instruction sequence that path
+      // already emits.  This is the same choice, for the same reason, as the
+      // atomics and the jump tables below: say `unsupported` and hand the
+      // function over, rather than claim a legality the selector cannot honour.
+      .unsupportedIf([](const LegalityQuery &Q) {
+        return !Q.MMODescrs.empty() &&
+               Q.MMODescrs[0].AlignInBits <
+                   Q.MMODescrs[0].MemoryTy.getSizeInBits();
+      })
       .clampScalar(0, s64, s64)
       .lower();
 
