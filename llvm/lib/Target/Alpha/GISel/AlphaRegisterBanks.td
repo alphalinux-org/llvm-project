@@ -13,4 +13,8 @@
 //===----------------------------------------------------------------------===//
 
 def GPRRegBank : RegisterBank<"GPR", [GPRC]>;
-def FPRRegBank : RegisterBank<"FPR", [FPRC]>;
+// F4RC and F8RC are the single- and double-only subsets of FPRC.  Nothing the
+// legalizer produces asks for one, but an inline asm operand does: a "f"
+// constraint on a float picks F4RC, and a register class outside every bank
+// has no bank to be asked for.
+def FPRRegBank : RegisterBank<"FPR", [FPRC, F4RC, F8RC]>;

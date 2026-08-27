@@ -174,7 +174,12 @@ static bool isFPReg(Register Reg, const MachineRegisterInfo &MRI) {
   if (Reg.isPhysical())
     return Alpha::FPRCRegClass.contains(Reg);
   if (const TargetRegisterClass *RC = MRI.getRegClassOrNull(Reg))
-    return Alpha::FPRCRegClass.hasSubClassEq(RC);
+    // F4RC and F8RC hold the same registers as FPRC but are not subclasses of
+    // it, so asking FPRC alone misses the class an inline asm "f" operand is
+    // given.
+    return Alpha::FPRCRegClass.hasSubClassEq(RC) ||
+           Alpha::F4RCRegClass.hasSubClassEq(RC) ||
+           Alpha::F8RCRegClass.hasSubClassEq(RC);
   const RegisterBank *RB = MRI.getRegBankOrNull(Reg);
   return RB && RB->getID() == Alpha::FPRRegBankID;
 }
