@@ -18,6 +18,7 @@
 #include "AlphaMachineFunctionInfo.h"
 #include "AlphaSubtarget.h"
 #include "MCTargetDesc/AlphaMCTargetDesc.h"
+#include "llvm/CodeGen/FunctionLoweringInfo.h"
 #include "llvm/CodeGen/GlobalISel/MachineIRBuilder.h"
 #include "llvm/CodeGen/GlobalISel/Utils.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -172,7 +173,18 @@ bool AlphaCallLowering::lowerReturn(MachineIRBuilder &MIRBuilder,
 
   auto MIB = MIRBuilder.buildInstrNoInsert(Alpha::RET);
 
-  if (!VRegs.empty()) {
+  // A value RetCC_Alpha could not assign -- anything wider than a quadword, an
+  // aggregate, a vector -- comes back in memory instead, through a buffer whose
+  // address the caller passed in $16 as a hidden first argument.  canLowerReturn
+  // said so, and IRTranslator recorded the decision in CanLowerReturn; what is
+  // left is to write the pieces into that buffer.  Without this the return
+  // simply failed to translate and the whole function fell back to the
+  // SelectionDAG path.
+  if (!FLI.CanLowerReturn) {
+    insertSRetStores(MIRBuilder, Val->getType(), VRegs, FLI.DemoteRegister);
+    MIRBuilder.buildCopy(Register(Alpha::R0), FLI.DemoteRegister);
+    MIB.addUse(Alpha::R0, RegState::Implicit);
+  } else if (!VRegs.empty()) {
     const DataLayout &DL = F.getDataLayout();
     SmallVector<ArgInfo, 4> SplitArgs;
     ArgInfo OrigArg{VRegs, Val->getType(), 0};
@@ -209,6 +221,15 @@ bool AlphaCallLowering::lowerFormalArguments(MachineIRBuilder &MIRBuilder,
   const DataLayout &DL = F.getDataLayout();
 
   SmallVector<ArgInfo, 8> SplitArgs;
+
+  // A function returning in memory is given the buffer's address as a hidden
+  // first argument, ahead of everything the IR declares.  It has to be assigned
+  // with the rest so that it lands in $16 and pushes the declared arguments
+  // along by one register, which is where the SelectionDAG path and GCC both
+  // put them.
+  if (!FLI.CanLowerReturn)
+    insertSRetIncomingArgument(F, SplitArgs, FLI.DemoteRegister, MRI, DL);
+
   unsigned Idx = 0;
   for (const auto &Arg : F.args()) {
     ArgInfo OrigArg{VRegs[Idx], Arg.getType(), Idx};
@@ -446,8 +467,11 @@ bool AlphaCallLowering::lowerCall(MachineIRBuilder &MIRBuilder,
   if (IsTailCall)
     return lowerTailCall(MIRBuilder, Info, OutArgs);
 
+  // The caller side of the same thing: when the callee returns in memory the
+  // buffer is a stack object of the caller's, and its address has already been
+  // put at the head of OrigArgs, so nothing comes back in a register.
   SmallVector<ArgInfo, 4> InArgs;
-  if (!Info.OrigRet.Ty->isVoidTy())
+  if (Info.CanLowerReturn && !Info.OrigRet.Ty->isVoidTy())
     splitToValueTypes(Info.OrigRet, InArgs, DL, Info.CallConv);
 
   auto CallSeqStart = MIRBuilder.buildInstr(Alpha::ADJCALLSTACKDOWN);
@@ -490,5 +514,11 @@ bool AlphaCallLowering::lowerCall(MachineIRBuilder &MIRBuilder,
   MIRBuilder.buildInstr(Alpha::ADJCALLSTACKUP)
       .addImm(ArgAssigner.StackSize)
       .addImm(0);
+
+  // Read the returned value back out of the buffer the callee filled in.
+  if (!Info.CanLowerReturn)
+    insertSRetLoads(MIRBuilder, Info.OrigRet.Ty, Info.OrigRet.Regs,
+                    Info.DemoteRegister, Info.DemoteStackIndex);
+
   return true;
 }
