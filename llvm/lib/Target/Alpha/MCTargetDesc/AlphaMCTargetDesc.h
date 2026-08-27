@@ -70,6 +70,10 @@ inline StringRef getFPTrapSuffix(unsigned TrapClass, bool IEEE, bool Inexact,
   case 6: // Quadword-to-longword: integer overflow, and no inexact form.
     return IEEE ? "sv" : (TrapU ? "v" : StringRef());
   default:
+    // The VAX F and G classes (7-10) land here.  Nothing selects one, so there
+    // is no policy to apply: what a VAX floating instruction carries is what
+    // was written, and -mieee has nothing to say about a format that has no
+    // IEEE exceptions to complete in software.
     return StringRef();
   }
 }
@@ -100,7 +104,14 @@ inline bool fpRounds(unsigned TrapClass) {
 // and dropping the c silently assembled it as cvttq/sv.  Compares (2) and the
 // conversions that have no rounding field (5) take none.
 inline bool fpTakesWrittenRound(unsigned TrapClass) {
-  return fpRounds(TrapClass) || TrapClass == 3;
+  return fpRounds(TrapClass) || TrapClass == 3 || TrapClass == 7 ||
+         TrapClass == 8 || TrapClass == 10;
+}
+// The VAX F and G formats round to nearest or toward zero and have no other
+// mode: the two spellings /m and /d name rounding fields those instructions do
+// not define, and GNU as does not decode a word with one.
+inline bool fpIsVaxClass(unsigned TrapClass) {
+  return TrapClass >= 7 && TrapClass <= 10;
 }
 inline StringRef getFPRoundSuffix(unsigned Mode) {
   for (const FPRoundInfo &R : FPRoundModes)
@@ -143,11 +154,11 @@ inline unsigned getFPRoundModeForFuncBits(unsigned Bits) {
 // The trap class an FP instruction carries in the low three bits of its
 // TSFlags; 0 for one that takes no qualifier.  See TrapClass in
 // AlphaInstrFormats.td.
-enum : unsigned { TrapClassMask = 0x7 };
+enum : unsigned { TrapClassMask = 0xf };
 
 // Which field of an encoding a relocation can be written into.  The values
 // match RelocField in AlphaInstrFormats.td.
-enum : unsigned { RelocFieldShift = 3, RelocFieldMask = 0x3u << RelocFieldShift };
+enum : unsigned { RelocFieldShift = 4, RelocFieldMask = 0x3u << RelocFieldShift };
 enum : unsigned {
   RelocFieldNone = 0,
   RelocFieldDisp16 = 1,
@@ -236,7 +247,8 @@ inline unsigned getFPTrapFuncBitsForSpelling(StringRef S, bool &Ok) {
 // at all.  cvtst's does not: the 0x200 it has there is what distinguishes it
 // from cvtts, and it takes no qualifier of its own.
 inline bool fpTrapFieldIsQualifier(unsigned TrapClass) {
-  return (TrapClass >= 1 && TrapClass <= 4) || TrapClass == 6;
+  return (TrapClass >= 1 && TrapClass <= 4) || TrapClass == 6 ||
+         fpIsVaxClass(TrapClass);
 }
 
 // Whether a trap class actually defines this trap-bit and rounding-mode
@@ -258,6 +270,9 @@ inline bool fpQualIsLegal(unsigned TrapClass, unsigned TrapBits,
                           unsigned RoundMode) {
   if (!fpTakesWrittenRound(TrapClass) && RoundMode != FPRoundNormal)
     return false;
+  if (fpIsVaxClass(TrapClass) && RoundMode != FPRoundNormal &&
+      RoundMode != FPRoundChopped)
+    return false;
   switch (TrapClass) {
   case 1: // Arithmetic, and the T-to-S convert: all sixteen.
   case 3: // Floating to integer: the same set, spelled with v.
@@ -271,9 +286,28 @@ inline bool fpQualIsLegal(unsigned TrapClass, unsigned TrapBits,
     return TrapBits == 0 || TrapBits == 0x500;
   case 4: // Integer to floating: no underflow bit without inexact.
     return TrapBits == 0 || TrapBits == 0x700;
+  case 7: // VAX arithmetic and the G converts: bare, /u, /s and /su, each with
+          // or without the chopped rounding letter.  There is no inexact bit:
+          // the VAX formats have no way to signal one.
+  case 8: // cvtgq, which is the same set spelled with v.
+    return TrapBits == 0 || TrapBits == 0x100 || TrapBits == 0x400 ||
+           TrapBits == 0x500;
+  case 9: // The G compares: bare or /s.  Not /su -- there is no underflow in a
+          // comparison, and GNU as does not accept one.
+    return TrapBits == 0 || TrapBits == 0x400;
+  case 10: // Quadword to VAX floating: no trap qualifier at all, since the
+           // conversion cannot signal, but the rounding letter is there.
+    return TrapBits == 0;
   default: // cvtst (class 5) and anything unclassified: none.
     return TrapBits == 0;
   }
+}
+
+// Whether a class spells its trap qualifier with v (integer overflow) rather
+// than u (floating underflow); see getFPTrapSpelling.  The floating-to-integer
+// converts are the classes that do.
+inline bool fpUsesIntOverflowSpelling(unsigned TrapClass) {
+  return TrapClass == 3 || TrapClass == 6 || TrapClass == 8;
 }
 
 // The u and v spellings produce the same function bits and differ only in which
@@ -285,7 +319,7 @@ inline bool fpTrapSpellingMatchesClass(unsigned TrapClass, unsigned TrapBits,
                                        bool IsIntOverflowSpelling) {
   if (!(TrapBits & 0x100))
     return !IsIntOverflowSpelling;
-  return IsIntOverflowSpelling == (TrapClass == 3 || TrapClass == 6);
+  return IsIntOverflowSpelling == fpUsesIntOverflowSpelling(TrapClass);
 }
 
 // The spelling of a trap qualifier from its function bits.  The v forms differ

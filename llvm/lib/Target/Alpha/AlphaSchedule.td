@@ -210,6 +210,17 @@ multiclass AlphaInstRW {
   def : InstRW<[Wr_JSR], (instrs OTS_CALL)>;
   def : InstRW<[Wr_IALU, Wr_IALU], (instrs LDGPself)>;
   def : InstRW<[Wr_FAdd], (instrs CVTQT_D, CVTST_S, CVTTQ_SVID)>;
+  // The VAX formats run on the same adder, multiplier and divider as the IEEE
+  // ones -- there is no separate VAX unit -- so they cost what their IEEE
+  // counterparts cost, F_floating with the single-precision divide latency.
+  def : InstRW<[Wr_FAdd], (instrs
+      ADDF, SUBF, ADDG, SUBG, CMPGEQ, CMPGLT, CMPGLE,
+      CVTDG, CVTGF, CVTGD, CVTGQ, CVTQF, CVTQG)>;
+  def : InstRW<[Wr_FMul], (instrs MULF, MULG)>;
+  def : InstRW<[Wr_FDivS], (instrs DIVF)>;
+  def : InstRW<[Wr_FDivT], (instrs DIVG)>;
+  def : InstRW<[Wr_FLoad], (instrs LDF, LDG)>;
+  def : InstRW<[Wr_FStore, Rd_FStData], (instrs STF, STG)>;
   // An FP branch tests an FP register, which changes nothing here.
   def : InstRW<[Wr_Br], (instrs FBEQ, FBNE, FBLT, FBLE, FBGT, FBGE)>;
   def : InstRW<[Wr_JSR], (instrs JSRt)>;

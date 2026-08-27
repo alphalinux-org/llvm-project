@@ -28,9 +28,11 @@ class AlphaInst<dag outs, dag ins, string asmstr, list<dag> pattern>
 
   // Floating-point trap-mode class, consulted by the code emitter and printer
   // to add software-completion (/su, /sui, /sv, ...) qualifiers under -mieee.
-  // 0 none, 1 arithmetic, 2 compare, 3 float-to-int, 4 int-to-float.
-  bits<3> TrapClass = 0;
-  let TSFlags{2-0} = TrapClass;
+  // 0 none, 1 arithmetic, 2 compare, 3 float-to-int, 4 int-to-float, 5 cvtst,
+  // 6 cvtql, and 7-10 the VAX F and G floating classes, whose qualifier sets
+  // are not any of the IEEE ones.
+  bits<4> TrapClass = 0;
+  let TSFlags{3-0} = TrapClass;
 
   // Which field of this encoding a relocation can be written into, so the
   // assembler can reject a specifier that does not fit one -- GNU as calls
@@ -38,7 +40,7 @@ class AlphaInst<dag outs, dag ins, string asmstr, list<dag> pattern>
   // displacement, 2 the 14-bit branch-prediction hint, 3 the 21-bit branch
   // displacement.
   bits<2> RelocField = 0;
-  let TSFlags{4-3} = RelocField;
+  let TSFlags{5-4} = RelocField;
 
   bits<6> Opcode = 0;
   let Inst{31-26} = Opcode;

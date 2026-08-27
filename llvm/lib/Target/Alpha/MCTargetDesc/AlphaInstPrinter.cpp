@@ -37,9 +37,10 @@ void AlphaInstPrinter::printInst(const MCInst *MI, uint64_t Address,
   if (Alpha::hasFPQual(MI->getFlags())) {
     // What was written, or what the bits say.  Printing anything else would
     // contradict the encoding this instruction already has.
-    Suffix = Alpha::getFPTrapSpelling(Alpha::fpQualTrapBits(MI->getFlags()),
-                                      /*IsIntOverflow=*/TrapClass == 3 || TrapClass == 6)
-                 .str();
+    Suffix =
+        Alpha::getFPTrapSpelling(Alpha::fpQualTrapBits(MI->getFlags()),
+                                 Alpha::fpUsesIntOverflowSpelling(TrapClass))
+            .str();
     RM = Alpha::fpQualRoundMode(MI->getFlags());
   } else {
     Suffix =

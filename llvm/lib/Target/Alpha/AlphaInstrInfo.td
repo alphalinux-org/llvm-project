@@ -776,6 +776,73 @@ def CVTTQn : FP_r<0x16, 0x0af, "cvttq", []>;
 // -mfp-rounding-mode=d (e.g. glibc s_rint.c).
 def CVTTQ_SVID : FP_r<0x16, 0x7ef, "cvttq/svid", []>;
 
+//===----------------------------------------------------------------------===//
+// VAX F_floating and G_floating (primary opcode 0x15).
+//
+// The VAX formats are the other half of the Alpha floating-point architecture:
+// F_floating is the single-precision format the VAX used and G_floating the
+// double, and every implementation has to run them because Digital's own VMS
+// compilers emitted them.  Nothing here is selectable -- C has no VAX floating
+// type and this compiler targets Linux -- but the assembler has to be able to
+// say what the architecture can encode and the disassembler to read it back,
+// which is the whole reason these are here.  D_floating is not: only the two
+// conversions to and from G survive on Alpha, and those are cvtdg and cvtgd.
+//
+// The qualifiers are their own dialect.  There is no inexact bit, because a
+// VAX-format operation has no way to signal one, so the trap field holds only
+// bare, /u (or /v where the result is an integer), /s and /su -- and the
+// comparisons, which cannot overflow or underflow, take only bare and /s.  The
+// rounding field has just the two VAX modes, normal and chopped, so /m and /d
+// name fields these instructions do not define.  Trap classes 7 to 10 in
+// AlphaMCTargetDesc.h spell all of that out.
+//===----------------------------------------------------------------------===//
+
+class VAXFP_rr<bits<11> func, string mnem>
+    : FForm<0x15, func, (outs FPRC:$Rc), (ins FPRC:$Ra, FPRC:$Rb),
+            mnem # " $Ra, $Rb, $Rc", []>;
+
+let TrapClass = 7 in {  // VAX arithmetic: bare, /u, /s, /su, each with /c.
+def ADDF : VAXFP_rr<0x080, "addf">;
+def SUBF : VAXFP_rr<0x081, "subf">;
+def MULF : VAXFP_rr<0x082, "mulf">;
+def DIVF : VAXFP_rr<0x083, "divf">;
+def ADDG : VAXFP_rr<0x0a0, "addg">;
+def SUBG : VAXFP_rr<0x0a1, "subg">;
+def MULG : VAXFP_rr<0x0a2, "mulg">;
+def DIVG : VAXFP_rr<0x0a3, "divg">;
+}
+let TrapClass = 9 in {  // VAX compare: bare or /s, and no rounding letter.
+def CMPGEQ : VAXFP_rr<0x0a5, "cmpgeq">;
+def CMPGLT : VAXFP_rr<0x0a6, "cmpglt">;
+def CMPGLE : VAXFP_rr<0x0a7, "cmpgle">;
+}
+
+// The conversions, which take their single source in Fb with Fa = $f31.
+let TrapClass = 7 in {
+def CVTDG : FP_r<0x15, 0x09e, "cvtdg", []>;
+def CVTGF : FP_r<0x15, 0x0ac, "cvtgf", []>;
+def CVTGD : FP_r<0x15, 0x0ad, "cvtgd", []>;
+}
+let TrapClass = 8 in  // Result is an integer, so the overflow letter is v.
+def CVTGQ : FP_r<0x15, 0x0af, "cvtgq", []>;
+let TrapClass = 10 in {  // From an integer: nothing to trap on, but it rounds.
+def CVTQF : FP_r<0x15, 0x0bc, "cvtqf", []>;
+def CVTQG : FP_r<0x15, 0x0be, "cvtqg", []>;
+}
+
+// The VAX loads and stores.  Unlike lds/sts, which convert between S_floating
+// in memory and T_floating in the register, ldf and stf move an F_floating
+// value into and out of the register's VAX layout; ldg and stg move eight
+// bytes with the longwords swapped into G_floating order.
+let mayLoad = 1, hasSideEffects = 0 in {
+def LDF : MForm<0x20, (outs FPRC:$Ra), (ins memri:$addr), "ldf $Ra, $addr", []>;
+def LDG : MForm<0x21, (outs FPRC:$Ra), (ins memri:$addr), "ldg $Ra, $addr", []>;
+}
+let mayStore = 1, hasSideEffects = 0 in {
+def STF : MForm<0x24, (outs), (ins FPRC:$Ra, memri:$addr), "stf $Ra, $addr", []>;
+def STG : MForm<0x25, (outs), (ins FPRC:$Ra, memri:$addr), "stg $Ra, $addr", []>;
+}
+
 // The low-bit conditional moves: `cmovlbs $Ra, $Rb, $Rc` moves when bit 0 of
 // $Ra is set, cmovlbc when it is clear.  They fold the `and $Ra, 1` that
 // `(x & 1) ? a : b` would otherwise need before an ordinary cmovne/cmoveq,
@@ -2275,6 +2342,12 @@ def : InstAlias<"fnop", (CPYS F31, F31, F31)>;
 def : InstAlias<"fclr $dst", (CPYS FPRC:$dst, F31, F31)>;
 def : InstAlias<"negs $src, $dst", (SUBS FPRC:$dst, F31, FPRC:$src)>;
 def : InstAlias<"negt $src, $dst", (SUBT FPRC:$dst, F31, FPRC:$src)>;
+// The VAX negations, which are subtractions from zero in the same way.  GNU as
+// accepts only the bare and /s spellings of these two, but that is a property
+// of its mnemonic table rather than of the encoding: subf/su $f31 assembles
+// there and means the same thing.
+def : InstAlias<"negf $src, $dst", (SUBF FPRC:$dst, F31, FPRC:$src)>;
+def : InstAlias<"negg $src, $dst", (SUBG FPRC:$dst, F31, FPRC:$src)>;
 
 // __builtin_alpha_umulh reuses the umulh instruction (also the mulhu pattern).
 def : Pat<(int_alpha_umulh i64:$a, i64:$b), (UMULH GPRC:$a, GPRC:$b)>;
