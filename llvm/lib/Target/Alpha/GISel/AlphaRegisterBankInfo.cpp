@@ -211,6 +211,10 @@ AlphaRegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
   case G_BR:
     OperandsMapping = getOperandsMapping({nullptr});
     break;
+  case G_BRINDIRECT:
+    OperandsMapping =
+        getOperandsMapping({&Alpha::ValueMappings[Alpha::GPR3OpsIdx]});
+    break;
   case G_BRCOND:
     OperandsMapping =
         getOperandsMapping({&Alpha::ValueMappings[Alpha::GPR3OpsIdx], nullptr});
@@ -247,6 +251,8 @@ AlphaRegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
   case G_FRAME_INDEX:
   case G_GLOBAL_VALUE:
   case G_JUMP_TABLE:
+  case G_BLOCK_ADDR:
+  case G_CONSTANT_POOL:
     // What these produce comes from an immediate, a frame index or a symbol,
     // none of which is a register and none of which may be given a mapping.
     OperandsMapping =

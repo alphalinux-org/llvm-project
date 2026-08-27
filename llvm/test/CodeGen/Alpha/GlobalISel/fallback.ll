@@ -9,17 +9,6 @@
 ; The output below is the SelectionDAG lowering, which is what makes the point:
 ; these compile correctly, just not through GlobalISel.
 
-; The address of a block is formed gp-relative like a global's.
-@ba = global ptr null
-; CHECK-LABEL: blockaddr:
-; CHECK:       gprelhigh
-define void @blockaddr() {
-  store ptr blockaddress(@blockaddr, %here), ptr @ba
-  br label %here
-here:
-  ret void
-}
-
 ; A read-modify-write becomes an ldq_l/stq_c retry loop, which the SelectionDAG
 ; path builds with a custom inserter.
 ; CHECK-LABEL: rmw:

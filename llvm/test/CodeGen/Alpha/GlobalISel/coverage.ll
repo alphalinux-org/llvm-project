@@ -16,11 +16,12 @@
 ; each of those instructions, which is what makes the two prefixes mean
 ; something: without it the BASE checks would pass on ev67 output too.
 ;
-; A switch dense enough to become a jump table is covered by jump-table.ll
-; rather than here, because the sequence it checks is long enough to be worth a
-; file.  The address of a block or of a constant-pool entry is still left to the
-; SelectionDAG path, as are the atomics, whose retry loop that path builds with
-; a custom inserter GlobalISel does not run.  See fallback.ll.
+; A switch dense enough to become a jump table is covered by jump-table.ll, and
+; the address of a block or of a constant-pool entry by gprel-address.ll, rather
+; than here, because the sequences they check are long enough to be worth their
+; own files.  The atomics are still left to the SelectionDAG path, whose retry
+; loop it builds with a custom inserter GlobalISel does not run.  See
+; fallback.ll.
 
 ; CHECK-LABEL: fence:
 ; CHECK:      mb

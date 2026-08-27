@@ -380,13 +380,11 @@ AlphaLegalizerInfo::AlphaLegalizerInfo(const AlphaSubtarget &ST) {
   getActionDefinitionsBuilder(G_BITREVERSE).lower();
 
   // The address of a block and of a constant-pool entry are formed the same
-  // gp-relative way a global's is, which the selector does not do for these
-  // two, so they go to the SelectionDAG path as well.  The only thing that
-  // reaches G_BRINDIRECT is an indirectbr, whose target is a blockaddress, so
-  // it goes the same way; calling it legal would be a claim the selector has no
-  // case, no GINodeEquiv and no brind pattern to back up.
-  getActionDefinitionsBuilder({G_BRINDIRECT, G_BLOCK_ADDR, G_CONSTANT_POOL})
-      .unsupported();
+  // gp-relative way a jump table's is, and by the same code.  The only thing
+  // that reaches G_BRINDIRECT is an indirectbr, whose target is a block
+  // address, so the three arrive together or not at all.
+  getActionDefinitionsBuilder({G_BLOCK_ADDR, G_CONSTANT_POOL}).legalFor({p0});
+  getActionDefinitionsBuilder(G_BRINDIRECT).legalFor({p0});
 
   // A jump table dispatch: the table address is formed gp-relative and the
   // dispatch reads a 32-bit gp-relative offset out of it, which is what

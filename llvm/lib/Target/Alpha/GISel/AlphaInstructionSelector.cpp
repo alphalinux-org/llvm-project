@@ -63,6 +63,7 @@ private:
   bool selectSelect(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectFConstant(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectBrJT(MachineInstr &I, MachineRegisterInfo &MRI) const;
+  bool selectGprelAddress(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectAluImm(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectNarrowArith(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectFieldExtract(MachineInstr &I, MachineRegisterInfo &MRI) const;
@@ -1546,28 +1547,22 @@ bool AlphaInstructionSelector::selectInstr(MachineInstr &I) const {
     I.eraseFromParent();
     return true;
   }
-  case TargetOpcode::G_JUMP_TABLE: {
-    // The table's address is built the way a gp-relative global's is: the
-    // linker resolves both to a fixed distance from the global pointer.
-    MachineFunction &MF = *I.getParent()->getParent();
-    MF.getInfo<AlphaMachineFunctionInfo>()->setUsesGP();
-    Register Hi = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
-    MachineInstrBuilder HiMIB =
-        BuildMI(*I.getParent(), I, I.getDebugLoc(), TII.get(Alpha::LDAHg), Hi)
-            .add(I.getOperand(1))
-            .addReg(Alpha::R29);
+  case TargetOpcode::G_JUMP_TABLE:
+  case TargetOpcode::G_BLOCK_ADDR:
+  case TargetOpcode::G_CONSTANT_POOL:
+    return selectGprelAddress(I, MRI);
+  case TargetOpcode::G_BRJT:
+    return selectBrJT(I, MRI);
+  case TargetOpcode::G_BRINDIRECT: {
+    // An indirect branch jumps to whatever address it is given; the only thing
+    // that produces one is an indirectbr, whose target is a block address.
     MachineInstrBuilder MIB =
-        BuildMI(*I.getParent(), I, I.getDebugLoc(), TII.get(Alpha::LDAg),
-                I.getOperand(0).getReg())
-            .add(I.getOperand(1))
-            .addReg(Hi);
-    constrainSelectedInstRegOperands(*HiMIB, TII, TRI, RBI);
+        BuildMI(*I.getParent(), I, I.getDebugLoc(), TII.get(Alpha::JMP))
+            .addUse(I.getOperand(0).getReg());
     I.eraseFromParent();
     constrainSelectedInstRegOperands(*MIB, TII, TRI, RBI);
     return true;
   }
-  case TargetOpcode::G_BRJT:
-    return selectBrJT(I, MRI);
   case TargetOpcode::G_FRAME_INDEX: {
     // The address of a stack slot: an lda whose displacement the frame index
     // elimination fills in.
@@ -1579,6 +1574,24 @@ bool AlphaInstructionSelector::selectInstr(MachineInstr &I) const {
   default:
     return false;
   }
+}
+
+// The address of something the linker resolves to a fixed distance from the
+// global pointer: a jump table, a constant-pool entry, or a block address.
+// All three are local to the object by construction, so none of them needs a
+// GOT entry and all three are formed the same way a gp-relative global's
+// address is -- an ldah/lda pair against $29, which is what LowerConstantPool,
+// LowerJumpTable and LowerBlockAddress each build.
+//
+// The symbol operand is copied across whole rather than rebuilt, so that the
+// index or block address and any offset on it survive: a constant-pool operand
+// can carry one, and dropping it would name the start of the entry instead of
+// the field being addressed.
+bool AlphaInstructionSelector::selectGprelAddress(
+    MachineInstr &I, MachineRegisterInfo &MRI) const {
+  emitGprelPair(I, Alpha::LDAg, I.getOperand(0).getReg(), I.getOperand(1), MRI);
+  I.eraseFromParent();
+  return true;
 }
 
 // A jump table dispatch.  This is LowerBR_JT's sequence, instruction for
