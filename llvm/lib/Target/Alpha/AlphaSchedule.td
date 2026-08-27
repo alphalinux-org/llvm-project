@@ -150,7 +150,7 @@ multiclass AlphaInstRW {
   def : InstRW<[Wr_Br, Rd_ITest],
                (instrs BEQ, BNE, BLT, BLE, BGT, BGE, BLBC, BLBS)>;
   def : InstRW<[Wr_JSR], (instrs JSR, JSRr, JSRd, JSRdl, JMP, RET)>;
-  def : InstRW<[Wr_Misc], (instrs RPCC, MB, RDUNIQ)>;
+  def : InstRW<[Wr_Misc], (instrs RPCC, RC, RS, MB, RDUNIQ)>;
   // The immediate forms cost what their register forms do.
   def : InstRW<[Wr_IALU], (instrs
       LDAd, LDAg, LDAt, LDAHd, LDAHg, LDAHt, LDAHm, LDAtlsgd, LDAtlsldm, NOP)>;

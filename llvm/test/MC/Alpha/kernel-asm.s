@@ -29,6 +29,13 @@
 # CHECK: excb                             # encoding: [0x00,0x04,0x00,0x60]
 	excb
 
+# rc and rs read and then clear or set the interrupt flag.  They are PALcode's,
+# not a userland program's, and the unused Rb field is zero rather than 31.
+# CHECK: rc $0                            # encoding: [0x00,0xe0,0x00,0x60]
+	rc $0
+# CHECK: rs $1                            # encoding: [0x00,0xf0,0x20,0x60]
+	rs $1
+
 # unop and the cache hints.
 # CHECK: unop                             # encoding: [0x00,0x00,0xfe,0x2f]
 	unop

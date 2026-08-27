@@ -2273,6 +2273,25 @@ def RPCC : AlphaInst<(outs GPRC:$Ra), (ins), "rpcc $Ra",
   let Inst{15-0} = 0xc000;
 }
 
+// rc and rs read the interrupt flag into Ra and then clear or set it.  They
+// exist for PALcode's use and nothing in a Linux userland issues one, so there
+// is no intrinsic and no pattern -- they are here so that hand-written
+// assembly assembles and so that the disassembler is not surprised by one.
+// Unlike rpcc the unused Rb field is zero rather than 31, which is what GNU as
+// encodes and what GNU objdump expects.
+class ReadIntrFlag<bits<16> func, string mnem>
+    : AlphaInst<(outs GPRC:$Ra), (ins), mnem # " $Ra", []> {
+  bits<5> Ra;
+  let Opcode = 0x18;
+  let Inst{25-21} = Ra;
+  let Inst{20-16} = 0;
+  let Inst{15-0} = func;
+}
+let hasSideEffects = 1, mayLoad = 0, mayStore = 0 in {
+def RC : ReadIntrFlag<0xe000, "rc">;
+def RS : ReadIntrFlag<0xf000, "rs">;
+}
+
 // Route the byte/word extract, insert and mask intrinsics to the low-form
 // instructions that already exist for the pre-BWX access sequences.
 def : Pat<(int_alpha_extbl i64:$a, i64:$b), (EXTBL GPRC:$a, GPRC:$b)>;
