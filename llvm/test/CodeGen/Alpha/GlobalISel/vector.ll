@@ -88,3 +88,25 @@ define void @vshuf(ptr %p, ptr %q) {
   store <4 x i32> %r, ptr %p
   ret void
 }
+
+; A vector with no defining computation is scalarized like any other, into one
+; undefined element each.  Without a rule for it the legalizer gave up here,
+; which took every function containing a partly-undefined vector -- what an
+; insertelement into undef starts as -- back to the SelectionDAG path.
+; CHECK-LABEL: vundef:
+; CHECK:       ret
+define <4 x i32> @vundef() {
+  ret <4 x i32> undef
+}
+
+; An insertelement into undef is the ordinary way a vector is built, and it is
+; the case that reaches G_IMPLICIT_DEF with the other three elements left
+; undefined.  Only the inserted element survives to the extract, so the answer
+; is the argument itself.
+; CHECK-LABEL: vundef_insert:
+; CHECK:       bis $31, $16, $0
+define i32 @vundef_insert(i32 %x) {
+  %v = insertelement <4 x i32> undef, i32 %x, i32 0
+  %e = extractelement <4 x i32> %v, i32 0
+  ret i32 %e
+}

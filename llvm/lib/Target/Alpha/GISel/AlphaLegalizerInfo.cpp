@@ -306,6 +306,7 @@ AlphaLegalizerInfo::AlphaLegalizerInfo(const AlphaSubtarget &ST) {
   getActionDefinitionsBuilder(
       {G_IMPLICIT_DEF, G_FREEZE, G_CONSTANT_FOLD_BARRIER})
       .legalFor({s32, s64, p0})
+      .scalarize(0)
       .widenScalarToNextPow2(0)
       .clampScalar(0, s32, s64);
 
