@@ -55,8 +55,26 @@ AlphaLegalizerInfo::AlphaLegalizerInfo(const AlphaSubtarget &ST) {
   // pointed at them.  Hand such a function to that path whole.
   getActionDefinitionsBuilder({G_SDIV, G_UDIV, G_SREM, G_UREM}).unsupported();
 
+  // A shift of a scalar wider than a quadword is split into quadwords, which
+  // works only when the width is a whole number of them.  clampScalar splits
+  // in half and half of an s120 is an s60, whose own legalization goes looking
+  // for the pieces 60 and 8 have in common: legalizing one such shift spends
+  // millions of virtual registers unmerging s60s into s4s and does not finish.
+  // Two csmith programs in a forty-seed census stopped compiling on this once
+  // the loads above them became legal enough to reach it.  Hand such a
+  // function to the SelectionDAG path, which expands the shift itself.
+  //
+  // Rounding the width up to the next power of two first is the obvious
+  // alternative and it is not one: an s65 shift widened to s128 makes the
+  // legalizer and the artifact combiner pass an unmerge of a quadword into 64
+  // booleans back and forth forever.  The one that has been measured to
+  // terminate is the one that refuses.
   getActionDefinitionsBuilder({G_SHL, G_LSHR, G_ASHR})
       .legalFor({{s64, s64}})
+      .unsupportedIf([=](const LegalityQuery &Query) {
+        const unsigned Bits = Query.Types[0].getSizeInBits();
+        return Bits > 64 && Bits % 64 != 0;
+      })
       .clampScalar(0, s64, s64)
       .clampScalar(1, s64, s64);
 
