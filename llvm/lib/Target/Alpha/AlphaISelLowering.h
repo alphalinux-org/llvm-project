@@ -20,6 +20,14 @@
 
 namespace llvm {
 
+namespace Alpha {
+/// Whether a constant satisfies one of the constant-integer inline asm
+/// constraint letters ("IJKLMNOPS").  \p V is the value sign-extended and \p U
+/// the same value zero-extended, which differ for an operand narrower than a
+/// register.
+bool isValidConstantConstraint(char Letter, int64_t V, uint64_t U);
+} // namespace Alpha
+
 class AlphaSubtarget;
 class AlphaTargetMachine;
 

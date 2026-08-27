@@ -530,57 +530,54 @@ AlphaTargetLowering::getInlineAsmMemConstraint(StringRef ConstraintCode) const {
   return TargetLowering::getInlineAsmMemConstraint(ConstraintCode);
 }
 
+// Whether a constant satisfies one of the constant-integer constraint letters
+// (GCC's alpha letters).  Enforcing each letter's range here means an
+// out-of-range value is rejected and the register alternative of a combined
+// constraint such as "rI"/"rJ" is used instead.  Both instruction selectors ask
+// this, so the ranges are written once.
+bool llvm::Alpha::isValidConstantConstraint(char Letter, int64_t V,
+                                            uint64_t U) {
+  switch (Letter) {
+  case 'I':
+    return isUInt<8>(U); // unsigned 8-bit
+  case 'J':
+    return V == 0; // zero
+  case 'K':
+    return isInt<16>(V); // lda
+  case 'L':
+    return (U & 0xffffULL) == 0 && isInt<32>(V); // ldah
+  case 'N':
+    return isUInt<8>(~U); // complemented 8-bit
+  case 'O':
+    return isUInt<8>(0 - U); // negated 8-bit
+  case 'P':
+    return V == 1 || V == 2 || V == 3; // 1, 2 or 3
+  case 'S':
+    return isUInt<6>(U); // 6-bit shift count
+  case 'M':
+    // A zap byte-mask: each byte of the value is either kept whole or
+    // cleared, which is what `zapnot' can make of a register.
+    for (unsigned I = 0; I != 8; ++I) {
+      uint8_t B = (U >> (I * 8)) & 0xff;
+      if (B != 0 && B != 0xff)
+        return false;
+    }
+    return true;
+  default:
+    return false;
+  }
+}
+
 void AlphaTargetLowering::LowerAsmOperandForConstraint(
     SDValue Op, StringRef Constraint, std::vector<SDValue> &Ops,
     SelectionDAG &DAG) const {
   if (Constraint.size() == 1 &&
       StringRef("IJKLMNOPS").contains(Constraint[0])) {
-    // The constant-integer constraints (GCC's alpha letters).  Enforce each
-    // letter's range so an out-of-range value is rejected here and the register
-    // alternative of a combined constraint such as "rI"/"rJ" is used instead.
     auto *C = dyn_cast<ConstantSDNode>(Op);
     if (!C)
       return;
     int64_t V = C->getSExtValue();
-    uint64_t U = C->getZExtValue();
-    bool Ok = false;
-    switch (Constraint[0]) {
-    case 'I':
-      Ok = isUInt<8>(U);
-      break; // unsigned 8-bit
-    case 'J':
-      Ok = V == 0;
-      break; // zero
-    case 'K':
-      Ok = isInt<16>(V);
-      break; // lda
-    case 'L':
-      Ok = (U & 0xffffULL) == 0 && isInt<32>(V);
-      break; // ldah
-    case 'N':
-      Ok = isUInt<8>(~U);
-      break; // complemented 8-bit
-    case 'O':
-      Ok = isUInt<8>(0 - U);
-      break; // negated 8-bit
-    case 'P':
-      Ok = V == 1 || V == 2 || V == 3;
-      break; // 1, 2 or 3
-    case 'S':
-      Ok = isUInt<6>(U);
-      break; // 6-bit shift count
-    case 'M':
-      // A zap byte-mask: each byte of the value is either kept whole or
-      // cleared, which is what `zapnot' can make of a register.
-      Ok = true;
-      for (unsigned I = 0; I != 8; ++I) {
-        uint8_t B = (U >> (I * 8)) & 0xff;
-        if (B != 0 && B != 0xff)
-          Ok = false;
-      }
-      break;
-    }
-    if (Ok)
+    if (Alpha::isValidConstantConstraint(Constraint[0], V, C->getZExtValue()))
       Ops.push_back(
           DAG.getSignedTargetConstant(V, SDLoc(Op), Op.getValueType()));
     return;
