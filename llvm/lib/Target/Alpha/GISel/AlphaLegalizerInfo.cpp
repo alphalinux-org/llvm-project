@@ -11,8 +11,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "AlphaLegalizerInfo.h"
+#include "AlphaMachineFunctionInfo.h"
 #include "AlphaSubtarget.h"
+#include "llvm/CodeGen/GlobalISel/GenericMachineInstrs.h"
 #include "llvm/CodeGen/GlobalISel/LegalizerHelper.h"
+#include "llvm/CodeGen/GlobalISel/MachineIRBuilder.h"
 #include "llvm/CodeGen/TargetOpcodes.h"
 #include "llvm/CodeGen/ValueTypes.h"
 
@@ -394,11 +397,29 @@ AlphaLegalizerInfo::AlphaLegalizerInfo(const AlphaSubtarget &ST) {
   getActionDefinitionsBuilder(G_JUMP_TABLE).legalFor({p0});
   getActionDefinitionsBuilder(G_BRJT).legalFor({{p0, s64}});
 
-  // These need a custom lowering that matches what the SelectionDAG path
-  // builds, so leave them to it rather than open-code a second version.
-  getActionDefinitionsBuilder(
-      {G_VASTART, G_VAARG, G_DYN_STACKALLOC, G_STACKSAVE, G_STACKRESTORE})
-      .unsupported();
+  // va_start writes the { char *base; int offset; } pair that describes the
+  // argument save area.  The generic lowering stores a single pointer, which is
+  // the wrong shape and would leave the offset field holding whatever the
+  // alloca happened to contain, so this one is built here.
+  getActionDefinitionsBuilder(G_VASTART).custom();
+
+  // The stack grows down and $30 is the stack pointer, which is all the generic
+  // lowering needs to know: it copies the pointer out, subtracts, rounds and
+  // copies it back.  The size arrives already rounded up to the stack alignment
+  // -- IRTranslator::translateAlloca does that -- and the alignment operand is
+  // 1 unless the object wants more than the stack gives, so what comes out is
+  // the sequence LowerDYNAMIC_STACKALLOC builds.
+  getActionDefinitionsBuilder({G_DYN_STACKALLOC, G_STACKSAVE, G_STACKRESTORE})
+      .lower();
+
+  // va_arg is not reached from C on this target: clang expands it in the front
+  // end, so nothing but hand-written IR produces one.  That is just as well,
+  // because G_VAARG could not be lowered correctly if it were -- the argument
+  // save area puts a floating-point argument in a register slot 48 bytes below
+  // the integer one, and which slot to read depends on a distinction the opcode
+  // does not carry (IRTranslator::translateVAArg says so in its own FIXME).
+  // Hand it to the SelectionDAG path, which still has the type.
+  getActionDefinitionsBuilder(G_VAARG).unsupported();
 
   // A fence is one instruction whatever it orders.
   getActionDefinitionsBuilder(G_FENCE).alwaysLegal();
@@ -416,6 +437,10 @@ AlphaLegalizerInfo::AlphaLegalizerInfo(const AlphaSubtarget &ST) {
        G_ATOMICRMW_FMAX, G_ATOMICRMW_FMIN})
       .unsupported();
 
+  // These rules are never consulted: legalizeInstrStep sends every intrinsic
+  // to legalizeIntrinsic instead of asking for an action.  They are here so
+  // that an intrinsic is not an opcode with no rules at all, which verify()
+  // would pass over in silence.
   getActionDefinitionsBuilder({G_INTRINSIC, G_INTRINSIC_W_SIDE_EFFECTS,
                                G_INTRINSIC_CONVERGENT,
                                G_INTRINSIC_CONVERGENT_W_SIDE_EFFECTS})
@@ -431,4 +456,106 @@ AlphaLegalizerInfo::AlphaLegalizerInfo(const AlphaSubtarget &ST) {
   // -global-isel-abort=1 so a missing rule is a hard error rather than a quiet
   // fall back to SelectionDAG.
   verify(*ST.getInstrInfo());
+}
+
+bool AlphaLegalizerInfo::legalizeIntrinsic(LegalizerHelper &Helper,
+                                           MachineInstr &MI) const {
+  switch (cast<GIntrinsic>(MI).getIntrinsicID()) {
+  case Intrinsic::vacopy:
+    return legalizeVACopy(Helper, MI);
+  default:
+    // Everything else either has a selector case or reaches the generic
+    // handling.  Saying it is legal here is what the default does.
+    return true;
+  }
+}
+
+bool AlphaLegalizerInfo::legalizeCustom(LegalizerHelper &Helper,
+                                        MachineInstr &MI,
+                                        LostDebugLocObserver &) const {
+  switch (MI.getOpcode()) {
+  case TargetOpcode::G_VASTART:
+    return legalizeVAStart(Helper, MI);
+  default:
+    return false;
+  }
+}
+
+// This is LowerVASTART, field for field.  The va_list is gcc's
+// alpha_build_builtin_va_list -- a pointer to the argument save area and an
+// integer offset into it -- and both halves have to be written for a later
+// va_arg to find anything.
+// This is LowerVACOPY.  Both halves of the { char *base; int offset; } pair
+// have to be copied; leaving va_copy to the generic handling copies a single
+// pointer and loses the offset, and the offset is what says how much of the
+// argument list the source va_list has already consumed.
+//
+// It is written here rather than in the selector because a va_copy that
+// reached RegBankSelect would fail there: an intrinsic has no mapping, and the
+// blanket rule above cannot say otherwise, so an unhandled one is a hard error
+// rather than a fall back.
+bool AlphaLegalizerInfo::legalizeVACopy(LegalizerHelper &Helper,
+                                        MachineInstr &MI) const {
+  MachineIRBuilder &MIRBuilder = Helper.MIRBuilder;
+  MachineFunction &MF = MIRBuilder.getMF();
+  const LLT s64 = LLT::scalar(64);
+  const LLT p0 = LLT::pointer(0, 64);
+
+  Register Dst = MI.getOperand(1).getReg();
+  Register Src = MI.getOperand(2).getReg();
+
+  auto Eight = MIRBuilder.buildConstant(s64, 8);
+  auto SrcOff = MIRBuilder.buildPtrAdd(p0, Src, Eight);
+  auto DstOff = MIRBuilder.buildPtrAdd(p0, Dst, Eight);
+
+  auto MMO = [&](MachineMemOperand::Flags F, uint64_t Size) {
+    return MF.getMachineMemOperand(MachinePointerInfo(), F, Size, Align(8));
+  };
+
+  auto Base = MIRBuilder.buildLoad(p0, Src, *MMO(MachineMemOperand::MOLoad, 8));
+  // The offset field is an int.  It is read with a zero extension rather than a
+  // sign extension because it starts at the named arguments' size and only
+  // grows, so the two agree on every value it can hold, and it is written back
+  // four bytes wide so as not to disturb the tail padding.
+  auto Off = MIRBuilder.buildLoadInstr(TargetOpcode::G_ZEXTLOAD, s64, SrcOff,
+                                       *MMO(MachineMemOperand::MOLoad, 4));
+
+  MIRBuilder.buildStore(Base, Dst, *MMO(MachineMemOperand::MOStore, 8));
+  MIRBuilder.buildStore(Off, DstOff, *MMO(MachineMemOperand::MOStore, 4));
+
+  MI.eraseFromParent();
+  return true;
+}
+
+bool AlphaLegalizerInfo::legalizeVAStart(LegalizerHelper &Helper,
+                                         MachineInstr &MI) const {
+  MachineIRBuilder &MIRBuilder = Helper.MIRBuilder;
+  MachineFunction &MF = MIRBuilder.getMF();
+  const AlphaMachineFunctionInfo *FI = MF.getInfo<AlphaMachineFunctionInfo>();
+  const LLT s64 = LLT::scalar(64);
+  const LLT p0 = LLT::pointer(0, 64);
+
+  Register ListPtr = MI.getOperand(0).getReg();
+  assert(MI.hasOneMemOperand() && "va_start without a memory operand");
+  const MachinePointerInfo &PtrInfo =
+      (*MI.memoperands_begin())->getPointerInfo();
+
+  auto Base = MIRBuilder.buildFrameIndex(p0, FI->getVarArgsFrameIndex());
+  MIRBuilder.buildStore(Base, ListPtr,
+                        *MF.getMachineMemOperand(
+                            PtrInfo, MachineMemOperand::MOStore, 8, Align(8)));
+
+  // The offset field is an int, so this is a four-byte store of a value that
+  // lives in a whole register.  Writing a quadword instead would scribble on
+  // whatever the ABI puts in the tail padding of the va_list.
+  auto Eight = MIRBuilder.buildConstant(s64, 8);
+  auto OffPtr = MIRBuilder.buildPtrAdd(p0, ListPtr, Eight);
+  auto Off = MIRBuilder.buildConstant(s64, FI->getVarArgsOffset());
+  MIRBuilder.buildStore(Off, OffPtr,
+                        *MF.getMachineMemOperand(PtrInfo.getWithOffset(8),
+                                                 MachineMemOperand::MOStore, 4,
+                                                 Align(8)));
+
+  MI.eraseFromParent();
+  return true;
 }

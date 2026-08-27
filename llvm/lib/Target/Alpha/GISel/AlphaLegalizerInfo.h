@@ -22,6 +22,16 @@ class AlphaSubtarget;
 class AlphaLegalizerInfo : public LegalizerInfo {
 public:
   AlphaLegalizerInfo(const AlphaSubtarget &ST);
+
+  bool legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
+                      LostDebugLocObserver &LocObserver) const override;
+
+  bool legalizeIntrinsic(LegalizerHelper &Helper,
+                         MachineInstr &MI) const override;
+
+private:
+  bool legalizeVAStart(LegalizerHelper &Helper, MachineInstr &MI) const;
+  bool legalizeVACopy(LegalizerHelper &Helper, MachineInstr &MI) const;
 };
 
 } // end namespace llvm

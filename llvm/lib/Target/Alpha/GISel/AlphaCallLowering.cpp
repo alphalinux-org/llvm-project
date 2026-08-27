@@ -208,11 +208,6 @@ bool AlphaCallLowering::lowerFormalArguments(MachineIRBuilder &MIRBuilder,
   MachineRegisterInfo &MRI = MF.getRegInfo();
   const DataLayout &DL = F.getDataLayout();
 
-  // A variadic function needs the register save area the SelectionDAG path
-  // builds, which this does not do yet.
-  if (F.isVarArg())
-    return false;
-
   SmallVector<ArgInfo, 8> SplitArgs;
   unsigned Idx = 0;
   for (const auto &Arg : F.args()) {
@@ -225,10 +220,20 @@ bool AlphaCallLowering::lowerFormalArguments(MachineIRBuilder &MIRBuilder,
   if (needsFPRegs(MF.getSubtarget<AlphaSubtarget>(), SplitArgs))
     return false;
 
+  // The assignments are made here rather than through
+  // determineAndHandleAssignments so that the locations stay in scope: a
+  // variadic function needs to know how many of the six argument registers the
+  // named arguments used before it can save the rest.
+  SmallVector<CCValAssign, 16> ArgLocs;
+  CCState CCInfo(F.getCallingConv(), F.isVarArg(), MF, ArgLocs, F.getContext());
   IncomingValueAssigner Assigner(CC_Alpha);
   AlphaIncomingValueHandler Handler(MIRBuilder, MRI);
-  if (!determineAndHandleAssignments(Handler, Assigner, SplitArgs, MIRBuilder,
-                                     F.getCallingConv(), F.isVarArg()))
+  if (!determineAssignments(Assigner, SplitArgs, CCInfo))
+    return false;
+  if (!handleAssignments(Handler, SplitArgs, CCInfo, ArgLocs, MIRBuilder))
+    return false;
+
+  if (F.isVarArg() && !saveVarArgRegisters(MIRBuilder, CCInfo, ArgLocs))
     return false;
 
   // Keep the hidden result pointer of a function returning in memory: it is
@@ -250,6 +255,79 @@ bool AlphaCallLowering::lowerFormalArguments(MachineIRBuilder &MIRBuilder,
   // $26 and is preserved by the frame lowering.
   MRI.addLiveIn(Alpha::R26);
   MIRBuilder.getMBB().addLiveIn(Alpha::R26);
+  return true;
+}
+
+// Fill the argument save area a later va_arg reads, exactly as the
+// IsVarArg arm of LowerFormalArguments does.  Slot N of the argument list
+// lives at IntBase + N*8 for every N: the six register slots are the save area
+// itself, and slot 6 onwards are the caller's stack arguments, which start at
+// the incoming stack pointer.  So the integer save area sits immediately below
+// the incoming stack pointer at a fixed -48, with the floating-point area
+// below it at -96, and neither offset depends on how much stack the named
+// arguments used.
+bool AlphaCallLowering::saveVarArgRegisters(
+    MachineIRBuilder &MIRBuilder, const CCState &CCInfo,
+    ArrayRef<CCValAssign> ArgLocs) const {
+  MachineFunction &MF = MIRBuilder.getMF();
+  MachineFrameInfo &MFI = MF.getFrameInfo();
+  MachineRegisterInfo &MRI = MF.getRegInfo();
+  const AlphaSubtarget &STI = MF.getSubtarget<AlphaSubtarget>();
+  const LLT s64 = LLT::scalar(64);
+  const LLT p0 = LLT::pointer(0, 64);
+
+  static const MCPhysReg IntArgRegs[] = {Alpha::R16, Alpha::R17, Alpha::R18,
+                                         Alpha::R19, Alpha::R20, Alpha::R21};
+  static const MCPhysReg FPArgRegs[] = {Alpha::F16, Alpha::F17, Alpha::F18,
+                                        Alpha::F19, Alpha::F20, Alpha::F21};
+
+  unsigned NumNamed = CCInfo.getStackSize() / 8;
+  for (const CCValAssign &VA : ArgLocs)
+    if (VA.isRegLoc())
+      ++NumNamed;
+
+  int IntFI = MFI.CreateFixedObject(48, -48, /*IsImmutable=*/false);
+  int FpFI = MFI.CreateFixedObject(48, -96, /*IsImmutable=*/false);
+  auto IntBase = MIRBuilder.buildFrameIndex(p0, IntFI);
+  auto FpBase = MIRBuilder.buildFrameIndex(p0, FpFI);
+
+  for (unsigned I = NumNamed; I < 6; ++I) {
+    MRI.addLiveIn(IntArgRegs[I]);
+    MIRBuilder.getMBB().addLiveIn(IntArgRegs[I]);
+    auto IntVal = MIRBuilder.buildCopy(s64, Register(IntArgRegs[I]));
+    auto Offset = MIRBuilder.buildConstant(s64, I * 8);
+    auto IntPtr = MIRBuilder.buildPtrAdd(p0, IntBase, Offset);
+    MIRBuilder.buildStore(
+        IntVal, IntPtr,
+        *MF.getMachineMemOperand(
+            MachinePointerInfo::getFixedStack(MF, IntFI, I * 8),
+            MachineMemOperand::MOStore, 8, Align(8)));
+
+    // With -mno-fp-regs there are no floating-point argument registers to read:
+    // the file is out of the register classes altogether.  A floating-point
+    // argument arrives in an integer register under that flag, so fill the
+    // floating-point save area from the integer registers too, which is what
+    // gcc's alpha_setup_incoming_varargs does -- the register it reads is
+    // `16 + cum + TARGET_FPREGS*32', the integer one when TARGET_FPREGS is
+    // zero.
+    Register FPVal = IntVal.getReg(0);
+    if (!STI.hasNoFPRegs()) {
+      MRI.addLiveIn(FPArgRegs[I]);
+      MIRBuilder.getMBB().addLiveIn(FPArgRegs[I]);
+      FPVal = MIRBuilder.buildCopy(LLT::float64(), Register(FPArgRegs[I]))
+                  .getReg(0);
+    }
+    auto FPPtr = MIRBuilder.buildPtrAdd(p0, FpBase, Offset);
+    MIRBuilder.buildStore(
+        FPVal, FPPtr,
+        *MF.getMachineMemOperand(
+            MachinePointerInfo::getFixedStack(MF, FpFI, I * 8),
+            MachineMemOperand::MOStore, 8, Align(8)));
+  }
+
+  auto *FI = MF.getInfo<AlphaMachineFunctionInfo>();
+  FI->setVarArgsFrameIndex(IntFI);
+  FI->setVarArgsOffset(NumNamed * 8);
   return true;
 }
 

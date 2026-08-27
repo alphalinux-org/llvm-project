@@ -37,6 +37,9 @@ public:
                             ArrayRef<ArrayRef<Register>> VRegs,
                             FunctionLoweringInfo &FLI) const override;
 
+  bool saveVarArgRegisters(MachineIRBuilder &MIRBuilder, const CCState &CCInfo,
+                           ArrayRef<CCValAssign> ArgLocs) const;
+
   bool lowerCall(MachineIRBuilder &MIRBuilder,
                  CallLoweringInfo &Info) const override;
 
