@@ -22,6 +22,7 @@
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
+#include "llvm/IR/InlineAsm.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCStreamer.h"
@@ -338,10 +339,21 @@ bool AlphaAsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI,
                                             raw_ostream &O) {
   if (ExtraCode && ExtraCode[0])
     return true;
-  // An inline-asm memory operand is (base register, displacement), printed as
-  // the usual `disp($base)`.
-  const MachineOperand &Disp = MI->getOperand(OpNo + 1);
-  O << (Disp.isImm() ? Disp.getImm() : 0) << '('
+  // An inline-asm memory operand is printed as the usual `disp($base)`, but
+  // the two selectors do not hand over the same thing.  The SelectionDAG path
+  // splits the address into a base and a displacement in
+  // SelectInlineAsmMemoryOperand, so the group holds two operands; GlobalISel's
+  // generic lowering has no such hook and passes the whole address in one
+  // register.  The flag word ahead of the group says which, and reading the
+  // second operand without asking runs off the end of the instruction.
+  const InlineAsm::Flag F(MI->getOperand(OpNo - 1).getImm());
+  int64_t Disp = 0;
+  if (F.getNumOperandRegisters() > 1) {
+    const MachineOperand &DispOp = MI->getOperand(OpNo + 1);
+    if (DispOp.isImm())
+      Disp = DispOp.getImm();
+  }
+  O << Disp << '('
     << AlphaInstPrinter::getRegisterName(MI->getOperand(OpNo).getReg()) << ')';
   return false;
 }

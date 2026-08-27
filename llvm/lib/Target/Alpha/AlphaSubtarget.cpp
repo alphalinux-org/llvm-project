@@ -10,6 +10,7 @@
 #include "Alpha.h"
 #include "AlphaTargetMachine.h"
 #include "GISel/AlphaCallLowering.h"
+#include "GISel/AlphaInlineAsmLowering.h"
 #include "GISel/AlphaLegalizerInfo.h"
 #include "GISel/AlphaRegisterBankInfo.h"
 
@@ -40,6 +41,7 @@ AlphaSubtarget::AlphaSubtarget(const Triple &TT, StringRef CPU,
       TLInfo(static_cast<const AlphaTargetMachine &>(TM), *this),
       FrameLowering(*this) {
   CallLoweringInfo.reset(new AlphaCallLowering(*getTargetLowering()));
+  InlineAsmLoweringInfo.reset(new AlphaInlineAsmLowering(getTargetLowering()));
   Legalizer.reset(new AlphaLegalizerInfo(*this));
   auto *RBI = new AlphaRegisterBankInfo();
   RegBankInfo.reset(RBI);
@@ -49,6 +51,10 @@ AlphaSubtarget::AlphaSubtarget(const Triple &TT, StringRef CPU,
 
 const CallLowering *AlphaSubtarget::getCallLowering() const {
   return CallLoweringInfo.get();
+}
+
+const InlineAsmLowering *AlphaSubtarget::getInlineAsmLowering() const {
+  return InlineAsmLoweringInfo.get();
 }
 
 InstructionSelector *AlphaSubtarget::getInstructionSelector() const {

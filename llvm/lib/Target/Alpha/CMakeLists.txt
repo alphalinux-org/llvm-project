@@ -34,6 +34,7 @@ add_llvm_target(AlphaCodeGen
   AlphaTrapBarriers.cpp
   AlphaVerifyInvariants.cpp
   GISel/AlphaCallLowering.cpp
+  GISel/AlphaInlineAsmLowering.cpp
   GISel/AlphaInstructionSelector.cpp
   GISel/AlphaLegalizerInfo.cpp
   GISel/AlphaPostLegalizerCombiner.cpp
