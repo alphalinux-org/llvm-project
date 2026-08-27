@@ -1953,6 +1953,69 @@ def AMASKi : OFormL<0x11, 0x61, (outs GPRC:$Rc), (ins u8imm:$lit),
 }
 } // hasSideEffects = 0
 
+//===----------------------------------------------------------------------===//
+// The literal operand forms of the __builtin_alpha_* intrinsics.
+//
+// An operate instruction takes an 8-bit literal wherever it takes $Rb, and
+// every one of these builtins is written with a constant far more often than
+// with a variable -- a byte position, a zap mask, a shift amount.  Without
+// these patterns the constant is materialized into a register first, so
+// `__builtin_alpha_extql(x, 3)` costs `lda` + `extql` where gcc emits the one
+// `extql $16, 3, $0`.  The register forms above stay where they are; these
+// only add the more specific match, which selection prefers on its own.
+//===----------------------------------------------------------------------===//
+
+class LitPat<SDPatternOperator node, Instruction inst>
+    : Pat<(node i64:$Ra, immUExt8:$lit), (inst GPRC:$Ra, immUExt8:$lit)>;
+
+// Compare bytes, and the two byte-mask instructions.
+def : LitPat<int_alpha_cmpbge, CMPBGEi>;
+def : LitPat<int_alpha_zap,    ZAPi>;
+def : LitPat<int_alpha_zapnot, ZAPNOTi>;
+
+// Extract, insert and mask, at a literal byte position.
+def : LitPat<int_alpha_extbl, EXTBLi>;
+def : LitPat<int_alpha_extwl, EXTWLi>;
+def : LitPat<int_alpha_extll, EXTLLi>;
+def : LitPat<int_alpha_extql, EXTQLi>;
+def : LitPat<int_alpha_extwh, EXTWHi>;
+def : LitPat<int_alpha_extlh, EXTLHi>;
+def : LitPat<int_alpha_extqh, EXTQHi>;
+def : LitPat<int_alpha_insbl, INSBLi>;
+def : LitPat<int_alpha_inswl, INSWLi>;
+def : LitPat<int_alpha_insll, INSLLi>;
+def : LitPat<int_alpha_insql, INSQLi>;
+def : LitPat<int_alpha_inswh, INSWHi>;
+def : LitPat<int_alpha_inslh, INSLHi>;
+def : LitPat<int_alpha_insqh, INSQHi>;
+def : LitPat<int_alpha_mskbl, MSKBLi>;
+def : LitPat<int_alpha_mskwl, MSKWLi>;
+def : LitPat<int_alpha_mskll, MSKLLi>;
+def : LitPat<int_alpha_mskql, MSKQLi>;
+def : LitPat<int_alpha_mskwh, MSKWHi>;
+def : LitPat<int_alpha_msklh, MSKLHi>;
+def : LitPat<int_alpha_mskqh, MSKQHi>;
+
+// The high half of an unsigned multiply.
+def : LitPat<int_alpha_umulh, UMULHi>;
+
+// amask is the one builtin whose literal form is not a LitPat: it has no $Ra
+// operand at all -- the register form reads $Rb and holds $Ra at $31 -- so the
+// pattern matches the intrinsic's single argument.
+def : Pat<(int_alpha_amask immUExt8:$lit), (AMASKi immUExt8:$lit)>;
+
+// The MVI min/max forms, which need the feature their register forms need.
+let Predicates = [HasMVI] in {
+def : LitPat<int_alpha_minsb8, MINSB8i>;
+def : LitPat<int_alpha_minsw4, MINSW4i>;
+def : LitPat<int_alpha_minub8, MINUB8i>;
+def : LitPat<int_alpha_minuw4, MINUW4i>;
+def : LitPat<int_alpha_maxsb8, MAXSB8i>;
+def : LitPat<int_alpha_maxsw4, MAXSW4i>;
+def : LitPat<int_alpha_maxub8, MAXUB8i>;
+def : LitPat<int_alpha_maxuw4, MAXUW4i>;
+}
+
 // andnot: an alias of bic (and with the complement of the second operand).
 def : InstAlias<"andnot $Ra, $Rb, $Rc", (BIC GPRC:$Rc, GPRC:$Ra, GPRC:$Rb)>;
 def : InstAlias<"andnot $Ra, $lit, $Rc", (BICi GPRC:$Rc, GPRC:$Ra, u8imm:$lit)>;
