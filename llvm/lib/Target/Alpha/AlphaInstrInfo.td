@@ -1410,8 +1410,16 @@ def : Pat<(setcc GPRC:$a, 0, SETGT), (CMPLT R31, GPRC:$a)>;
 // Ordered floating-point comparisons.  The compare leaves 2.0 or 0.0 in an FP
 // register; moving those bits to an integer register and shifting right by 62
 // yields 1 or 0.  Greater-than forms swap the operands.
+// The move is not spelled out here.  Without the FIX extension there is no
+// integer/floating move at all, and routing the compare result through the
+// bitcast stack slot costs a frame and four instructions where a branch on the
+// floating condition costs three and no frame.  FCMPRES stands for the whole
+// "compare result to 0 or 1" step so its custom inserter can pick.
+let usesCustomInserter = 1 in
+def FCMPRES : AlphaPseudo<(outs GPRC:$dst), (ins FPRC:$src), "# FCMPRES", []>;
+
 class FCmpPat<CondCode cc, ValueType vt, Instruction cmp, dag a, dag b>
-    : Pat<(setcc vt:$x, vt:$y, cc), (SRLi (MOVf2i (cmp a, b)), 62)>;
+    : Pat<(setcc vt:$x, vt:$y, cc), (FCMPRES (cmp a, b))>;
 
 foreach vt = [f32, f64] in {
 def : FCmpPat<SETOEQ, vt, CMPTEQ, (vt $x), (vt $y)>;

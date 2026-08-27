@@ -2726,137 +2726,136 @@ static MachineBasicBlock *emitAtomicLoop(MachineInstr &MI,
   return BB;
 }
 
+// A floating-point compare leaves 2.0 or 0.0 in a floating register, and a
+// setcc wants 1 or 0 in an integer one.  With the FIX extension the bits move
+// directly and a shift finishes the job.  Without it there is no
+// integer/floating move, and going through the bitcast stack slot forces a
+// frame onto a function that would otherwise need none.  Branching on the
+// floating condition instead is a register away from free, and is what gcc
+// emits: materialise 1, branch if the compare was true, materialise 0 on the
+// path that falls through.
+static MachineBasicBlock *emitFCmpRes(MachineInstr &MI, MachineBasicBlock *BB,
+                                      bool HasFIX) {
+  MachineFunction &MF = *BB->getParent();
+  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
+  MachineRegisterInfo &MRI = MF.getRegInfo();
+  const DebugLoc &DL = MI.getDebugLoc();
+  Register Dst = MI.getOperand(0).getReg();
+  Register Src = MI.getOperand(1).getReg();
+
+  if (HasFIX) {
+    Register Bits = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+    BuildMI(*BB, MI, DL, TII.get(Alpha::FTOIT), Bits).addReg(Src);
+    BuildMI(*BB, MI, DL, TII.get(Alpha::SRLi), Dst).addReg(Bits).addImm(62);
+    MI.eraseFromParent();
+    return BB;
+  }
+
+  const BasicBlock *LLVMBB = BB->getBasicBlock();
+  MachineFunction::iterator It = ++BB->getIterator();
+  MachineBasicBlock *FalseBB = MF.CreateMachineBasicBlock(LLVMBB);
+  MachineBasicBlock *SinkBB = MF.CreateMachineBasicBlock(LLVMBB);
+  MF.insert(It, FalseBB);
+  MF.insert(It, SinkBB);
+
+  SinkBB->splice(SinkBB->begin(), BB, std::next(MI.getIterator()), BB->end());
+  SinkBB->transferSuccessorsAndUpdatePHIs(BB);
+
+  Register One = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  Register Zero = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  BuildMI(BB, DL, TII.get(Alpha::LDA), One).addImm(1).addReg(Alpha::R31);
+  BuildMI(BB, DL, TII.get(Alpha::FBNE)).addReg(Src).addMBB(SinkBB);
+  BB->addSuccessor(FalseBB);
+  BB->addSuccessor(SinkBB);
+
+  BuildMI(FalseBB, DL, TII.get(Alpha::LDA), Zero).addImm(0).addReg(Alpha::R31);
+  FalseBB->addSuccessor(SinkBB);
+
+  BuildMI(*SinkBB, SinkBB->begin(), DL, TII.get(Alpha::PHI), Dst)
+      .addReg(One)
+      .addMBB(BB)
+      .addReg(Zero)
+      .addMBB(FalseBB);
+
+  MI.eraseFromParent();
+  return SinkBB;
+}
+
 MachineBasicBlock *
 AlphaTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
                                                  MachineBasicBlock *MBB) const {
-  switch (MI.getOpcode()) {
-  case Alpha::ATOMIC_ADD_I8:
-    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_SUBWORD_RMW_LOOP,
-                          /*NumScratch=*/4, /*NumDefs=*/1,
-                          {Alpha::ADDQ, 0});
-  case Alpha::ATOMIC_SUB_I8:
-    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_SUBWORD_RMW_LOOP,
-                          /*NumScratch=*/4, /*NumDefs=*/1,
-                          {Alpha::SUBQ, 0});
-  case Alpha::ATOMIC_AND_I8:
-    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_SUBWORD_RMW_LOOP,
-                          /*NumScratch=*/4, /*NumDefs=*/1,
-                          {Alpha::AND, 0});
-  case Alpha::ATOMIC_OR_I8:
-    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_SUBWORD_RMW_LOOP,
-                          /*NumScratch=*/4, /*NumDefs=*/1,
-                          {Alpha::BIS, 0});
-  case Alpha::ATOMIC_XOR_I8:
-    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_SUBWORD_RMW_LOOP,
-                          /*NumScratch=*/4, /*NumDefs=*/1,
-                          {Alpha::XOR, 0});
-  case Alpha::ATOMIC_XCHG_I8:
-    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_SUBWORD_RMW_LOOP,
-                          /*NumScratch=*/4, /*NumDefs=*/1,
-                          {0, 0});
-  case Alpha::ATOMIC_ADD_I16:
-    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_SUBWORD_RMW_LOOP,
-                          /*NumScratch=*/4, /*NumDefs=*/1,
-                          {Alpha::ADDQ, 1});
-  case Alpha::ATOMIC_SUB_I16:
-    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_SUBWORD_RMW_LOOP,
-                          /*NumScratch=*/4, /*NumDefs=*/1,
-                          {Alpha::SUBQ, 1});
-  case Alpha::ATOMIC_AND_I16:
-    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_SUBWORD_RMW_LOOP,
-                          /*NumScratch=*/4, /*NumDefs=*/1,
-                          {Alpha::AND, 1});
-  case Alpha::ATOMIC_OR_I16:
-    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_SUBWORD_RMW_LOOP,
-                          /*NumScratch=*/4, /*NumDefs=*/1,
-                          {Alpha::BIS, 1});
-  case Alpha::ATOMIC_XOR_I16:
-    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_SUBWORD_RMW_LOOP,
-                          /*NumScratch=*/4, /*NumDefs=*/1,
-                          {Alpha::XOR, 1});
-  case Alpha::ATOMIC_XCHG_I16:
-    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_SUBWORD_RMW_LOOP,
-                          /*NumScratch=*/4, /*NumDefs=*/1,
-                          {0, 1});
-  case Alpha::ATOMIC_CMPXCHG_I8:
-    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_SUBWORD_CAS_LOOP,
-                          /*NumScratch=*/4, /*NumDefs=*/1,
-                          {0});
-  case Alpha::ATOMIC_CMPXCHG_I16:
-    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_SUBWORD_CAS_LOOP,
-                          /*NumScratch=*/4, /*NumDefs=*/1,
-                          {1});
-  case Alpha::SAFE_STOREI8:
-    return emitAtomicLoop(MI, MBB, Alpha::SAFE_STORE_LOOP,
-                          /*NumScratch=*/3, /*NumDefs=*/0,
-                          {0});
-  case Alpha::SAFE_STOREI16:
-    return emitAtomicLoop(MI, MBB, Alpha::SAFE_STORE_LOOP,
-                          /*NumScratch=*/3, /*NumDefs=*/0,
-                          {1});
-  case Alpha::SAFE_USTORE:
-    return emitAtomicLoop(MI, MBB, Alpha::SAFE_USTORE_LOOP,
-                          /*NumScratch=*/6, /*NumDefs=*/0,
-                          {});
-  case Alpha::ATOMIC_ADD_I64:
-    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_RMW_LOOP,
-                          /*NumScratch=*/1, /*NumDefs=*/1,
-                          {Alpha::ADDQ, 0});
-  case Alpha::ATOMIC_SUB_I64:
-    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_RMW_LOOP,
-                          /*NumScratch=*/1, /*NumDefs=*/1,
-                          {Alpha::SUBQ, 0});
-  case Alpha::ATOMIC_AND_I64:
-    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_RMW_LOOP,
-                          /*NumScratch=*/1, /*NumDefs=*/1,
-                          {Alpha::AND, 0});
-  case Alpha::ATOMIC_OR_I64:
-    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_RMW_LOOP,
-                          /*NumScratch=*/1, /*NumDefs=*/1,
-                          {Alpha::BIS, 0});
-  case Alpha::ATOMIC_XOR_I64:
-    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_RMW_LOOP,
-                          /*NumScratch=*/1, /*NumDefs=*/1,
-                          {Alpha::XOR, 0});
-  case Alpha::ATOMIC_XCHG_I64:
-    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_RMW_LOOP,
-                          /*NumScratch=*/1, /*NumDefs=*/1,
-                          {0, 0});
-  case Alpha::ATOMIC_ADD_I32:
-    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_RMW_LOOP,
-                          /*NumScratch=*/1, /*NumDefs=*/1,
-                          {Alpha::ADDQ, 1});
-  case Alpha::ATOMIC_SUB_I32:
-    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_RMW_LOOP,
-                          /*NumScratch=*/1, /*NumDefs=*/1,
-                          {Alpha::SUBQ, 1});
-  case Alpha::ATOMIC_AND_I32:
-    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_RMW_LOOP,
-                          /*NumScratch=*/1, /*NumDefs=*/1,
-                          {Alpha::AND, 1});
-  case Alpha::ATOMIC_OR_I32:
-    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_RMW_LOOP,
-                          /*NumScratch=*/1, /*NumDefs=*/1,
-                          {Alpha::BIS, 1});
-  case Alpha::ATOMIC_XOR_I32:
-    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_RMW_LOOP,
-                          /*NumScratch=*/1, /*NumDefs=*/1,
-                          {Alpha::XOR, 1});
-  case Alpha::ATOMIC_XCHG_I32:
-    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_RMW_LOOP,
-                          /*NumScratch=*/1, /*NumDefs=*/1,
-                          {0, 1});
-  case Alpha::ATOMIC_CMPXCHG_I64:
-    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_CAS_LOOP,
-                          /*NumScratch=*/2, /*NumDefs=*/1,
-                          {0});
-  case Alpha::ATOMIC_CMPXCHG_I32:
-    return emitAtomicLoop(MI, MBB, Alpha::ATOMIC_CAS_LOOP,
-                          /*NumScratch=*/2, /*NumDefs=*/1,
-                          {1});
-  default:
-    break;
+  // Every pseudo that becomes an ldq_l/stq_c loop, and what emitAtomicLoop
+  // needs to know about it: the loop pseudo it turns into, how many scratch
+  // registers and results that loop wants, and the immediates the expansion
+  // reads off the end.  Alu is the operation applied to the loaded value, and
+  // is 0 for the exchanges, which store their operand as it stands; Width is 0
+  // for the narrower member of a pair (byte, quadword) and 1 for the wider
+  // (word, longword).  Either is -1 where the loop takes no such immediate.
+  struct AtomicLoopDesc {
+    unsigned Pseudo;
+    unsigned LoopOpc;
+    unsigned NumScratch;
+    unsigned NumDefs;
+    int Alu;
+    int Width;
+  };
+  static constexpr AtomicLoopDesc AtomicLoops[] = {
+      {Alpha::ATOMIC_ADD_I8, Alpha::ATOMIC_SUBWORD_RMW_LOOP, 4, 1, Alpha::ADDQ,
+       0},
+      {Alpha::ATOMIC_SUB_I8, Alpha::ATOMIC_SUBWORD_RMW_LOOP, 4, 1, Alpha::SUBQ,
+       0},
+      {Alpha::ATOMIC_AND_I8, Alpha::ATOMIC_SUBWORD_RMW_LOOP, 4, 1, Alpha::AND,
+       0},
+      {Alpha::ATOMIC_OR_I8, Alpha::ATOMIC_SUBWORD_RMW_LOOP, 4, 1, Alpha::BIS,
+       0},
+      {Alpha::ATOMIC_XOR_I8, Alpha::ATOMIC_SUBWORD_RMW_LOOP, 4, 1, Alpha::XOR,
+       0},
+      {Alpha::ATOMIC_XCHG_I8, Alpha::ATOMIC_SUBWORD_RMW_LOOP, 4, 1, 0, 0},
+      {Alpha::ATOMIC_ADD_I16, Alpha::ATOMIC_SUBWORD_RMW_LOOP, 4, 1, Alpha::ADDQ,
+       1},
+      {Alpha::ATOMIC_SUB_I16, Alpha::ATOMIC_SUBWORD_RMW_LOOP, 4, 1, Alpha::SUBQ,
+       1},
+      {Alpha::ATOMIC_AND_I16, Alpha::ATOMIC_SUBWORD_RMW_LOOP, 4, 1, Alpha::AND,
+       1},
+      {Alpha::ATOMIC_OR_I16, Alpha::ATOMIC_SUBWORD_RMW_LOOP, 4, 1, Alpha::BIS,
+       1},
+      {Alpha::ATOMIC_XOR_I16, Alpha::ATOMIC_SUBWORD_RMW_LOOP, 4, 1, Alpha::XOR,
+       1},
+      {Alpha::ATOMIC_XCHG_I16, Alpha::ATOMIC_SUBWORD_RMW_LOOP, 4, 1, 0, 1},
+      {Alpha::ATOMIC_CMPXCHG_I8, Alpha::ATOMIC_SUBWORD_CAS_LOOP, 4, 1, -1, 0},
+      {Alpha::ATOMIC_CMPXCHG_I16, Alpha::ATOMIC_SUBWORD_CAS_LOOP, 4, 1, -1, 1},
+      {Alpha::SAFE_STOREI8, Alpha::SAFE_STORE_LOOP, 3, 0, -1, 0},
+      {Alpha::SAFE_STOREI16, Alpha::SAFE_STORE_LOOP, 3, 0, -1, 1},
+      {Alpha::SAFE_USTORE, Alpha::SAFE_USTORE_LOOP, 6, 0, -1, -1},
+      {Alpha::ATOMIC_ADD_I64, Alpha::ATOMIC_RMW_LOOP, 1, 1, Alpha::ADDQ, 0},
+      {Alpha::ATOMIC_SUB_I64, Alpha::ATOMIC_RMW_LOOP, 1, 1, Alpha::SUBQ, 0},
+      {Alpha::ATOMIC_AND_I64, Alpha::ATOMIC_RMW_LOOP, 1, 1, Alpha::AND, 0},
+      {Alpha::ATOMIC_OR_I64, Alpha::ATOMIC_RMW_LOOP, 1, 1, Alpha::BIS, 0},
+      {Alpha::ATOMIC_XOR_I64, Alpha::ATOMIC_RMW_LOOP, 1, 1, Alpha::XOR, 0},
+      {Alpha::ATOMIC_XCHG_I64, Alpha::ATOMIC_RMW_LOOP, 1, 1, 0, 0},
+      {Alpha::ATOMIC_ADD_I32, Alpha::ATOMIC_RMW_LOOP, 1, 1, Alpha::ADDQ, 1},
+      {Alpha::ATOMIC_SUB_I32, Alpha::ATOMIC_RMW_LOOP, 1, 1, Alpha::SUBQ, 1},
+      {Alpha::ATOMIC_AND_I32, Alpha::ATOMIC_RMW_LOOP, 1, 1, Alpha::AND, 1},
+      {Alpha::ATOMIC_OR_I32, Alpha::ATOMIC_RMW_LOOP, 1, 1, Alpha::BIS, 1},
+      {Alpha::ATOMIC_XOR_I32, Alpha::ATOMIC_RMW_LOOP, 1, 1, Alpha::XOR, 1},
+      {Alpha::ATOMIC_XCHG_I32, Alpha::ATOMIC_RMW_LOOP, 1, 1, 0, 1},
+      {Alpha::ATOMIC_CMPXCHG_I64, Alpha::ATOMIC_CAS_LOOP, 2, 1, -1, 0},
+      {Alpha::ATOMIC_CMPXCHG_I32, Alpha::ATOMIC_CAS_LOOP, 2, 1, -1, 1},
+  };
+
+  for (const AtomicLoopDesc &D : AtomicLoops) {
+    if (D.Pseudo != MI.getOpcode())
+      continue;
+    SmallVector<int64_t, 2> Modes;
+    if (D.Alu >= 0)
+      Modes.push_back(D.Alu);
+    if (D.Width >= 0)
+      Modes.push_back(D.Width);
+    return emitAtomicLoop(MI, MBB, D.LoopOpc, D.NumScratch, D.NumDefs, Modes);
   }
+
+  if (MI.getOpcode() == Alpha::FCMPRES)
+    return emitFCmpRes(MI, MBB, Subtarget.hasFIX());
 
   // MOVi2f/MOVf2i reinterpret the 64 bits of a value.  The FIX extension moves
   // them directly with itoft/ftoit; otherwise they bounce through an 8-byte

@@ -134,6 +134,10 @@ multiclass AlphaInstRW {
   // float-to-integer move reads its FP source with the same EV6 delay.
   def : InstRW<[Wr_FtoI, Rd_FStData], (instrs MOVf2i)>;
   def : InstRW<[Wr_ItoF], (instrs MOVi2f)>;
+  // The compare-result pseudo is the move plus the shift that narrows 2.0/0.0
+  // to 1/0; without the FIX extension it is a branch instead, and either way it
+  // is gone before a scheduler sees it.
+  def : InstRW<[Wr_FtoI, Wr_IShift, Rd_FStData], (instrs FCMPRES)>;
   def : InstRW<[Wr_Br], (instrs BR)>;
   // A conditional branch tests its first source, which can be forwarded early.
   def : InstRW<[Wr_Br, Rd_ITest],
