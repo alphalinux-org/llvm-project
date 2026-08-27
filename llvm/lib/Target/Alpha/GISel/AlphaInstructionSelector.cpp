@@ -526,27 +526,17 @@ Register AlphaInstructionSelector::emitFCmpBit(MachineInstr &I,
                                                unsigned Opc, Register LHS,
                                                Register RHS,
                                                Register Dst) const {
-  MachineBasicBlock &MBB = *I.getParent();
   Register FPRes = MRI.createVirtualRegister(&Alpha::FPRCRegClass);
-  MachineInstrBuilder Cmp =
-      BuildMI(MBB, I, I.getDebugLoc(), TII.get(Opc), FPRes)
-          .addUse(LHS)
-          .addUse(RHS);
-  constrainSelectedInstRegOperands(*Cmp, TII, TRI, RBI);
+  emit(I, Opc, FPRes).addUse(LHS).addUse(RHS);
 
-  Register Bits = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
-  MachineInstrBuilder Move =
-      BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::MOVf2i), Bits)
-          .addUse(FPRes);
-  constrainSelectedInstRegOperands(*Move, TII, TRI, RBI);
-
-  Register Shifted = Dst ? Dst : MRI.createVirtualRegister(&Alpha::GPRCRegClass);
-  MachineInstrBuilder Shift =
-      BuildMI(MBB, I, I.getDebugLoc(), TII.get(Alpha::SRLi), Shifted)
-          .addUse(Bits)
-          .addImm(62);
-  constrainSelectedInstRegOperands(*Shift, TII, TRI, RBI);
-  return Shifted;
+  // FCMPRES, not a move and a shift: without the FIX extension there is no
+  // integer/floating move, and spelling one out here would send the result
+  // through the bitcast stack slot and put a frame on a leaf function.  Its
+  // custom inserter picks ftoit plus the shift, or a branch on the floating
+  // condition, according to the subtarget.
+  Register Res = Dst ? Dst : MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  emit(I, Alpha::FCMPRES, Res).addUse(FPRes);
+  return Res;
 }
 
 // There are only the equal, less-than and less-or-equal instructions: the

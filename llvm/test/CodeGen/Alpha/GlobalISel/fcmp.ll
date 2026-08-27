@@ -28,12 +28,7 @@ define i64 @oeq(double %a, double %b) {
 ; CHECK-LABEL: une:
 ; CHECK:      cmpteq $f16, $f17, {{\$f[0-9]+}}
 ; FIX:        srl {{\$[0-9]+}}, 62, {{\$[0-9]+}}
-; The inverted predicates are the ones selectFCmp builds by hand, and it
-; spells out the move and the shift: without the FIX extension there is no
-; integer/floating move, so the result goes through the bitcast stack slot and
-; this leaf function gets a frame.
-; NOFIX:      stt {{\$f[0-9]+}}, {{[0-9]+}}($30)
-; NOFIX:      srl {{\$[0-9]+}}, 62, {{\$[0-9]+}}
+; NOFIX:      fbne {{\$f[0-9]+}}, .LBB
 ; CHECK:      xor {{\$[0-9]+}}, 1, $0
 define i64 @une(float %a, float %b) {
   %c = fcmp une float %a, %b
