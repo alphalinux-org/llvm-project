@@ -193,14 +193,20 @@ AlphaTargetLowering::AlphaTargetLowering(const AlphaTargetMachine &TM,
           ISD::FMAXIMUM})
       setOperationAction(Op, VT, Expand);
 
-  // Only the ordered floating-point comparisons have direct instructions; the
-  // rest are expanded into combinations of them.  SETNE belongs here too: the
-  // NaN-agnostic codes otherwise map straight onto cmpteq/cmptlt/cmptle, but
-  // there is no cmptne, so it has to become an inverted cmpteq.
+  // Only the ordered comparisons and the unordered test have direct
+  // instructions; the rest are expanded into combinations of them.  SETNE
+  // belongs here too: the NaN-agnostic codes otherwise map straight onto
+  // cmpteq/cmptlt/cmptle, but there is no cmptne, so it has to become an
+  // inverted cmpteq.
+  //
+  // SETUO and SETO are deliberately *not* expanded: cmptun is exactly the
+  // unordered predicate, and SETO is its complement.  Expanding them costs
+  // eight instructions -- a self-comparison of each operand, and'ed and
+  // inverted -- where cmptun plus a shift is three.
   for (MVT VT : {MVT::f32, MVT::f64})
     for (auto CC :
          {ISD::SETONE, ISD::SETUEQ, ISD::SETUGT, ISD::SETUGE, ISD::SETULT,
-          ISD::SETULE, ISD::SETUNE, ISD::SETUO, ISD::SETO, ISD::SETNE})
+          ISD::SETULE, ISD::SETUNE, ISD::SETNE})
       setCondCodeAction(CC, VT, Expand);
 
   // Alpha has no per-instruction FP-exception signaling; lower constrained

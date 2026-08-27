@@ -33,9 +33,8 @@ define double @seli(i64 %c, double %t, double %f) {
 ; wherever the operand is not tied.
 define float @sel_zero_false(float %a) {
 ; CHECK-LABEL: sel_zero_false:
-; CHECK:      cmpteq $f16, $f16, $f1
-; CHECK-NEXT: cpys $f31, $f31, $f0
-; CHECK-NEXT: fcmovne $f1, $f16, $f0
+; CHECK:      cmptun $f0, $f0, $f1
+; CHECK-NEXT: fcmovne $f1, $f31, $f0
   %cmp = fcmp uno float %a, %a
   %r = select i1 %cmp, float 0.0, float %a
   ret float %r

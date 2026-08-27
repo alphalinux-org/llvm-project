@@ -106,3 +106,56 @@ define double @ne_select(double %a, double %b, double %x, double %y) {
   ret double %s
 }
 
+; The unordered predicate is an instruction of its own: cmptun writes 2.0 when
+; either operand is a NaN.  Left to the generic expansion this is a
+; self-comparison of each operand, and'ed and inverted -- eight instructions
+; against three -- so the absence of a second compare is checked.
+; CHECK-LABEL: uno:
+; CHECK-NOT:   cmpteq
+; CHECK:       cmptun $f16, $f17, $f0
+; FIX:         srl $0, 62, $0
+; NOFIX:       fbne $f0, .LBB
+; CHECK:       ret
+define i64 @uno(double %a, double %b) {
+  %c = fcmp uno double %a, %b
+  %z = zext i1 %c to i64
+  ret i64 %z
+}
+
+; CHECK-LABEL: uno_f32:
+; CHECK-NOT:   cmpteq
+; CHECK:       cmptun $f16, $f17, $f0
+; CHECK:       ret
+define i64 @uno_f32(float %a, float %b) {
+  %c = fcmp uno float %a, %b
+  %z = zext i1 %c to i64
+  ret i64 %z
+}
+
+; Ordered is the complement of the same instruction, one xor more -- not a
+; different comparison.
+; CHECK-LABEL: ord:
+; CHECK-NOT:   cmpteq
+; CHECK:       cmptun $f16, $f17, $f0
+; FIX:         srl $0, 62, $0
+; NOFIX:       fbne $f0, .LBB
+; CHECK:       xor $0, 1, $0
+; CHECK:       ret
+define i64 @ord(double %a, double %b) {
+  %c = fcmp ord double %a, %b
+  %z = zext i1 %c to i64
+  ret i64 %z
+}
+
+; Feeding a select, cmptun's 2.0/0.0 result goes straight into fcmovne, with no
+; trip through an integer register.
+; CHECK-LABEL: uno_select:
+; CHECK-NOT:   cmpteq
+; CHECK:       cmptun $f16, $f17, $f1
+; CHECK:       fcmovne $f1, $f18, $f0
+; CHECK:       ret
+define double @uno_select(double %a, double %b, double %x, double %y) {
+  %c = fcmp uno double %a, %b
+  %s = select i1 %c, double %x, double %y
+  ret double %s
+}

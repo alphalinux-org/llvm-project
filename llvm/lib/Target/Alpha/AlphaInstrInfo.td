@@ -1433,6 +1433,12 @@ def : FCmpPat<SETLT, vt, CMPTLT, (vt $x), (vt $y)>;
 def : FCmpPat<SETLE, vt, CMPTLE, (vt $x), (vt $y)>;
 def : FCmpPat<SETGT, vt, CMPTLT, (vt $y), (vt $x)>;
 def : FCmpPat<SETGE, vt, CMPTLE, (vt $y), (vt $x)>;
+// cmptun is the unordered predicate itself, and ordered is its complement.
+// These are the only two conditions that do not go through an ordered compare,
+// and leaving them to the generic expansion cost eight instructions apiece.
+def : FCmpPat<SETUO, vt, CMPTUN, (vt $x), (vt $y)>;
+def : Pat<(setcc vt:$x, vt:$y, SETO),
+          (XORi (FCMPRES (CMPTUN vt:$x, vt:$y)), 1)>;
 }
 
 // A floating-point select whose condition is itself a floating-point comparison
@@ -1456,6 +1462,7 @@ def : FSelPat<svt, SETLT, cvt, CMPTLT, (cvt $x), (cvt $y)>;
 def : FSelPat<svt, SETLE, cvt, CMPTLE, (cvt $x), (cvt $y)>;
 def : FSelPat<svt, SETGT, cvt, CMPTLT, (cvt $y), (cvt $x)>;
 def : FSelPat<svt, SETGE, cvt, CMPTLE, (cvt $y), (cvt $x)>;
+def : FSelPat<svt, SETUO, cvt, CMPTUN, (cvt $x), (cvt $y)>;
 }
 
 // Otherwise move the 0/1 condition into an FP register (its bits are zero or
