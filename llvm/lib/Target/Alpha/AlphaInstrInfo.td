@@ -1058,11 +1058,17 @@ def : Pat<(f64 (select GPRC:$c, FPRC:$t, FPRC:$f)),
 // Cheap floating-point constants avoid a constant-pool load: $f31 reads as +0.0,
 // and an equal compare of $f31 with itself yields exactly +2.0.  These hold for
 // both S_floating and T_floating, whose 0.0 and 2.0 share the same register bits.
+// +0.0 is a COPY out of $f31 rather than $f31 itself: $f31 is reserved and
+// never written, so the coalescer joins the copy away and the zero operand is
+// read in place, as gcc reads it, but naming the physical register in the
+// pattern makes it unusable as a tied operand -- fcmovne's "old value" is one,
+// and `isnan(a) ? 0.0f : a` put $f31 there and asserted in
+// TwoAddressInstructionPass, which has only a virtual register to rewrite.
 def immFP0  : PatLeaf<(fpimm), [{ return N->isExactlyValue(+0.0); }]>;
 def immFPn0 : PatLeaf<(fpimm), [{ return N->isExactlyValue(-0.0); }]>;
 def immFP2  : PatLeaf<(fpimm), [{ return N->isExactlyValue(+2.0); }]>;
 foreach vt = [f32, f64] in {
-def : Pat<(vt immFP0),  (vt (CPYS  (vt F31), (vt F31)))>;
+def : Pat<(vt immFP0),  (vt (COPY_TO_REGCLASS (vt F31), FPRC))>;
 def : Pat<(vt immFPn0), (vt (CPYSN (vt F31), (vt F31)))>;
 def : Pat<(vt immFP2),  (vt (CMPTEQ (vt F31), (vt F31)))>;
 }
