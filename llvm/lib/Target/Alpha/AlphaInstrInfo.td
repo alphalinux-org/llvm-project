@@ -1172,6 +1172,14 @@ def : Pat<(setcc GPRC:$a, immUExt8:$c, SETLE),  (CMPLEi  GPRC:$a, immUExt8:$c)>;
 def : Pat<(setcc GPRC:$a, immUExt8:$c, SETULT), (CMPULTi GPRC:$a, immUExt8:$c)>;
 def : Pat<(setcc GPRC:$a, immUExt8:$c, SETULE), (CMPULEi GPRC:$a, immUExt8:$c)>;
 
+// `x <= C' is canonicalized to `x < C+1' before selection, which is free until
+// C is 255: 256 does not fit the 8-bit literal field, so the comparison that
+// needs no constant at all is the one that has to build one.  Turning it back
+// into the le form recovers the literal.  This is the only constant where the
+// two forms differ, because 257 does not fit either form.
+def : Pat<(setcc GPRC:$a, 256, SETLT),  (CMPLEi  GPRC:$a, 255)>;
+def : Pat<(setcc GPRC:$a, 256, SETULT), (CMPULEi GPRC:$a, 255)>;
+
 // x > 0 swaps its operands to cmplt 0, x, putting zero in the first (register)
 // position where the immediate form cannot hold it; use the zero register.
 // (x >= 0 and unsigned x > 0 are canonicalized to a sign-bit test and x != 0

@@ -55,3 +55,38 @@ define i64 @sgt0(i64 %x) {
   %r = zext i1 %c to i64
   ret i64 %r
 }
+
+; `x <= C' is canonicalized to `x < C+1', which costs nothing until C is 255:
+; 256 does not fit the 8-bit literal field, so the form that needs no constant
+; is the one that has to build one.  cmple takes the literal back.  255 is the
+; only constant where the two forms differ -- 257 fits neither.
+; CHECK-LABEL: sle255:
+; CHECK-NOT:  lda
+; CHECK:      cmple $16, 255, $0
+; CHECK-NEXT: ret
+define i64 @sle255(i64 %x) {
+  %c = icmp sle i64 %x, 255
+  %r = zext i1 %c to i64
+  ret i64 %r
+}
+
+; CHECK-LABEL: ule255:
+; CHECK-NOT:  lda
+; CHECK:      cmpule $16, 255, $0
+; CHECK-NEXT: ret
+define i64 @ule255(i64 %x) {
+  %c = icmp ule i64 %x, 255
+  %r = zext i1 %c to i64
+  ret i64 %r
+}
+
+; One below the boundary still goes the canonical way, and must: cmplt with 255
+; is the same one instruction, so rewriting it would be churn.
+; CHECK-LABEL: sle254:
+; CHECK:      cmplt $16, 255, $0
+; CHECK-NEXT: ret
+define i64 @sle254(i64 %x) {
+  %c = icmp sle i64 %x, 254
+  %r = zext i1 %c to i64
+  ret i64 %r
+}
