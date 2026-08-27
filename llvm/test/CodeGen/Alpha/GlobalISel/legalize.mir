@@ -331,3 +331,23 @@ body:             |
     RET implicit $r0
 ...
 
+---
+# An extension whose source is not a power of two.  This is what a load of an
+# odd size lowers to, and it is the end of the road for the helper: widenScalar
+# has no case for an extension at all and lowerEXT handles only vectors, so if
+# the rule does not call this legal the function falls back.
+name:            sext_s24
+legalized:       false
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $r16
+    ; CHECK-LABEL: name: sext_s24
+    ; CHECK-NOT: failedISel: true
+    ; CHECK: {{%[0-9]+}}:_(s64) = G_SEXT {{%[0-9]+}}(s24)
+    %0:_(s64) = COPY $r16
+    %1:_(s24) = G_TRUNC %0(s64)
+    %2:_(s64) = G_SEXT %1(s24)
+    $r0 = COPY %2(s64)
+    RET implicit $r0
+...

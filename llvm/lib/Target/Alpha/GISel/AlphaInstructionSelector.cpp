@@ -1464,33 +1464,36 @@ bool AlphaInstructionSelector::selectInstr(MachineInstr &I) const {
     return selectCopy(I, MRI, RBI);
   }
   case TargetOpcode::G_ZEXT: {
-    // zapnot keeps the bytes its mask names and zeroes the rest; a boolean
-    // needs only its low bit.  The low byte is the one mask that fits and's
-    // 8-bit literal field, and and is a logic operation where zapnot is a
-    // shift-class one: four issue pipes rather than two on the 21264, either
-    // integer pipe rather than E0 alone on the 21164, and one cycle rather
-    // than two on the 21064.
-    LLT SrcTy = MRI.getType(I.getOperand(1).getReg());
-    unsigned Opc, Imm;
-    if (SrcTy == LLT::scalar(1)) {
-      Opc = Alpha::ANDi;
-      Imm = 1;
-    } else if (SrcTy == LLT::scalar(8)) {
-      Opc = Alpha::ANDi;
-      Imm = 0xFF;
-    } else if (SrcTy == LLT::scalar(16)) {
-      Opc = Alpha::ZAPNOTi;
-      Imm = 3;
-    } else if (SrcTy == LLT::scalar(32)) {
-      Opc = Alpha::ZAPNOTi;
-      Imm = 15;
-    } else {
+    // zapnot keeps the bytes its mask names and zeroes the rest, so it extends
+    // any whole number of bytes; a boolean needs only its low bit.  A width
+    // that is neither -- the source of an extension the legalizer built out of
+    // a three-byte load, say -- has no byte mask, and a pair of shifts clears
+    // everything above it instead.
+    Register Dst = I.getOperand(0).getReg();
+    Register Src = I.getOperand(1).getReg();
+    unsigned Size = MRI.getType(Src).getSizeInBits();
+    if (Size >= 64)
       return false;
-    }
 
-    emit(I, Opc, I.getOperand(0).getReg())
-        .addUse(I.getOperand(1).getReg())
-        .addImm(Imm);
+    MachineInstrBuilder MIB;
+    if (Size == 1) {
+      MIB = emit(I, Alpha::ANDi, Dst).addUse(Src).addImm(1);
+    } else if (Size == 8) {
+      // The one byte mask that fits and's 8-bit literal field.  and is a
+      // logic operation and zapnot a shift-class one, which is four issue
+      // pipes rather than two on the 21264, either integer pipe rather than
+      // E0 alone on the 21164, and one cycle rather than two on the 21064.
+      MIB = emit(I, Alpha::ANDi, Dst).addUse(Src).addImm(0xFF);
+    } else if (Size % 8 == 0) {
+      MIB = emit(I, Alpha::ZAPNOTi, Dst)
+                .addUse(Src)
+                .addImm((1u << (Size / 8)) - 1);
+    } else {
+      unsigned Shift = 64 - Size;
+      Register Tmp = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+      emit(I, Alpha::SLLi, Tmp).addUse(Src).addImm(Shift);
+      MIB = emit(I, Alpha::SRLi, Dst).addUse(Tmp).addImm(Shift);
+    }
     I.eraseFromParent();
     return true;
   }
@@ -1517,8 +1520,11 @@ bool AlphaInstructionSelector::selectInstr(MachineInstr &I) const {
       MIB =
           emit(I, SrcTy.getSizeInBits() == 8 ? Alpha::SEXTB : Alpha::SEXTW, Dst)
               .addUse(Src);
-    } else if (SrcTy == LLT::scalar(8) || SrcTy == LLT::scalar(16)) {
-      unsigned Shift = SrcTy == LLT::scalar(8) ? 56 : 48;
+    } else if (SrcTy.isScalar() && SrcTy.getSizeInBits() > 1 &&
+               SrcTy.getSizeInBits() < 64) {
+      // Any other width, a byte and a word among them: shift the field up to
+      // the top of the register and back down again with an arithmetic shift.
+      unsigned Shift = 64 - SrcTy.getSizeInBits();
       Register Tmp = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
       emit(I, Alpha::SLLi, Tmp).addUse(Src).addImm(Shift);
       MIB = emit(I, Alpha::SRAi, Dst).addUse(Tmp).addImm(Shift);

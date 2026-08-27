@@ -116,9 +116,23 @@ AlphaLegalizerInfo::AlphaLegalizerInfo(const AlphaSubtarget &ST) {
   // whatever the type says, the selector switches on the *source* width alone,
   // and sign-extending a byte into a whole register leaves the low 32 bits
   // holding exactly the s32 value.
+  //
+  // The source width is not a list either, because it is not a list of the
+  // widths a register can hold: lowering a load of an odd size produces an
+  // extension from that size, and a three-byte load at -O2 is enough to do it.
+  // Neither widening nor narrowing nor lowering can help there --
+  // LegalizerHelper has no widenScalar case for an extension at all, and
+  // lowerEXT handles only vectors -- so the width has to be legal here or the
+  // function falls back. The selector extends any of them: a whole number of
+  // bytes is a zapnot mask, and anything else is a pair of shifts, which is
+  // what a byte and a word cost in any case.
   getActionDefinitionsBuilder({G_SEXT, G_ZEXT, G_ANYEXT})
-      .legalFor({{s64, s1}, {s64, s8}, {s64, s16}, {s64, s32},
-                 {s32, s1}, {s32, s8}, {s32, s16}})
+      .legalIf([=](const LegalityQuery &Query) {
+        const LLT Dst = Query.Types[0];
+        const LLT Src = Query.Types[1];
+        return Dst.isScalar() && Src.isScalar() && (Dst == s32 || Dst == s64) &&
+               Src.getSizeInBits() < Dst.getSizeInBits();
+      })
       .maxScalar(0, s64);
 
   // The extending loads need a rule of their own rather than no rule at all:

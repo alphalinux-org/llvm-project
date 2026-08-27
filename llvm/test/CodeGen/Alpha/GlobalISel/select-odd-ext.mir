@@ -1,0 +1,79 @@
+# RUN: llc -mtriple=alpha-unknown-linux-gnu -run-pass=instruction-select \
+# RUN:   -global-isel-abort=1 -verify-machineinstrs %s -o - | FileCheck %s
+
+# Extending a source width that is not a power of two.  The legalizer produces
+# these from a load of an odd size and cannot produce anything else, so the
+# selector has to take any width at all rather than the four it used to name.
+#
+# A whole number of bytes is still one instruction -- zapnot's mask names bytes,
+# so three of them is 7 rather than the 1, 3 and 15 the old list held -- and a
+# width that is not a whole number of bytes is a pair of shifts, which is what a
+# byte and a word already cost.  Asked of the selection pass on its own because
+# the artifact combiner rewrites most of these into a mask before an end-to-end
+# run reaches the selector.
+
+---
+name:            zext_s24
+legalized:       true
+regBankSelected: true
+tracksRegLiveness: true
+registers:
+  - { id: 0, class: gpr }
+  - { id: 1, class: gpr }
+  - { id: 2, class: gpr }
+body:             |
+  bb.0:
+    liveins: $r16
+    ; CHECK-LABEL: name: zext_s24
+    ; CHECK: ZAPNOTi %{{[0-9]+}}, 7
+    %0:gpr(s64) = COPY $r16
+    %1:gpr(s24) = G_TRUNC %0(s64)
+    %2:gpr(s64) = G_ZEXT %1(s24)
+    $r0 = COPY %2(s64)
+    RET implicit $r0
+...
+---
+# Not a whole number of bytes: no mask names it, so the field is shifted up to
+# the top of the register and back down with a logical shift.
+name:            zext_s5
+legalized:       true
+regBankSelected: true
+tracksRegLiveness: true
+registers:
+  - { id: 0, class: gpr }
+  - { id: 1, class: gpr }
+  - { id: 2, class: gpr }
+body:             |
+  bb.0:
+    liveins: $r16
+    ; CHECK-LABEL: name: zext_s5
+    ; CHECK: SLLi %{{[0-9]+}}, 59
+    ; CHECK: SRLi %{{[0-9]+}}, 59
+    %0:gpr(s64) = COPY $r16
+    %1:gpr(s5) = G_TRUNC %0(s64)
+    %2:gpr(s64) = G_ZEXT %1(s5)
+    $r0 = COPY %2(s64)
+    RET implicit $r0
+...
+---
+# The same for a sign extension, where the shift back down is arithmetic.
+name:            sext_s24
+legalized:       true
+regBankSelected: true
+tracksRegLiveness: true
+registers:
+  - { id: 0, class: gpr }
+  - { id: 1, class: gpr }
+  - { id: 2, class: gpr }
+body:             |
+  bb.0:
+    liveins: $r16
+    ; CHECK-LABEL: name: sext_s24
+    ; CHECK: SLLi %{{[0-9]+}}, 40
+    ; CHECK: SRAi %{{[0-9]+}}, 40
+    %0:gpr(s64) = COPY $r16
+    %1:gpr(s24) = G_TRUNC %0(s64)
+    %2:gpr(s64) = G_SEXT %1(s24)
+    $r0 = COPY %2(s64)
+    RET implicit $r0
+...
