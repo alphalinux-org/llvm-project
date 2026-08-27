@@ -1,0 +1,176 @@
+# RUN: llc -mtriple=alpha-unknown-linux-gnu -run-pass=instruction-select \
+# RUN:   -global-isel-abort=1 -verify-machineinstrs %s -o - \
+# RUN:   | FileCheck %s --check-prefixes=CHECK,BASE
+# RUN: llc -mtriple=alpha-unknown-linux-gnu -mcpu=ev6 \
+# RUN:   -run-pass=instruction-select -global-isel-abort=1 \
+# RUN:   -verify-machineinstrs %s -o - | FileCheck %s --check-prefixes=CHECK,BWX
+
+# The extending loads.  Which of the two extensions costs an instruction is
+# decided by the load, not by the opcode: every narrow load and every extract
+# zero-fills what it read, and ldl sign-fills, so a zero-extending longword
+# load and a sign-extending byte load are the ones that pay.  That is the whole
+# content of these cases, and it is why they are asked of the selection pass
+# alone -- at -O2 there is nothing left to see, and at -O0 the extension and
+# the load reach it as separate instructions anyway.
+#
+# These arrive from lowering a load whose width is not a power of two -- an i40
+# at -O0 becomes a G_ZEXTLOAD from an s32 and a byte load above it -- and, once
+# there is a pre-legalizer combiner, from folding an extension into the load
+# that feeds it.
+
+---
+name:            zext8
+legalized:       true
+regBankSelected: true
+tracksRegLiveness: true
+registers:
+  - { id: 0, class: gpr }
+  - { id: 1, class: gpr }
+liveins:
+  - { reg: '$r16' }
+body:             |
+  bb.0:
+    liveins: $r16
+
+    ; The byte load zero-extends already, with BWX and without it: there is
+    ; nothing to do above the field.
+    ; CHECK-LABEL: name: zext8
+    ; BASE: %[[Q:[0-9]+]]:gprc = LDQ_U %[[P:[0-9]+]]
+    ; BASE-NEXT: EXTBL %[[Q]], %[[P]]
+    ; BWX: LDBU
+    ; CHECK-NOT: ZAPNOTi
+    ; CHECK-NOT: SLLi
+    %0:gpr(p0) = COPY $r16
+    %1:gpr(s64) = G_ZEXTLOAD %0(p0) :: (load (s8))
+    $r0 = COPY %1(s64)
+    RET implicit $r0
+...
+---
+name:            sext8
+legalized:       true
+regBankSelected: true
+tracksRegLiveness: true
+registers:
+  - { id: 0, class: gpr }
+  - { id: 1, class: gpr }
+liveins:
+  - { reg: '$r16' }
+body:             |
+  bb.0:
+    liveins: $r16
+
+    ; Sign-extending is the byte load's cost: one sextb with BWX, and the
+    ; shift up and arithmetic shift back down without it.
+    ; CHECK-LABEL: name: sext8
+    ; BASE: %[[Q:[0-9]+]]:gprc = EXTBL
+    ; BASE-NEXT: %[[S:[0-9]+]]:gprc = SLLi %[[Q]], 56
+    ; BASE-NEXT: SRAi %[[S]], 56
+    ; BWX: %[[L:[0-9]+]]:gprc = LDBU
+    ; BWX-NEXT: SEXTB %[[L]]
+    %0:gpr(p0) = COPY $r16
+    %1:gpr(s64) = G_SEXTLOAD %0(p0) :: (load (s8))
+    $r0 = COPY %1(s64)
+    RET implicit $r0
+...
+---
+name:            zext32
+legalized:       true
+regBankSelected: true
+tracksRegLiveness: true
+registers:
+  - { id: 0, class: gpr }
+  - { id: 1, class: gpr }
+liveins:
+  - { reg: '$r16' }
+body:             |
+  bb.0:
+    liveins: $r16
+
+    ; ldl sign-extends the longword it reads, so this is the direction that
+    ; costs an instruction: keep the four bytes read and zero the rest.
+    ; CHECK-LABEL: name: zext32
+    ; CHECK: %[[L:[0-9]+]]:gprc = LDL
+    ; CHECK-NEXT: ZAPNOTi %[[L]], 15
+    %0:gpr(p0) = COPY $r16
+    %1:gpr(s64) = G_ZEXTLOAD %0(p0) :: (load (s32))
+    $r0 = COPY %1(s64)
+    RET implicit $r0
+...
+---
+name:            sext32
+legalized:       true
+regBankSelected: true
+tracksRegLiveness: true
+registers:
+  - { id: 0, class: gpr }
+  - { id: 1, class: gpr }
+liveins:
+  - { reg: '$r16' }
+body:             |
+  bb.0:
+    liveins: $r16
+
+    ; And this is the direction that is free.  A rule that emitted the
+    ; extension unconditionally would put an addl here.
+    ; CHECK-LABEL: name: sext32
+    ; CHECK: LDL
+    ; CHECK-NOT: ADDL
+    ; CHECK-NOT: ZAPNOTi
+    %0:gpr(p0) = COPY $r16
+    %1:gpr(s64) = G_SEXTLOAD %0(p0) :: (load (s32))
+    $r0 = COPY %1(s64)
+    RET implicit $r0
+...
+---
+name:            zext32_misaligned
+legalized:       true
+regBankSelected: true
+tracksRegLiveness: true
+registers:
+  - { id: 0, class: gpr }
+  - { id: 1, class: gpr }
+liveins:
+  - { reg: '$r16' }
+body:             |
+  bb.0:
+    liveins: $r16
+
+    ; The misaligned expansion extracts the field, and an extract zero-fills,
+    ; so the longword load that pays above pays nothing here.  This is the case
+    ; that says the decision is made from the alignment as well as the width.
+    ; CHECK-LABEL: name: zext32_misaligned
+    ; CHECK: EXTLL
+    ; CHECK: EXTLH
+    ; CHECK: BIS
+    ; CHECK-NOT: ZAPNOTi
+    %0:gpr(p0) = COPY $r16
+    %1:gpr(s64) = G_ZEXTLOAD %0(p0) :: (load (s32), align 1)
+    $r0 = COPY %1(s64)
+    RET implicit $r0
+...
+---
+name:            sext16
+legalized:       true
+regBankSelected: true
+tracksRegLiveness: true
+registers:
+  - { id: 0, class: gpr }
+  - { id: 1, class: gpr }
+liveins:
+  - { reg: '$r16' }
+body:             |
+  bb.0:
+    liveins: $r16
+
+    ; sextw with BWX, and the shift pair without it.
+    ; CHECK-LABEL: name: sext16
+    ; BASE: %[[Q:[0-9]+]]:gprc = EXTWL
+    ; BASE-NEXT: %[[S:[0-9]+]]:gprc = SLLi %[[Q]], 48
+    ; BASE-NEXT: SRAi %[[S]], 48
+    ; BWX: %[[L:[0-9]+]]:gprc = LDWU
+    ; BWX-NEXT: SEXTW %[[L]]
+    %0:gpr(p0) = COPY $r16
+    %1:gpr(s64) = G_SEXTLOAD %0(p0) :: (load (s16))
+    $r0 = COPY %1(s64)
+    RET implicit $r0
+...

@@ -51,6 +51,8 @@ private:
   bool selectLoadStore(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectMisalignedLoadStore(MachineInstr &I, MachineRegisterInfo &MRI,
                                  bool IsLoad, bool IsFP, uint64_t Size) const;
+  bool selectExtLoad(MachineInstr &I, MachineRegisterInfo &MRI,
+                     uint64_t Size) const;
   bool selectICmp(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectFCmp(MachineInstr &I, MachineRegisterInfo &MRI) const;
   Register emitFCmpBit(MachineInstr &I, MachineRegisterInfo &MRI,
@@ -284,12 +286,19 @@ static bool selectCopy(MachineInstr &I, MachineRegisterInfo &MRI,
 // the address computation in front of the access can often be folded into.
 bool AlphaInstructionSelector::selectLoadStore(MachineInstr &I,
                                                MachineRegisterInfo &MRI) const {
-  bool IsLoad = I.getOpcode() == TargetOpcode::G_LOAD;
+  bool IsLoad = I.getOpcode() != TargetOpcode::G_STORE;
   Register ValReg = I.getOperand(0).getReg();
   Register AddrReg = I.getOperand(1).getReg();
 
   const MachineMemOperand &MMO = **I.memoperands_begin();
   uint64_t Size = MMO.getSizeInBits().getValue();
+
+  // An extending load reads the bytes a plain load of the same width reads;
+  // what differs is what fills the register above them.  Give it the extension
+  // it needs, if it needs one at all, and then select it as that plain load.
+  if (I.getOpcode() == TargetOpcode::G_SEXTLOAD ||
+      I.getOpcode() == TargetOpcode::G_ZEXTLOAD)
+    return selectExtLoad(I, MRI, Size);
 
   const AlphaSubtarget &STI =
       I.getParent()->getParent()->getSubtarget<AlphaSubtarget>();
@@ -446,6 +455,72 @@ bool AlphaInstructionSelector::selectLoadStore(MachineInstr &I,
 
   I.eraseFromParent();
   return true;
+}
+
+// An extending load: G_SEXTLOAD or G_ZEXTLOAD, whose memory type is narrower
+// than the register it lands in.  Nothing here reads memory -- the load itself
+// goes back through selectLoadStore as a plain one -- and all this decides is
+// what has to happen to the bits above the field afterwards.
+//
+// Which extension is free depends on the load: ldl sign-extends the longword
+// it reads, while ldbu and ldwu zero-extend, the pre-BWX extract zero-extends
+// what it extracts, and so does the misaligned expansion.  So exactly one of
+// the two extensions is already done by the time the value is in a register,
+// and the other one is a single instruction.
+bool AlphaInstructionSelector::selectExtLoad(MachineInstr &I,
+                                             MachineRegisterInfo &MRI,
+                                             uint64_t Size) const {
+  bool IsSigned = I.getOpcode() == TargetOpcode::G_SEXTLOAD;
+  if (Size != 8 && Size != 16 && Size != 32)
+    return false;
+
+  const MachineMemOperand &MMO = **I.memoperands_begin();
+  bool Misaligned = MMO.getAlign().value() * 8 < Size;
+  bool LoadSignFills = Size == 32 && !Misaligned;
+
+  if (IsSigned != LoadSignFills) {
+    MachineBasicBlock &MBB = *I.getParent();
+    const AlphaSubtarget &STI = MBB.getParent()->getSubtarget<AlphaSubtarget>();
+    Register DstReg = I.getOperand(0).getReg();
+    // The load writes this instead, and the extension below reads it.  It is
+    // built generic and given a bank rather than a class: the two instructions
+    // that touch it are constrained when they are selected, and each of them
+    // is the thing that knows which class it needs.
+    Register RawReg = MRI.createGenericVirtualRegister(LLT::scalar(64));
+    MRI.setRegBank(RawReg, RBI.getRegBank(Alpha::GPRRegBankID));
+
+    // After the load, which is still this instruction: it is selected below,
+    // and whatever it becomes is built in front of it and takes its place.
+    auto Ext = std::next(I.getIterator());
+    const DebugLoc &DL = I.getDebugLoc();
+    auto Build = [&](unsigned Opc, Register Dst) {
+      return emitAt(MBB, Ext, DL, Opc, Dst);
+    };
+
+    MachineInstrBuilder Last;
+    if (!IsSigned) {
+      // Sign-filled and wanted zero-filled, which is the ldl case alone:
+      // keep the four bytes the load read and zero the rest.
+      Last = Build(Alpha::ZAPNOTi, DstReg).addUse(RawReg).addImm(0xf);
+    } else if (Size == 32) {
+      // addl sign-extends its longword result, and $31 adds nothing to it.
+      Last = Build(Alpha::ADDL, DstReg).addUse(RawReg).addUse(Alpha::R31);
+    } else if (STI.hasBWX()) {
+      Last =
+          Build(Size == 8 ? Alpha::SEXTB : Alpha::SEXTW, DstReg).addUse(RawReg);
+    } else {
+      // Shift the field up to the top of the register and back down with an
+      // arithmetic shift, which fills from its sign bit.
+      unsigned Shift = 64 - Size;
+      Register Up = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+      Build(Alpha::SLLi, Up).addUse(RawReg).addImm(Shift);
+      Last = Build(Alpha::SRAi, DstReg).addUse(Up).addImm(Shift);
+    }
+    I.getOperand(0).setReg(RawReg);
+  }
+
+  I.setDesc(TII.get(TargetOpcode::G_LOAD));
+  return selectLoadStore(I, MRI);
 }
 
 // A misaligned access, expanded the way AlphaTargetLowering::LowerLOAD and
@@ -1310,6 +1385,8 @@ bool AlphaInstructionSelector::selectInstr(MachineInstr &I) const {
     return true;
   case TargetOpcode::G_LOAD:
   case TargetOpcode::G_STORE:
+  case TargetOpcode::G_SEXTLOAD:
+  case TargetOpcode::G_ZEXTLOAD:
     return selectLoadStore(I, MRI);
   case TargetOpcode::G_ICMP:
     return selectICmp(I, MRI);

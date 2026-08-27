@@ -128,38 +128,3 @@ body:             |
     RET implicit $f0
 ...
 
----
-# An extending load.  An opcode with no rules at all has an empty rule set that
-# verify() accepts vacuously, so leaving G_ZEXTLOAD and G_SEXTLOAD out would
-# leave nothing checking this -- and it is reachable: legalizing a load of a
-# type that is not a power of two, an i40 at -O0, produces exactly this.  The
-# selector has no counterpart for either opcode.
-#
-# `.lower()` looks like the answer and is not.  lowerLoad only *splits* a load,
-# and for a byte-sized, power-of-two, naturally aligned extending load -- which
-# is what this is -- it has nothing to split and returns UnableToLegalize, so
-# the rule would fail one step further on rather than here.  Selecting these
-# directly is the improvement to make: ldl already sign-extends a longword, and
-# ldbu and ldwu zero-extend where there is BWX.  Until then, hand the function
-# to the SelectionDAG path whole.
-#
-# This case is a lock, not a detector, and the distinction is worth writing
-# down: an opcode with no rules at all also fails to legalize and is also
-# marked failedISel, so without the rule this output is byte-identical
-# and the case still passes.  It has teeth in the other direction only -- it
-# fails if someone declares these legal without giving the selector something
-# to select, which is the mistake the rule is here to prevent.
-name:            zextload
-legalized:       false
-tracksRegLiveness: true
-body:             |
-  bb.0:
-    liveins: $r16
-    ; CHECK-LABEL: name: zextload
-    ; CHECK: failedISel: true
-    ; CHECK: G_ZEXTLOAD
-    %0:_(p0) = COPY $r16
-    %1:_(s64) = G_ZEXTLOAD %0(p0) :: (load (s32))
-    $r0 = COPY %1(s64)
-    RET implicit $r0
-...

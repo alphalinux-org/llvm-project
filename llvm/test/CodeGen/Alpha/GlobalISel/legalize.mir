@@ -76,6 +76,47 @@ body:             |
     RET
 ...
 ---
+# An extending load is legal for the three widths the loads cover, at any
+# alignment, and stays as it is: the selector reads the field with the load and
+# fills the register above it, and which of the two extensions costs an
+# instruction depends on the load it chose -- see extload.mir.
+#
+# This rule exists rather than being left out.  An opcode with no rules at all
+# has an empty rule set that verify() accepts vacuously, so the absence of a
+# rule is not the absence of a claim; it is an unchecked one.
+name:            zextload_s32
+legalized:       false
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $r16
+    ; CHECK-LABEL: name: zextload_s32
+    ; CHECK: {{%[0-9]+}}:_(s64) = G_ZEXTLOAD %{{[0-9]+}}(p0) :: (load (s32))
+    %0:_(p0) = COPY $r16
+    %1:_(s64) = G_ZEXTLOAD %0(p0) :: (load (s32))
+    $r0 = COPY %1(s64)
+    RET implicit $r0
+...
+---
+# A width that is not one of those three is what `lower()` is for, and it is
+# the case lowerLoad can actually do: it splits the access into ones that are.
+# The i40 at -O0 that produced the original G_ZEXTLOAD arrives exactly here.
+name:            zextload_s40
+legalized:       false
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $r16
+    ; CHECK-LABEL: name: zextload_s40
+    ; CHECK-NOT: G_ZEXTLOAD %{{[0-9]+}}(p0) :: (load (s40)
+    ; CHECK: G_ZEXTLOAD
+    ; CHECK: G_PTR_ADD
+    %0:_(p0) = COPY $r16
+    %1:_(s64) = G_ZEXTLOAD %0(p0) :: (load (s40), align 1)
+    $r0 = COPY %1(s64)
+    RET implicit $r0
+...
+---
 # A narrow add is widened to the register width, and the truncations that
 # produced its operands disappear with it: nothing on Alpha adds eight bits.
 name:            add_s8

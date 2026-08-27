@@ -175,11 +175,18 @@ AlphaRegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
   case G_ASHR:
   case G_PTR_ADD:
     break;
+  case G_SEXTLOAD:
+  case G_ZEXTLOAD:
   case G_LOAD:
   case G_STORE: {
     Register ValReg = MI.getOperand(0).getReg();
-    bool IsFP =
-        Opc == G_LOAD ? usedByFP(ValReg, MRI) : definedByFP(ValReg, MRI);
+    // An extending load is always an integer one: the extension is of a field
+    // narrower than the register, and there is no floating operation that
+    // reads such a thing.  Asking usedByFP about it would put a value the
+    // selector reads with ldl or an extract into a floating register.
+    bool IsFP = Opc == G_STORE  ? definedByFP(ValReg, MRI)
+                : Opc == G_LOAD ? usedByFP(ValReg, MRI)
+                                : false;
     OperandsMapping = getOperandsMapping(
         {&Alpha::ValueMappings[IsFP ? Alpha::FPR3OpsIdx : Alpha::GPR3OpsIdx],
          &Alpha::ValueMappings[Alpha::GPR3OpsIdx]});

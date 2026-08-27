@@ -127,17 +127,25 @@ AlphaLegalizerInfo::AlphaLegalizerInfo(const AlphaSubtarget &ST) {
   // reachable -- lowering a non-power-of-two load (an i40 at -O0) produces a
   // G_ZEXTLOAD from an s32.
   //
-  // The selector has no counterpart for either opcode.  `.lower()` looks like
-  // the answer and is not: lowerLoad splits a load, and for a byte-sized,
-  // power-of-two, naturally aligned extending load -- which is exactly this
-  // one -- it has nothing to split and returns UnableToLegalize, so the rule
-  // would fail one step further on.  Say unsupported and hand the function to
-  // the SelectionDAG path, as for the atomics above.
+  // They are selected directly, because the load that reads the bytes already
+  // fills the register above them one way or the other: ldl sign-extends a
+  // longword, ldbu and ldwu zero-extend a byte and a word where there is BWX,
+  // and both the pre-BWX extract and the misaligned one zero-extend whatever
+  // they extract.  So one of the two extensions costs nothing and the other
+  // costs one instruction, which is what the SelectionDAG path pays too.
   //
-  // Selecting these directly is the improvement to make here: ldl already
-  // sign-extends a longword, and ldbu/ldwu zero-extend a byte and a word
-  // where there is BWX.  That is selector work, not a legalizer rule.
-  getActionDefinitionsBuilder({G_ZEXTLOAD, G_SEXTLOAD}).unsupported();
+  // Each entry names one byte as its alignment, for the reason the load rule
+  // above gives: the misaligned form of each is selected as well.
+  //
+  // `.lower()` is what is left, and it only ever *splits* a load; for a
+  // byte-sized, power-of-two one -- which is what an entry here would be -- it
+  // has nothing to split and returns UnableToLegalize.  It is reached only by
+  // the widths that are not powers of two, which is exactly what it can do.
+  getActionDefinitionsBuilder({G_ZEXTLOAD, G_SEXTLOAD})
+      .legalForTypesWithMemDesc(
+          {{s64, p0, s8, 8}, {s64, p0, s16, 8}, {s64, p0, s32, 8}})
+      .clampScalar(0, s64, s64)
+      .lower();
 
   getActionDefinitionsBuilder(G_TRUNC).alwaysLegal();
 
