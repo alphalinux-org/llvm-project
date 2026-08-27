@@ -424,17 +424,56 @@ AlphaLegalizerInfo::AlphaLegalizerInfo(const AlphaSubtarget &ST) {
   // A fence is one instruction whatever it orders.
   getActionDefinitionsBuilder(G_FENCE).alwaysLegal();
 
-  // A read-modify-write becomes an ldl_l/stl_c retry loop, which the
-  // SelectionDAG path builds with a custom inserter -- machinery GlobalISel
-  // does not run.  Marking these unsupported hands such a function to that
-  // path whole, which is where they are lowered correctly; calling them legal
-  // would reach a selector with nothing to select.
+  // A read-modify-write is an ldq_l/stq_c retry loop.  The loop is not built
+  // here and it is not built by the selector either: it is built after
+  // register allocation, by AlphaExpandAtomicPseudo, because the architecture
+  // requires that no memory access appear between the load locked and the
+  // store conditional and a spill placed there makes the store conditional
+  // fail every time round.  What the selector emits is the pseudo that stands
+  // for the loop, which is the same one the SelectionDAG path's custom
+  // inserter emits.
+  //
+  // The value is always held in a whole register whatever width is being
+  // accessed, so a narrower one is widened rather than lowered: the memory
+  // width lives in the memory operand, and it is the memory operand the
+  // expansion reads to pick between the quadword, longword and subword forms.
+  // Widening extends the operand with G_ANYEXT, which is what it should be --
+  // the bits above the access are never looked at.
+  //
+  // The alignment named is one byte, which is not a claim that the access can
+  // be misaligned: an atomic access has to be naturally aligned to work at
+  // all.  It is what keeps the rule from turning on an alignment the query
+  // does not carry.
+  getActionDefinitionsBuilder({G_ATOMICRMW_XCHG, G_ATOMICRMW_ADD,
+                               G_ATOMICRMW_SUB, G_ATOMICRMW_AND, G_ATOMICRMW_OR,
+                               G_ATOMICRMW_XOR})
+      .legalForTypesWithMemDesc({{s64, p0, s8, 8},
+                                 {s64, p0, s16, 8},
+                                 {s64, p0, s32, 8},
+                                 {s64, p0, s64, 8}})
+      .clampScalar(0, s64, s64);
+
+  getActionDefinitionsBuilder(G_ATOMIC_CMPXCHG)
+      .legalForTypesWithMemDesc({{s64, p0, s8, 8},
+                                 {s64, p0, s16, 8},
+                                 {s64, p0, s32, 8},
+                                 {s64, p0, s64, 8}})
+      .clampScalar(0, s64, s64);
+
+  // The loop returns the value it read and nothing else, so the success flag
+  // is the comparison of that against the comparand -- which is what the
+  // generic lowering builds, and what the SelectionDAG path builds too.
+  getActionDefinitionsBuilder(G_ATOMIC_CMPXCHG_WITH_SUCCESS).lower();
+
+  // The rest have no loop pseudo of their own.  They do not reach here from C:
+  // AtomicExpand rewrites each into a compare-and-swap loop in the IR, before
+  // either instruction selector sees it.  Marking them unsupported is what
+  // hands a function containing one -- which would have to be hand-written IR
+  // -- to the SelectionDAG path whole.
   getActionDefinitionsBuilder(
-      {G_ATOMIC_CMPXCHG, G_ATOMIC_CMPXCHG_WITH_SUCCESS, G_ATOMICRMW_XCHG,
-       G_ATOMICRMW_ADD, G_ATOMICRMW_SUB, G_ATOMICRMW_AND, G_ATOMICRMW_NAND,
-       G_ATOMICRMW_OR, G_ATOMICRMW_XOR, G_ATOMICRMW_MAX, G_ATOMICRMW_MIN,
-       G_ATOMICRMW_UMAX, G_ATOMICRMW_UMIN, G_ATOMICRMW_FADD, G_ATOMICRMW_FSUB,
-       G_ATOMICRMW_FMAX, G_ATOMICRMW_FMIN})
+      {G_ATOMICRMW_NAND, G_ATOMICRMW_MAX, G_ATOMICRMW_MIN, G_ATOMICRMW_UMAX,
+       G_ATOMICRMW_UMIN, G_ATOMICRMW_FADD, G_ATOMICRMW_FSUB, G_ATOMICRMW_FMAX,
+       G_ATOMICRMW_FMIN})
       .unsupported();
 
   // These rules are never consulted: legalizeInstrStep sends every intrinsic

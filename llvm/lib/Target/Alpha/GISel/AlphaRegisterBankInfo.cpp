@@ -365,6 +365,22 @@ AlphaRegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
                                                          : Alpha::GPR3OpsIdx]});
     break;
   }
+  // A read-modify-write and a compare-and-swap take an address and one or two
+  // values, and give back the value that was read.  All of them are integer
+  // registers: a floating-point atomic reaches here as an integer one, because
+  // the loop that implements it operates on the bits.
+  case G_ATOMICRMW_XCHG:
+  case G_ATOMICRMW_ADD:
+  case G_ATOMICRMW_SUB:
+  case G_ATOMICRMW_AND:
+  case G_ATOMICRMW_OR:
+  case G_ATOMICRMW_XOR:
+  case G_ATOMIC_CMPXCHG: {
+    SmallVector<const ValueMapping *, 4> Ops(
+        NumOperands, &Alpha::ValueMappings[Alpha::GPR3OpsIdx]);
+    OperandsMapping = getOperandsMapping(Ops);
+    break;
+  }
   // The ordering carries no register.
   case G_FENCE:
     OperandsMapping = getOperandsMapping({nullptr, nullptr});

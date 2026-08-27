@@ -64,6 +64,7 @@ private:
   bool selectFConstant(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectBrJT(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectGprelAddress(MachineInstr &I, MachineRegisterInfo &MRI) const;
+  bool selectAtomic(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectAluImm(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectNarrowArith(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectFieldExtract(MachineInstr &I, MachineRegisterInfo &MRI) const;
@@ -1567,16 +1568,21 @@ bool AlphaInstructionSelector::selectInstr(MachineInstr &I) const {
   case TargetOpcode::G_BLOCK_ADDR:
   case TargetOpcode::G_CONSTANT_POOL:
     return selectGprelAddress(I, MRI);
+  case TargetOpcode::G_ATOMICRMW_XCHG:
+  case TargetOpcode::G_ATOMICRMW_ADD:
+  case TargetOpcode::G_ATOMICRMW_SUB:
+  case TargetOpcode::G_ATOMICRMW_AND:
+  case TargetOpcode::G_ATOMICRMW_OR:
+  case TargetOpcode::G_ATOMICRMW_XOR:
+  case TargetOpcode::G_ATOMIC_CMPXCHG:
+    return selectAtomic(I, MRI);
   case TargetOpcode::G_BRJT:
     return selectBrJT(I, MRI);
   case TargetOpcode::G_BRINDIRECT: {
     // An indirect branch jumps to whatever address it is given; the only thing
     // that produces one is an indirectbr, whose target is a block address.
-    MachineInstrBuilder MIB =
-        BuildMI(*I.getParent(), I, I.getDebugLoc(), TII.get(Alpha::JMP))
-            .addUse(I.getOperand(0).getReg());
+    emit(I, Alpha::JMP).addUse(I.getOperand(0).getReg());
     I.eraseFromParent();
-    constrainSelectedInstRegOperands(*MIB, TII, TRI, RBI);
     return true;
   }
   case TargetOpcode::G_FRAME_INDEX: {
@@ -1623,6 +1629,79 @@ bool AlphaInstructionSelector::selectGprelAddress(
 // one s4addq; load the entry -- ldl, which sign-extends the longword it reads,
 // so the offset arrives already widened -- add the global pointer back to
 // recover the absolute address, and jump to it.
+// Emit the pseudo that stands for an ldq_l/stq_c retry loop, which is what
+// EmitInstrWithCustomInserter emits on the SelectionDAG path and for the same
+// reason: the loop itself cannot be built until after register allocation,
+// because the architecture requires that no memory access appear between the
+// load locked and the store conditional, and a spill placed inside that window
+// makes the store conditional fail every time round.  AlphaExpandAtomicPseudo
+// builds it there, from either path's pseudo.
+//
+// The scratch registers the expansion needs are extra outputs of the pseudo
+// rather than registers the expansion picks, so that the register allocator is
+// what chooses them.
+bool AlphaInstructionSelector::selectAtomic(MachineInstr &I,
+                                            MachineRegisterInfo &MRI) const {
+  bool IsCAS = I.getOpcode() == TargetOpcode::G_ATOMIC_CMPXCHG;
+
+  assert(I.hasOneMemOperand() && "atomic without a memory operand");
+  uint64_t Bits = (*I.memoperands_begin())->getSizeInBits().getValue();
+
+  // The operate-format opcode the loop applies to the value it read.  Zero is
+  // an exchange, which applies nothing.
+  unsigned Alu = 0;
+  switch (I.getOpcode()) {
+  case TargetOpcode::G_ATOMICRMW_ADD:
+    Alu = Alpha::ADDQ;
+    break;
+  case TargetOpcode::G_ATOMICRMW_SUB:
+    Alu = Alpha::SUBQ;
+    break;
+  case TargetOpcode::G_ATOMICRMW_AND:
+    Alu = Alpha::AND;
+    break;
+  case TargetOpcode::G_ATOMICRMW_OR:
+    Alu = Alpha::BIS;
+    break;
+  case TargetOpcode::G_ATOMICRMW_XOR:
+    Alu = Alpha::XOR;
+    break;
+  }
+
+  // A byte and a word are read and written through the quadword they fall in,
+  // so those get the longer loop; the last operand tells each form which of
+  // its two widths this is.
+  unsigned LoopOpc;
+  unsigned NumScratch;
+  int64_t Mode;
+  if (Bits <= 16) {
+    LoopOpc =
+        IsCAS ? Alpha::ATOMIC_SUBWORD_CAS_LOOP : Alpha::ATOMIC_SUBWORD_RMW_LOOP;
+    NumScratch = 4;
+    Mode = Bits == 16;
+  } else {
+    LoopOpc = IsCAS ? Alpha::ATOMIC_CAS_LOOP : Alpha::ATOMIC_RMW_LOOP;
+    NumScratch = IsCAS ? 2 : 1;
+    Mode = Bits == 32;
+  }
+
+  MachineInstrBuilder MIB = emit(I, LoopOpc);
+  MIB.addReg(I.getOperand(0).getReg(), RegState::Define);
+  for (unsigned N = 0; N != NumScratch; ++N)
+    MIB.addReg(MRI.createVirtualRegister(&Alpha::GPRCRegClass),
+               RegState::Define | RegState::Dead);
+  for (unsigned N = 1, E = I.getNumOperands(); N != E; ++N)
+    MIB.add(I.getOperand(N));
+  if (!IsCAS)
+    MIB.addImm(Alu);
+  MIB.addImm(Mode);
+  MIB.setMemRefs(I.memoperands());
+
+  I.eraseFromParent();
+  constrainSelectedInstRegOperands(*MIB, TII, TRI, RBI);
+  return true;
+}
+
 bool AlphaInstructionSelector::selectBrJT(MachineInstr &I,
                                           MachineRegisterInfo &MRI) const {
   MachineBasicBlock &MBB = *I.getParent();

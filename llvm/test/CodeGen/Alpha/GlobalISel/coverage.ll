@@ -19,9 +19,8 @@
 ; A switch dense enough to become a jump table is covered by jump-table.ll, and
 ; the address of a block or of a constant-pool entry by gprel-address.ll, rather
 ; than here, because the sequences they check are long enough to be worth their
-; own files.  The atomics are still left to the SelectionDAG path, whose retry
-; loop it builds with a custom inserter GlobalISel does not run.  See
-; fallback.ll.
+; own files.  The atomics are covered by
+; atomics.ll, whose retry loops are longer still.
 
 ; CHECK-LABEL: fence:
 ; CHECK:      mb

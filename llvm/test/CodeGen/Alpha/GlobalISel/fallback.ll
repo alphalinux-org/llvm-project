@@ -9,16 +9,6 @@
 ; The output below is the SelectionDAG lowering, which is what makes the point:
 ; these compile correctly, just not through GlobalISel.
 
-; A read-modify-write becomes an ldq_l/stq_c retry loop, which the SelectionDAG
-; path builds with a custom inserter.
-; CHECK-LABEL: rmw:
-; CHECK:       ldq_l
-; CHECK:       stq_c
-define i64 @rmw(ptr %p, i64 %v) {
-  %a = atomicrmw add ptr %p, i64 %v seq_cst
-  ret i64 %a
-}
-
 ; There is no divide instruction; the SelectionDAG path calls __divq, which
 ; takes its arguments in $24/$25 and returns in $27.
 ; CHECK-LABEL: sdiv:

@@ -2,6 +2,10 @@
 ; RUN:   | FileCheck %s --check-prefix=BWX
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu -mcpu=ev4 < %s \
 ; RUN:   | FileCheck %s --check-prefix=NOBWX
+; RUN: llc -mtriple=alpha-unknown-linux-gnu -mcpu=ev56 -global-isel \
+; RUN:   -global-isel-abort=1 < %s | FileCheck %s --check-prefix=BWX
+; RUN: llc -mtriple=alpha-unknown-linux-gnu -mcpu=ev4 -global-isel \
+; RUN:   -global-isel-abort=1 < %s | FileCheck %s --check-prefix=NOBWX
 
 ; BWX-LABEL: sext_i8:
 ; BWX:        sextb $16, $0
