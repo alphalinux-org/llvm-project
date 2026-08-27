@@ -15,6 +15,7 @@
 #include "llvm/CodeGen/GlobalISel/IRTranslator.h"
 #include "llvm/CodeGen/GlobalISel/InstructionSelect.h"
 #include "llvm/CodeGen/GlobalISel/Legalizer.h"
+#include "llvm/CodeGen/GlobalISel/Localizer.h"
 #include "llvm/CodeGen/GlobalISel/RegBankSelect.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
@@ -32,6 +33,8 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeAlphaTarget() {
   initializeAlphaTrapBarriersPass(PR);
   initializeAlphaExpandAtomicPseudoPass(PR);
   initializeAlphaVerifyInvariantsPass(PR);
+  initializeAlphaPreLegalizerCombinerPass(PR);
+  initializeAlphaPostLegalizerCombinerPass(PR);
 }
 
 static Reloc::Model getEffectiveRelocModel(bool JIT,
@@ -115,7 +118,9 @@ public:
   void addIRPasses() override;
   bool addInstSelector() override;
   bool addIRTranslator() override;
+  void addPreLegalizeMachineIR() override;
   bool addLegalizeMachineIR() override;
+  void addPreRegBankSelect() override;
   bool addRegBankSelect() override;
   bool addGlobalInstructionSelect() override;
   bool addILPOpts() override;
@@ -174,9 +179,27 @@ bool AlphaPassConfig::addIRTranslator() {
   return false;
 }
 
+void AlphaPassConfig::addPreLegalizeMachineIR() {
+  // The memory intrinsics have to be caught before the legalizer turns them
+  // into libcalls; the combiner runs at -O0 too, where it inlines a copy of up
+  // to 32 bytes rather than consulting the target's store limits.
+  addPass(createAlphaPreLegalizerCombiner());
+}
+
 bool AlphaPassConfig::addLegalizeMachineIR() {
   addPass(new Legalizer());
   return false;
+}
+
+void AlphaPassConfig::addPreRegBankSelect() {
+  if (getOptLevel() != CodeGenOptLevel::None)
+    addPass(createAlphaPostLegalizerCombiner());
+  // The IR translator emits every constant and address in the entry block, so
+  // one that is used far away is live across the calls in between and takes a
+  // callee-saved register and a spill.  The localizer sinks each such value to
+  // its uses, which is what the SelectionDAG path gets for free by building a
+  // DAG per block.
+  addPass(new Localizer());
 }
 
 bool AlphaPassConfig::addRegBankSelect() {

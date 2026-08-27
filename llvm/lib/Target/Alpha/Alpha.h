@@ -45,6 +45,11 @@ createAlphaInstructionSelector(const AlphaTargetMachine &TM,
                                const AlphaRegisterBankInfo &RBI);
 FunctionPass *createAlphaISelDag(AlphaTargetMachine &TM,
                                  CodeGenOptLevel OptLevel);
+FunctionPass *createAlphaPreLegalizerCombiner();
+void initializeAlphaPreLegalizerCombinerPass(PassRegistry &);
+
+FunctionPass *createAlphaPostLegalizerCombiner();
+void initializeAlphaPostLegalizerCombinerPass(PassRegistry &);
 
 } // namespace llvm
 

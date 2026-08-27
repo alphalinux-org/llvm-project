@@ -13,6 +13,10 @@ tablegen(LLVM AlphaGenRegisterInfo.inc -gen-register-info)
 tablegen(LLVM AlphaGenSubtargetInfo.inc -gen-subtarget)
 tablegen(LLVM AlphaGenGlobalISel.inc -gen-global-isel)
 tablegen(LLVM AlphaGenRegisterBank.inc -gen-register-bank)
+tablegen(LLVM AlphaGenPreLegalizeGICombiner.inc -gen-global-isel-combiner
+              -combiners="AlphaPreLegalizerCombiner")
+tablegen(LLVM AlphaGenPostLegalizeGICombiner.inc -gen-global-isel-combiner
+              -combiners="AlphaPostLegalizerCombiner")
 
 add_public_tablegen_target(AlphaCommonTableGen)
 
@@ -32,6 +36,8 @@ add_llvm_target(AlphaCodeGen
   GISel/AlphaCallLowering.cpp
   GISel/AlphaInstructionSelector.cpp
   GISel/AlphaLegalizerInfo.cpp
+  GISel/AlphaPostLegalizerCombiner.cpp
+  GISel/AlphaPreLegalizerCombiner.cpp
   GISel/AlphaRegisterBankInfo.cpp
 
   LINK_COMPONENTS

@@ -191,6 +191,16 @@ public:
                                           unsigned Uid,
                                           MCContext &Ctx) const override;
 
+  // The type an inline memcpy/memset expansion uses, on the GlobalISel path.
+  // There is no unaligned load or store, so it is the destination alignment,
+  // capped at a quadword.  The SelectionDAG path derives the same answer from
+  // the generic search, but the GlobalISel port of that search steps from a
+  // quadword straight down to a byte -- it halves the size in *bytes* -- so
+  // without this every copy that is not quadword-aligned would be done a byte
+  // at a time.
+  LLT getOptimalMemOpLLT(const MemOp &Op,
+                         const AttributeList &FuncAttributes) const override;
+
   // Comparisons produce a 0/1 result in a 64-bit integer register.
   EVT getSetCCResultType(const DataLayout &DL, LLVMContext &Context,
                          EVT VT) const override {

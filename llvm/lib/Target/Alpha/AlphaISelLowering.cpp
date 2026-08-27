@@ -2114,6 +2114,18 @@ SDValue AlphaTargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
   return DAG.getNode(AlphaISD::BR_NE, DL, MVT::Other, Chain, Cond, Dest);
 }
 
+LLT AlphaTargetLowering::getOptimalMemOpLLT(const MemOp &Op,
+                                            const AttributeList &) const {
+  // With no fixed destination alignment there is nothing to be careful about:
+  // the caller has already established that the copy is safe.
+  if (!Op.isFixedDstAlign())
+    return LLT::scalar(64);
+  // The source alignment is never the smaller of the two here -- the caller
+  // rejects that case before asking.
+  uint64_t Bytes = std::min<uint64_t>(Op.getDstAlign().value(), 8);
+  return LLT::scalar(Bytes * 8);
+}
+
 const MCExpr *
 AlphaTargetLowering::LowerCustomJumpTableEntry(const MachineJumpTableInfo *,
                                                const MachineBasicBlock *MBB,

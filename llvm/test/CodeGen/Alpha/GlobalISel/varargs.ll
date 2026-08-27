@@ -22,8 +22,8 @@ declare void @use(ptr)
 ;
 ; CHECK-LABEL: start:
 ; CHECK:       lda $[[I:[0-9]+]], 80($30)
-; CHECK:       lda $[[F:[0-9]+]], 32($30)
 ; CHECK:       stq $17, 8($[[I]])
+; CHECK:       lda $[[F:[0-9]+]], 32($30)
 ; CHECK:       stt $f17, 8($[[F]])
 ; CHECK:       stq $21, 40($[[I]])
 ; CHECK:       stt $f21, 40($[[F]])

@@ -1,4 +1,6 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu -mcpu=ev6 < %s | FileCheck %s
+; RUN: llc -mtriple=alpha-unknown-linux-gnu -mcpu=ev6 -global-isel \
+; RUN:   -global-isel-abort=1 < %s | FileCheck %s
 
 ; A small aligned memcpy/memset is expanded inline to quadword loads and stores
 ; instead of a library call; an unaligned or large copy keeps the call.

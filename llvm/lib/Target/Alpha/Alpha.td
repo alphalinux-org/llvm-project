@@ -14,6 +14,7 @@ include "AlphaCallingConv.td"
 include "AlphaInstrInfo.td"
 include "AlphaSchedule.td"
 include "GISel/AlphaRegisterBanks.td"
+include "GISel/AlphaCombine.td"
 
 defm : RemapAllTargetPseudoPointerOperands<GPRC>;
 
