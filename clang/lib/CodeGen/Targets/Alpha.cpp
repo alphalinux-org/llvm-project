@@ -60,6 +60,104 @@ static bool isSFloating(const ASTContext &Ctx, QualType Ty) {
   return Ty->isRealFloatingType() && Ctx.getTypeSize(Ty) == 32;
 }
 
+// gcc gives a struct whose layout is one member the *mode* of that member --
+// compute_record_mode does it, and it recurses, so `struct { struct { float f;
+// } i; }` and `struct { float f[1]; }` reach SFmode too -- and then
+// alpha_function_arg and alpha_pass_by_reference classify the struct by that
+// mode rather than as an aggregate.  For most modes that changes nothing here,
+// because an aggregate of that size is passed in the same integer slots
+// anyway; it matters only for the two modes that go by invisible reference,
+// TFmode/TCmode and (unnamed) SFmode/SCmode.  Returns the scalar type the
+// struct inherits from, or a null QualType.
+//
+// A union never inherits: `union { float f; }` has one member and is still
+// passed by value, which is why this asks for a struct and not merely for a
+// record with one field.  Neither does a struct whose member does not fill it
+// (`struct { long double x; int pad; }`) or whose array member has more than
+// one element.
+//
+// compute_record_mode (gcc/stor-layout.cc) walks every FIELD_DECL and takes
+// the mode of the one that fills the record, so three shapes that look like
+// more than one member reach a mode here too:
+//
+//  - a member whose DECL_SIZE is zero is walked over, not counted: a
+//    zero-length array, a GNU empty struct, a zero-width bitfield.  (A C++
+//    empty *member* has size 1 and does count.)
+//  - a C++ base is a FIELD_DECL like any other, so an empty base is walked
+//    over and a single non-empty one is the member that fills the record.
+//  - under STRICT_ALIGNMENT, which Alpha is, a record whose alignment is below
+//    the mode's keeps BLKmode -- so a `packed' struct around a float or a long
+//    double is an aggregate, not SFmode or TFmode.
+static QualType getInheritedScalarType(const ASTContext &Ctx, QualType Ty) {
+  QualType OrigTy = Ty;
+  uint64_t Size = Ctx.getTypeSize(Ty);
+  while (true) {
+    if (const auto *AT = Ctx.getAsConstantArrayType(Ty)) {
+      if (!AT->getSize().isOne())
+        return QualType();
+      Ty = AT->getElementType();
+      continue;
+    }
+    const auto *RT = Ty->getAs<RecordType>();
+    if (!RT)
+      break;
+    const RecordDecl *RD = RT->getDecl();
+    if (!RD->isStruct() && !RD->isClass())
+      return QualType();
+    QualType Field;
+    // A member that occupies nothing is skipped rather than counted, so it
+    // cannot be the second member that makes the record an aggregate.
+    auto AddMember = [&](QualType MemberTy) {
+      if (Ctx.getTypeSize(MemberTy) == 0)
+        return true;
+      if (!Field.isNull())
+        return false;
+      Field = MemberTy;
+      return true;
+    };
+    if (const auto *CXXRD = dyn_cast<CXXRecordDecl>(RD)) {
+      // A virtual base has no fixed offset and a polymorphic class carries a
+      // vptr the walk cannot see; neither can hand its mode on.
+      if (CXXRD->getNumVBases() != 0 || CXXRD->isPolymorphic())
+        return QualType();
+      for (const CXXBaseSpecifier &B : CXXRD->bases()) {
+        // An empty base occupies no storage at all -- the empty base
+        // optimization gives it offset and size zero, where the same class as
+        // a *member* would still be one byte -- so it is walked over.
+        if (B.getType()->getAsCXXRecordDecl()->isEmpty())
+          continue;
+        if (!AddMember(B.getType()))
+          return QualType();
+      }
+    }
+    for (const FieldDecl *FD : RD->fields()) {
+      // A zero-width bitfield names no storage and is walked over; any other
+      // bitfield is a member the record cannot take the mode of.
+      if (FD->isBitField()) {
+        if (FD->getBitWidthValue() != 0)
+          return QualType();
+        continue;
+      }
+      if (!AddMember(FD->getType()))
+        return QualType();
+    }
+    if (Field.isNull())
+      return QualType();
+    Ty = Field;
+  }
+  // The member must fill the struct, or the struct keeps BLKmode.
+  if (Ctx.getTypeSize(Ty) != Size)
+    return QualType();
+  if (!Ty->isRealFloatingType() && !Ty->getAs<ComplexType>())
+    return QualType();
+  // Alpha is STRICT_ALIGNMENT, so a record aligned below its would-be mode
+  // stays BLKmode.  `struct { long double x; } __attribute__((packed))' is
+  // aligned to 1 and is passed as an aggregate, not by reference.
+  if (Ctx.getTypeAlignInChars(OrigTy) < Ctx.getTypeAlignInChars(Ty))
+    return QualType();
+  return Ty;
+}
+
 class AlphaTargetCodeGenInfo : public TargetCodeGenInfo {
 public:
   AlphaTargetCodeGenInfo(CodeGenTypes &CGT)
@@ -150,7 +248,35 @@ ABIArgInfo AlphaABIInfo::classifyArgumentType(QualType Ty, bool IsNamed) const {
   // so the arguments after it are unaffected.  It also stops the call being
   // tail-called, which matters -- the epilogue runs before the jump, leaving
   // the copy below the stack pointer by the time the callee reads it.
-  if (isXFloating(getContext(), Ty))
+  // A struct that inherits a floating mode from its single member is passed
+  // the way that mode is passed, so the two by-reference tests below are asked
+  // about the inherited type and not only about Ty itself.  Null for anything
+  // that is not such a struct, in which case ModeTy stays Ty and the two tests
+  // ask exactly what they asked before.
+  QualType ModeTy = Ty;
+  bool InheritedMode = false;
+  if (isAggregateTypeForABI(Ty)) {
+    QualType Inherited = getInheritedScalarType(getContext(), Ty);
+    if (!Inherited.isNull()) {
+      ModeTy = Inherited;
+      InheritedMode = true;
+    }
+  }
+
+  // Pass a non-trivial C++ record the way its special members require, ahead
+  // of the by-reference tests below: those spell "by reference" as byval, and
+  // byval is a copy the call lowering makes bitwise.  A record that is
+  // RAA_Indirect is already by reference in the ABI sense -- the caller passes
+  // the address of the object it constructed, which is also what gcc does,
+  // aggregate_type_p sending it to the integer registers as an address -- so
+  // copying it here would destroy the wrong storage.  Only a trivially
+  // copyable record may take the byval path.
+  if (isAggregateTypeForABI(Ty))
+    if (CGCXXABI::RecordArgABI RAA = getRecordArgABI(Ty, getCXXABI()))
+      return getNaturalAlignIndirect(Ty, getDataLayout().getAllocaAddrSpace(),
+                                     RAA == CGCXXABI::RAA_DirectInMemory);
+
+  if (isXFloating(getContext(), ModeTy))
     return getNaturalAlignIndirect(Ty, getDataLayout().getAllocaAddrSpace(),
                                    /*ByVal=*/true);
 
@@ -168,7 +294,15 @@ ABIArgInfo AlphaABIInfo::classifyArgumentType(QualType Ty, bool IsNamed) const {
   // (shouldSplitComplexVariadicArg), so what reaches this function is two
   // independent floats and the case below is only about a real one.  va_arg
   // reads the pair back the same way; see EmitVAArg.
-  if (!IsNamed && isSFloating(getContext(), Ty) && !Ty->getAs<ComplexType>())
+  //
+  // A struct that inherits SFmode or SCmode from its single member goes by
+  // reference too, and unlike a bare _Complex float it is *not* split: the
+  // split is alpha_split_complex_arg's, which acts on a complex argument and
+  // not on a record that merely has complex mode, so the struct is one address
+  // in one slot where the bare type is two.  shouldSplitComplexVariadicArg
+  // asks about Ty and so already declines to split it.
+  if (!IsNamed && isSFloating(getContext(), ModeTy) &&
+      (InheritedMode || !Ty->getAs<ComplexType>()))
     return getNaturalAlignIndirect(Ty, getDataLayout().getAllocaAddrSpace(),
                                    /*ByVal=*/true);
 
@@ -197,11 +331,6 @@ ABIArgInfo AlphaABIInfo::classifyArgumentType(QualType Ty, bool IsNamed) const {
   }
 
   if (isAggregateTypeForABI(Ty)) {
-    // Pass a non-trivial C++ record the way its special members require.
-    if (CGCXXABI::RecordArgABI RAA = getRecordArgABI(Ty, getCXXABI()))
-      return getNaturalAlignIndirect(Ty, getDataLayout().getAllocaAddrSpace(),
-                                     RAA == CGCXXABI::RAA_DirectInMemory);
-
     uint64_t Size = getContext().getTypeSize(Ty);
     if (Size == 0)
       return ABIArgInfo::getIgnore();
