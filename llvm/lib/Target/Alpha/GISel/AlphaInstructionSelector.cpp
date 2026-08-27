@@ -1429,6 +1429,22 @@ bool AlphaInstructionSelector::selectInstr(MachineInstr &I) const {
     return true;
   }
   case TargetOpcode::G_PTR_ADD: {
+    // An offset that fits in a displacement is an lda, which is one
+    // instruction where materialising the constant and adding it is two.  This
+    // is the same fold the load and store selection does to reach a
+    // displacement, done here for the offsets that never reach a memory
+    // operand: the address of a field taken and passed on, or a pointer walked
+    // by a fixed amount.
+    if (auto Offset = getIConstantVRegSExtVal(I.getOperand(2).getReg(), MRI)) {
+      if (isInt<16>(*Offset)) {
+        emit(I, Alpha::LDA, I.getOperand(0).getReg())
+            .addImm(*Offset)
+            .addUse(I.getOperand(1).getReg());
+        I.eraseFromParent();
+        return true;
+      }
+    }
+
     // A pointer is just a quadword.
     I.setDesc(TII.get(Alpha::ADDQ));
     constrainSelectedInstRegOperands(I, TII, TRI, RBI);
