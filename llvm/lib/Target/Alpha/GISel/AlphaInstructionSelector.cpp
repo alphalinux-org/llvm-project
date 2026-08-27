@@ -65,6 +65,7 @@ private:
   bool selectBrJT(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectGprelAddress(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectAtomic(MachineInstr &I, MachineRegisterInfo &MRI) const;
+  bool selectByteMaskAnd(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectAluImm(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectNarrowArith(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectFieldExtract(MachineInstr &I, MachineRegisterInfo &MRI) const;
@@ -1314,8 +1315,10 @@ bool AlphaInstructionSelector::selectInstr(MachineInstr &I) const {
   }
 
   // Before selectImpl, which matches the register-register and and leaves the
-  // mask to be materialized.
-  if (I.getOpcode() == TargetOpcode::G_AND && selectFieldExtract(I, MRI))
+  // mask to be materialized -- for 0xffffffff that is a constant-pool entry
+  // and a gp-relative load where zapnot is one instruction.
+  if (I.getOpcode() == TargetOpcode::G_AND &&
+      (selectFieldExtract(I, MRI) || selectByteMaskAnd(I, MRI)))
     return true;
 
   // Before selectImpl as well: three of the logical operations take the
@@ -1698,7 +1701,40 @@ bool AlphaInstructionSelector::selectAtomic(MachineInstr &I,
   MIB.setMemRefs(I.memoperands());
 
   I.eraseFromParent();
-  constrainSelectedInstRegOperands(*MIB, TII, TRI, RBI);
+  return true;
+}
+
+// An and whose mask keeps or clears whole bytes is a single zapnot, which
+// takes the byte pattern in its literal field and so needs no constant.  A
+// mask that fits and's own 8-bit literal is left alone: and is a logic
+// operation and zapnot a shift-class one, which on the 21264 is four issue
+// pipes rather than two, on the 21164 either integer pipe rather than E0
+// alone, and on the 21064 a one-cycle result rather than a two-cycle one.
+// 0xff is the only byte-granular mask that is also a literal.
+bool AlphaInstructionSelector::selectByteMaskAnd(
+    MachineInstr &I, MachineRegisterInfo &MRI) const {
+  Register Dst = I.getOperand(0).getReg();
+  if (MRI.getType(Dst) != LLT::scalar(64))
+    return false;
+
+  auto Cst = getIConstantVRegValWithLookThrough(I.getOperand(2).getReg(), MRI);
+  if (!Cst)
+    return false;
+  uint64_t Mask = Cst->Value.getZExtValue();
+  if (Mask <= 0xFF)
+    return false;
+
+  unsigned Keep = 0;
+  for (unsigned B = 0; B != 8; ++B) {
+    uint64_t Byte = (Mask >> (B * 8)) & 0xFF;
+    if (Byte == 0xFF)
+      Keep |= 1u << B;
+    else if (Byte != 0)
+      return false;
+  }
+
+  emit(I, Alpha::ZAPNOTi, Dst).addUse(I.getOperand(1).getReg()).addImm(Keep);
+  I.eraseFromParent();
   return true;
 }
 
@@ -1706,7 +1742,6 @@ bool AlphaInstructionSelector::selectBrJT(MachineInstr &I,
                                           MachineRegisterInfo &MRI) const {
   MachineBasicBlock &MBB = *I.getParent();
   MachineFunction &MF = *MBB.getParent();
-  const DebugLoc &DL = I.getDebugLoc();
 
   Register Table = I.getOperand(0).getReg();
   Register Index = I.getOperand(2).getReg();
@@ -1719,30 +1754,19 @@ bool AlphaInstructionSelector::selectBrJT(MachineInstr &I,
   // The shift-and-add is written as one instruction here rather than left to a
   // combine, because there is no GlobalISel combiner on this target to do it.
   Register EntryAddr = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
-  MachineInstrBuilder Add =
-      BuildMI(MBB, I, DL, TII.get(Alpha::S4ADDQ), EntryAddr)
-          .addUse(Index)
-          .addUse(Table);
-  constrainSelectedInstRegOperands(*Add, TII, TRI, RBI);
+  emit(I, Alpha::S4ADDQ, EntryAddr).addUse(Index).addUse(Table);
 
   Register Offset = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
-  MachineInstrBuilder Ld = BuildMI(MBB, I, DL, TII.get(Alpha::LDL), Offset)
-                               .addUse(EntryAddr)
-                               .addImm(0);
+  MachineInstrBuilder Ld =
+      emit(I, Alpha::LDL, Offset).addUse(EntryAddr).addImm(0);
   Ld.addMemOperand(MF.getMachineMemOperand(MachinePointerInfo::getJumpTable(MF),
                                            MachineMemOperand::MOLoad, 4,
                                            Align(4)));
-  constrainSelectedInstRegOperands(*Ld, TII, TRI, RBI);
 
   Register Target = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
-  MachineInstrBuilder Abs = BuildMI(MBB, I, DL, TII.get(Alpha::ADDQ), Target)
-                                .addUse(Alpha::R29)
-                                .addUse(Offset);
-  constrainSelectedInstRegOperands(*Abs, TII, TRI, RBI);
+  emit(I, Alpha::ADDQ, Target).addUse(Alpha::R29).addUse(Offset);
 
-  MachineInstrBuilder Jmp =
-      BuildMI(MBB, I, DL, TII.get(Alpha::JMP)).addUse(Target);
-  constrainSelectedInstRegOperands(*Jmp, TII, TRI, RBI);
+  emit(I, Alpha::JMP).addUse(Target);
 
   I.eraseFromParent();
   return true;
