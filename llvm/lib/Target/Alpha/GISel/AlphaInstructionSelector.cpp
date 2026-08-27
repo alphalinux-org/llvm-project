@@ -1414,6 +1414,14 @@ bool AlphaInstructionSelector::selectInstr(MachineInstr &I) const {
             ->getSubtarget<AlphaSubtarget>()
             .hasSmallData())
       return false;
+
+    // Nor is a thread-local one.  Its address is not the address of the
+    // template in .tdata but an offset into the running thread's block, which
+    // takes the tlsgd/tlsldm/gottprel/tprel sequences the SelectionDAG path
+    // builds; addressing it as an ordinary global would silently read the
+    // template.
+    if (I.getOperand(1).getGlobal()->isThreadLocal())
+      return false;
     I.getParent()
         ->getParent()
         ->getInfo<AlphaMachineFunctionInfo>()
