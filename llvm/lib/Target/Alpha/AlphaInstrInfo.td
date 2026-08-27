@@ -162,6 +162,18 @@ def u8imm : Operand<i64>;
 // An immediate that fits in the 8-bit operate literal field.
 def immUExt8 : ImmLeaf<i64, [{ return isUInt<8>(Imm); }]>;
 
+// A constant whose *complement* fits the 8-bit literal field.  `x & ~7`,
+// `x | ~7` and `~(x ^ 7)` are one instruction each on Alpha -- bic, ornot and
+// eqv -- but only the complement is small enough to be the literal operand, so
+// the pattern has to recognise the wide constant and hand the instruction the
+// narrow one.
+def immUExt8Not : PatLeaf<(imm), [{
+  return isUInt<8>(~N->getZExtValue());
+}]>;
+def notImm : SDNodeXForm<imm, [{
+  return CurDAG->getTargetConstant(~N->getZExtValue() & 0xFF, SDLoc(N), MVT::i64);
+}]>;
+
 // The 26-bit function code of a PALcode call (call_pal <n>).
 def PalFnAsmOperand : AsmOperandClass {
   let Name = "PalFn";
@@ -2015,6 +2027,19 @@ def : LitPat<int_alpha_maxsw4, MAXSW4i>;
 def : LitPat<int_alpha_maxub8, MAXUB8i>;
 def : LitPat<int_alpha_maxuw4, MAXUW4i>;
 }
+
+//===----------------------------------------------------------------------===//
+// The complement-of-a-literal logical operations.
+//
+// bic, ornot and eqv take the complement of their second operand, so a constant
+// that is huge (`~7` is 0xFFFFFFFFFFFFFFF8) becomes an ordinary 8-bit literal.
+// Without these the constant is built with an `lda` first and the plain and/bis/
+// xor is used, which is one instruction more than gcc emits for the same C.
+//===----------------------------------------------------------------------===//
+
+def : Pat<(and GPRC:$x, immUExt8Not:$c), (BICi   GPRC:$x, (notImm $c))>;
+def : Pat<(or  GPRC:$x, immUExt8Not:$c), (ORNOTi GPRC:$x, (notImm $c))>;
+def : Pat<(xor GPRC:$x, immUExt8Not:$c), (EQVi   GPRC:$x, (notImm $c))>;
 
 // andnot: an alias of bic (and with the complement of the second operand).
 def : InstAlias<"andnot $Ra, $Rb, $Rc", (BIC GPRC:$Rc, GPRC:$Ra, GPRC:$Rb)>;

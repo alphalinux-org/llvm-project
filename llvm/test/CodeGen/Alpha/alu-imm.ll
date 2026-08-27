@@ -62,3 +62,34 @@ define i64 @addhuge(i64 %x) {
   %r = add i64 %x, 70000
   ret i64 %r
 }
+
+; bic, ornot and eqv take the complement of their second operand, so a constant
+; that is far too wide for the literal field -- ~7 is 0xFFFFFFFFFFFFFFF8 -- is
+; an ordinary 8-bit literal once the instruction is chosen for it.  Without
+; this the constant is built with an lda first, which is the whole cost.
+; CHECK-LABEL: bicnot:
+; CHECK-NOT:   lda
+; CHECK:       bic $16, 7, $0
+; CHECK-NEXT:  ret
+define i64 @bicnot(i64 %x) {
+  %r = and i64 %x, -8
+  ret i64 %r
+}
+
+; CHECK-LABEL: ornotimm:
+; CHECK-NOT:   lda
+; CHECK:       ornot $16, 7, $0
+; CHECK-NEXT:  ret
+define i64 @ornotimm(i64 %x) {
+  %r = or i64 %x, -8
+  ret i64 %r
+}
+
+; CHECK-LABEL: eqvimm:
+; CHECK-NOT:   lda
+; CHECK:       eqv $16, 7, $0
+; CHECK-NEXT:  ret
+define i64 @eqvimm(i64 %x) {
+  %r = xor i64 %x, -8
+  ret i64 %r
+}
