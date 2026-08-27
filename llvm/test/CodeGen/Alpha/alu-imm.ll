@@ -93,3 +93,16 @@ define i64 @eqvimm(i64 %x) {
   %r = xor i64 %x, -8
   ret i64 %r
 }
+
+; A longword subtract by a small constant.  The quadword case is an lda with a
+; negative displacement and needs no instruction of its own, but a longword
+; result has to be sign-extended from 32 bits, which lda cannot do and subl
+; does for free.
+; CHECK-LABEL: subli:
+; CHECK-NOT:   lda
+; CHECK:       subl $16, 7, $0
+; CHECK-NEXT:  ret
+define signext i32 @subli(i32 signext %x) {
+  %r = sub i32 %x, 7
+  ret i32 %r
+}

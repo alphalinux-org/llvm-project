@@ -197,6 +197,23 @@ def notImm : SDNodeXForm<imm, [{
   return CurDAG->getTargetConstant(~N->getZExtValue() & 0xFF, SDLoc(N), MVT::i64);
 }]>;
 
+// A negative constant whose magnitude fits the 8-bit literal field.  DAGCombine
+// canonicalizes `x - C' to `x + -C' before selection, so a subtract by a small
+// constant arrives as an add of a large one; subl/subq take it back.
+def immNegUExt8 : PatLeaf<(imm), [{
+  int64_t V = N->getSExtValue();
+  return V < 0 && V >= -255;
+}]>;
+def negImm : SDNodeXForm<imm, [{
+  return CurDAG->getTargetConstant(-N->getSExtValue(), SDLoc(N), MVT::i64);
+}]>;
+
+// A literal small enough that a scaled add cannot carry into it: the low two
+// (or three) bits of `x << 2' (`x << 3') are zero, so DAGCombine may turn the
+// add into an or, and only for these constants are the two the same operation.
+def immUExt2 : ImmLeaf<i64, [{ return isUInt<2>(Imm); }]>;
+def immUExt3 : ImmLeaf<i64, [{ return isUInt<3>(Imm); }]>;
+
 // The 26-bit function code of a PALcode call (call_pal <n>).
 def PalFnAsmOperand : AsmOperandClass {
   let Name = "PalFn";
@@ -2296,6 +2313,51 @@ def : LitPat<int_alpha_maxuw4, MAXUW4i>;
 def : Pat<(and GPRC:$x, immUExt8Not:$c), (BICi   GPRC:$x, (notImm $c))>;
 def : Pat<(or  GPRC:$x, immUExt8Not:$c), (ORNOTi GPRC:$x, (notImm $c))>;
 def : Pat<(xor GPRC:$x, immUExt8Not:$c), (EQVi   GPRC:$x, (notImm $c))>;
+
+//===----------------------------------------------------------------------===//
+// Literal operands for the scaled add/subtract and the longword subtract.
+//
+// An operate instruction takes a literal wherever it takes $Rb, and array
+// address arithmetic reaches these constantly -- `4*i + 7' is one s4addq.  The
+// add form may also arrive as an `or': DAGCombine rewrites the add when it can
+// prove the operands share no bits, which for a scaled left shift means the
+// addend is smaller than the scale, and there the two are the same operation.
+//===----------------------------------------------------------------------===//
+
+def : Pat<(add (shl i64:$Ra, (i64 2)), immUExt8:$lit), (S4ADDQi GPRC:$Ra, immUExt8:$lit)>;
+def : Pat<(add (shl i64:$Ra, (i64 3)), immUExt8:$lit), (S8ADDQi GPRC:$Ra, immUExt8:$lit)>;
+def : Pat<(sub (shl i64:$Ra, (i64 2)), immUExt8:$lit), (S4SUBQi GPRC:$Ra, immUExt8:$lit)>;
+def : Pat<(sub (shl i64:$Ra, (i64 3)), immUExt8:$lit), (S8SUBQi GPRC:$Ra, immUExt8:$lit)>;
+// The subtract arrives as an add of a negative constant, the same
+// canonicalization the longword subtract below has to undo.
+def : Pat<(add (shl i64:$Ra, (i64 2)), immNegUExt8:$c), (S4SUBQi GPRC:$Ra, (negImm $c))>;
+def : Pat<(add (shl i64:$Ra, (i64 3)), immNegUExt8:$c), (S8SUBQi GPRC:$Ra, (negImm $c))>;
+def : Pat<(or  (shl i64:$Ra, (i64 2)), immUExt2:$lit), (S4ADDQi GPRC:$Ra, immUExt2:$lit)>;
+def : Pat<(or  (shl i64:$Ra, (i64 3)), immUExt3:$lit), (S8ADDQi GPRC:$Ra, immUExt3:$lit)>;
+
+def : Pat<(sext_inreg (add (shl i64:$Ra, (i64 2)), immUExt8:$lit), i32),
+          (S4ADDLi GPRC:$Ra, immUExt8:$lit)>;
+def : Pat<(sext_inreg (add (shl i64:$Ra, (i64 3)), immUExt8:$lit), i32),
+          (S8ADDLi GPRC:$Ra, immUExt8:$lit)>;
+def : Pat<(sext_inreg (sub (shl i64:$Ra, (i64 2)), immUExt8:$lit), i32),
+          (S4SUBLi GPRC:$Ra, immUExt8:$lit)>;
+def : Pat<(sext_inreg (sub (shl i64:$Ra, (i64 3)), immUExt8:$lit), i32),
+          (S8SUBLi GPRC:$Ra, immUExt8:$lit)>;
+def : Pat<(sext_inreg (add (shl i64:$Ra, (i64 2)), immNegUExt8:$c), i32),
+          (S4SUBLi GPRC:$Ra, (negImm $c))>;
+def : Pat<(sext_inreg (add (shl i64:$Ra, (i64 3)), immNegUExt8:$c), i32),
+          (S8SUBLi GPRC:$Ra, (negImm $c))>;
+def : Pat<(sext_inreg (or (shl i64:$Ra, (i64 2)), immUExt2:$lit), i32),
+          (S4ADDLi GPRC:$Ra, immUExt2:$lit)>;
+def : Pat<(sext_inreg (or (shl i64:$Ra, (i64 3)), immUExt3:$lit), i32),
+          (S8ADDLi GPRC:$Ra, immUExt3:$lit)>;
+
+// A longword subtract by a small constant.  The quadword case needs no pattern:
+// `x - C' is an `lda' with a negative displacement, which is already one
+// instruction.  The longword case cannot use lda, because the result has to be
+// sign-extended from 32 bits, and subl does both.
+def : Pat<(sext_inreg (add i64:$Ra, immNegUExt8:$c), i32),
+          (SUBLi GPRC:$Ra, (negImm $c))>;
 
 // andnot: an alias of bic (and with the complement of the second operand).
 def : InstAlias<"andnot $Ra, $Rb, $Rc", (BIC GPRC:$Rc, GPRC:$Ra, GPRC:$Rb)>;
