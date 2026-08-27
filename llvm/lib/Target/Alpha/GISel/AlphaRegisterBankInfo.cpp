@@ -14,6 +14,7 @@
 #include "AlphaSubtarget.h"
 #include "MCTargetDesc/AlphaMCTargetDesc.h"
 #include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/CodeGen/GlobalISel/GenericMachineInstrs.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetOpcodes.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
@@ -379,6 +380,19 @@ AlphaRegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
     SmallVector<const ValueMapping *, 4> Ops(
         NumOperands, &Alpha::ValueMappings[Alpha::GPR3OpsIdx]);
     OperandsMapping = getOperandsMapping(Ops);
+    break;
+  }
+  case G_INTRINSIC: {
+    // Only the two the selector answers.  Any other intrinsic is left without
+    // a mapping so that the function goes to the SelectionDAG path, which is
+    // where an unhandled one would end up in any case.
+    Intrinsic::ID ID = cast<GIntrinsic>(MI).getIntrinsicID();
+    if (ID != Intrinsic::returnaddress && ID != Intrinsic::frameaddress)
+      return getInvalidInstructionMapping();
+    // Past the destination the operands are the intrinsic's own number and a
+    // depth, neither of which is a register.
+    OperandsMapping = getOperandsMapping(
+        {&Alpha::ValueMappings[Alpha::GPR3OpsIdx], nullptr, nullptr});
     break;
   }
   // The ordering carries no register.

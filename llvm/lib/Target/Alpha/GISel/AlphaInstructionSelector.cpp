@@ -18,9 +18,11 @@
 #include "AlphaTargetMachine.h"
 #include "MCTargetDesc/AlphaMCTargetDesc.h"
 #include "llvm/CodeGen/GlobalISel/GIMatchTableExecutorImpl.h"
+#include "llvm/CodeGen/GlobalISel/GenericMachineInstrs.h"
 #include "llvm/CodeGen/GlobalISel/InstructionSelector.h"
 #include "llvm/CodeGen/GlobalISel/Utils.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetOpcodes.h"
 #include "llvm/IR/InstrTypes.h"
@@ -64,6 +66,8 @@ private:
   bool selectFConstant(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectBrJT(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectGprelAddress(MachineInstr &I, MachineRegisterInfo &MRI) const;
+  bool selectFrameOrReturnAddress(MachineInstr &I,
+                                  MachineRegisterInfo &MRI) const;
   bool selectAtomic(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectByteMaskAnd(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectAluImm(MachineInstr &I, MachineRegisterInfo &MRI) const;
@@ -1579,6 +1583,8 @@ bool AlphaInstructionSelector::selectInstr(MachineInstr &I) const {
   case TargetOpcode::G_BLOCK_ADDR:
   case TargetOpcode::G_CONSTANT_POOL:
     return selectGprelAddress(I, MRI);
+  case TargetOpcode::G_INTRINSIC:
+    return selectFrameOrReturnAddress(I, MRI);
   case TargetOpcode::G_ATOMICRMW_XCHG:
   case TargetOpcode::G_ATOMICRMW_ADD:
   case TargetOpcode::G_ATOMICRMW_SUB:
@@ -1607,6 +1613,49 @@ bool AlphaInstructionSelector::selectInstr(MachineInstr &I) const {
   default:
     return false;
   }
+}
+
+// llvm.returnaddress and llvm.frameaddress, which the SelectionDAG path answers
+// the same way (see LowerRETURNADDR and LowerFRAMEADDR).  A frame carries no
+// link to the one that called it, so only this function's own is reachable.
+bool AlphaInstructionSelector::selectFrameOrReturnAddress(
+    MachineInstr &I, MachineRegisterInfo &MRI) const {
+  Intrinsic::ID ID = cast<GIntrinsic>(I).getIntrinsicID();
+  if (ID != Intrinsic::returnaddress && ID != Intrinsic::frameaddress)
+    return false;
+
+  MachineFunction &MF = *I.getParent()->getParent();
+  MachineFrameInfo &MFI = MF.getFrameInfo();
+  Register Dst = I.getOperand(0).getReg();
+  uint64_t Depth = I.getOperand(2).getImm();
+
+  // Set where LowerRETURNADDR and LowerFRAMEADDR set it: the return address
+  // unconditionally, the frame address only for the frame that has one.  The
+  // difference has no effect here -- nothing in this target reads either flag
+  // back -- but the two paths answering the same builtin differently is a
+  // difference waiting to matter.
+  if (ID == Intrinsic::returnaddress)
+    MFI.setReturnAddressIsTaken(true);
+
+  if (Depth != 0) {
+    // A deeper frame would need an unwinder; answer zero for it.
+    emit(I, Alpha::BISi, Dst).addUse(Alpha::R31).addImm(0);
+  } else if (ID == Intrinsic::returnaddress) {
+    // The return address arrives in $26; copy its entry value, which has to be
+    // captured in the entry block before anything can clobber it.
+    Register RA = getFunctionLiveInPhysReg(MF, TII, Alpha::R26,
+                                           Alpha::GPRCRegClass, I.getDebugLoc());
+    emit(I, TargetOpcode::COPY, Dst).addUse(RA);
+  } else {
+    // Taking the frame address forces a frame pointer (see hasFPImpl), so this
+    // reads $15 as the prologue set it up, not the value it arrived with.
+    MFI.setFrameAddressIsTaken(true);
+    emit(I, TargetOpcode::COPY, Dst).addUse(TRI.getFrameRegister(MF));
+  }
+
+  I.eraseFromParent();
+  RBI.constrainGenericRegister(Dst, Alpha::GPRCRegClass, MRI);
+  return true;
 }
 
 // The address of something the linker resolves to a fixed distance from the
