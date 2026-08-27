@@ -1,5 +1,10 @@
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu -mcpu=ev6 < %s | FileCheck %s
+; RUN: llc -mtriple=alpha-unknown-linux-gnu -mcpu=ev6 -global-isel \
+; RUN:   -global-isel-abort=1 < %s | FileCheck %s
 ; RUN: llc -mtriple=alpha-unknown-linux-gnu -mcpu=ev6 -filetype=obj < %s \
+; RUN:   | llvm-readobj -r - | FileCheck --check-prefix=RELOC %s
+; RUN: llc -mtriple=alpha-unknown-linux-gnu -mcpu=ev6 -global-isel \
+; RUN:   -global-isel-abort=1 -filetype=obj < %s \
 ; RUN:   | llvm-readobj -r - | FileCheck --check-prefix=RELOC %s
 
 ; A direct tail call carries the same relocations a direct call does, so the

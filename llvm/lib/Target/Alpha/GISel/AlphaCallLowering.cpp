@@ -421,10 +421,11 @@ bool AlphaCallLowering::lowerCall(MachineIRBuilder &MIRBuilder,
   const AlphaSubtarget &STI = MF.getSubtarget<AlphaSubtarget>();
   const DataLayout &DL = F.getDataLayout();
 
-  // Only a direct call to a named function is handled here.  An indirect call
-  // needs the procedure value in $27, which the direct call instruction sets up
-  // itself, and a variadic one needs its own argument rules.
-  if (!Info.Callee.isGlobal() && !Info.Callee.isSymbol())
+  // A direct call names its callee; an indirect one carries it in a register,
+  // which has to reach $27 -- the procedure value the callee reads its own
+  // global pointer from, and which a direct call's own instruction sets up.
+  bool IsIndirect = !Info.Callee.isGlobal() && !Info.Callee.isSymbol();
+  if (IsIndirect && !Info.Callee.isReg())
     return false;
   if (needsFPRegs(STI, Info.OrigArgs) ||
       (Info.OrigRet.Ty && needsFPRegs(STI, {Info.OrigRet})))
@@ -479,7 +480,7 @@ bool AlphaCallLowering::lowerCall(MachineIRBuilder &MIRBuilder,
   // Pick the same call instruction the SelectionDAG path would: a hint
   // relocation only where the linker may not relax the call away, and under
   // -msmall-text a single bsr to a callee the linker resolves itself.
-  unsigned CallOpc = Alpha::JSRd;
+  unsigned CallOpc = IsIndirect ? Alpha::JSR : Alpha::JSRd;
   if (Info.Callee.isGlobal()) {
     const GlobalValue &GV = *Info.Callee.getGlobal();
     if (STI.hasSmallText() && isAlphaDirectlyNameable(GV))
@@ -489,7 +490,10 @@ bool AlphaCallLowering::lowerCall(MachineIRBuilder &MIRBuilder,
   }
 
   auto MIB = MIRBuilder.buildInstrNoInsert(CallOpc);
-  MIB.add(Info.Callee);
+  // JSR takes no operand: it reads $27, which is filled in below once the
+  // arguments are in place.
+  if (!IsIndirect)
+    MIB.add(Info.Callee);
   MIB.addRegMask(
       STI.getRegisterInfo()->getCallPreservedMask(MF, Info.CallConv));
 
@@ -498,6 +502,11 @@ bool AlphaCallLowering::lowerCall(MachineIRBuilder &MIRBuilder,
   if (!determineAndHandleAssignments(ArgHandler, ArgAssigner, OutArgs,
                                      MIRBuilder, Info.CallConv, Info.IsVarArg))
     return false;
+
+  // After the arguments, so that nothing setting them up sees $27 already
+  // live.  $27 is not an argument register, so the two cannot collide.
+  if (IsIndirect)
+    MIRBuilder.buildCopy(Register(Alpha::R27), Info.Callee.getReg());
 
   MIRBuilder.insertInstr(MIB);
 
