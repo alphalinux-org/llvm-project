@@ -751,15 +751,24 @@ def CVTTQn : FP_r<0x16, 0x0af, "cvttq", []>;
 // -mfp-rounding-mode=d (e.g. glibc s_rint.c).
 def CVTTQ_SVID : FP_r<0x16, 0x7ef, "cvttq/svid", []>;
 
-// Register-register conditional moves with no pattern of their own: the low
-// bit tests, which nothing selects, and the two conditions DAG canonicalization
-// rewrites away (setge/setle against zero become setgt/setlt against -1/1), so
-// the compiler never emits them but hand-written assembly and the platform's
-// own libraries are full of them.
-def CMOVLBS : OForm<0x11, 0x14, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
-                    "cmovlbs $Ra, $Rb, $Rc", []>;
-def CMOVLBC : OForm<0x11, 0x16, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
-                    "cmovlbc $Ra, $Rb, $Rc", []>;
+// The low-bit conditional moves: `cmovlbs $Ra, $Rb, $Rc` moves when bit 0 of
+// $Ra is set, cmovlbc when it is clear.  They fold the `and $Ra, 1` that
+// `(x & 1) ? a : b` would otherwise need before an ordinary cmovne/cmoveq,
+// which is a very common idiom -- a tag bit, a parity, a low flag bit.
+class CMOV_lb<bits<7> func, string mnem, CondCode cc>
+    : OForm<0x11, func, (outs GPRC:$Rc), (ins GPRC:$Rfalse, GPRC:$Ra, GPRC:$Rb),
+            mnem # " $Ra, $Rb, $Rc",
+            [(set i64:$Rc, (select (i64 (setcc (and i64:$Ra, 1), 0, cc)),
+                                   i64:$Rb, i64:$Rfalse))]> {
+  let Constraints = "$Rfalse = $Rc";
+}
+def CMOVLBS : CMOV_lb<0x14, "cmovlbs", SETNE>;
+def CMOVLBC : CMOV_lb<0x16, "cmovlbc", SETEQ>;
+
+// Register-register conditional moves with no pattern of their own: the two
+// conditions DAG canonicalization rewrites away (setge/setle against zero
+// become setgt/setlt against -1/1), so the compiler never emits them but
+// hand-written assembly and the platform's own libraries are full of them.
 def CMOVGE : OForm<0x11, 0x46, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
                    "cmovge $Ra, $Rb, $Rc", []>;
 def CMOVLE : OForm<0x11, 0x64, (outs GPRC:$Rc), (ins GPRC:$Ra, GPRC:$Rb),
@@ -1345,6 +1354,12 @@ def : Pat<(and (srl GPRC:$x, byteshift:$s), 0xffff),
 def : Pat<(and (srl GPRC:$x, byteshift:$s), 0xffffffff),
           (EXTLLi GPRC:$x, (bytepos $s))>;
 }
+
+// A select on `x & 1` itself, with no compare against zero, is the same
+// instruction: the condition operand of a select is already a truth value, and
+// `and $Ra, 1` is nonzero exactly when bit 0 is set.
+def : Pat<(select (and i64:$Ra, 1), i64:$t, i64:$f),
+          (CMOVLBS GPRC:$f, GPRC:$Ra, GPRC:$t)>;
 
 // Sign-extend the low 32 bits with `addl $x, $31, $dst`.
 def : Pat<(sext_inreg GPRC:$x, i32), (ADDL GPRC:$x, R31)>;
