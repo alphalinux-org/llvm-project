@@ -9,27 +9,6 @@
 ; The output below is the SelectionDAG lowering, which is what makes the point:
 ; these compile correctly, just not through GlobalISel.
 
-; A jump table dispatch is the gp-relative sequence LowerBR_JT builds.
-; CHECK-LABEL: switch_jt:
-; CHECK:       .LJTI0_0
-; CHECK:       jmp $31, ($0), 0
-define i64 @switch_jt(i64 %x) {
-entry:
-  switch i64 %x, label %d [ i64 0, label %a
-                            i64 1, label %b
-                            i64 2, label %c
-                            i64 3, label %a
-                            i64 4, label %b ]
-a:
-  ret i64 10
-b:
-  ret i64 20
-c:
-  ret i64 30
-d:
-  ret i64 40
-}
-
 ; The address of a block is formed gp-relative like a global's.
 @ba = global ptr null
 ; CHECK-LABEL: blockaddr:

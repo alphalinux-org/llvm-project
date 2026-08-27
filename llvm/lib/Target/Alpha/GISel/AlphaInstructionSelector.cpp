@@ -62,6 +62,7 @@ private:
   bool selectConstant(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectSelect(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectFConstant(MachineInstr &I, MachineRegisterInfo &MRI) const;
+  bool selectBrJT(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectAluImm(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectNarrowArith(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectFieldExtract(MachineInstr &I, MachineRegisterInfo &MRI) const;
@@ -1545,6 +1546,28 @@ bool AlphaInstructionSelector::selectInstr(MachineInstr &I) const {
     I.eraseFromParent();
     return true;
   }
+  case TargetOpcode::G_JUMP_TABLE: {
+    // The table's address is built the way a gp-relative global's is: the
+    // linker resolves both to a fixed distance from the global pointer.
+    MachineFunction &MF = *I.getParent()->getParent();
+    MF.getInfo<AlphaMachineFunctionInfo>()->setUsesGP();
+    Register Hi = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+    MachineInstrBuilder HiMIB =
+        BuildMI(*I.getParent(), I, I.getDebugLoc(), TII.get(Alpha::LDAHg), Hi)
+            .add(I.getOperand(1))
+            .addReg(Alpha::R29);
+    MachineInstrBuilder MIB =
+        BuildMI(*I.getParent(), I, I.getDebugLoc(), TII.get(Alpha::LDAg),
+                I.getOperand(0).getReg())
+            .add(I.getOperand(1))
+            .addReg(Hi);
+    constrainSelectedInstRegOperands(*HiMIB, TII, TRI, RBI);
+    I.eraseFromParent();
+    constrainSelectedInstRegOperands(*MIB, TII, TRI, RBI);
+    return true;
+  }
+  case TargetOpcode::G_BRJT:
+    return selectBrJT(I, MRI);
   case TargetOpcode::G_FRAME_INDEX: {
     // The address of a stack slot: an lda whose displacement the frame index
     // elimination fills in.
@@ -1556,6 +1579,65 @@ bool AlphaInstructionSelector::selectInstr(MachineInstr &I) const {
   default:
     return false;
   }
+}
+
+// A jump table dispatch.  This is LowerBR_JT's sequence, instruction for
+// instruction, and it has to be: the table it reads is written by
+// AlphaAsmPrinter::emitJumpTableEntry, whose entries are 32-bit gp-relative
+// offsets (R_ALPHA_GPREL32) because getJumpTableEncoding says EK_Custom32.
+// A table of absolute addresses would be the simpler thing to jump through
+// and would put a text relocation in every shared library that switched on
+// anything, which is what GCC's PIC switch lowering avoids and why the entry
+// kind is what it is.
+//
+// So: scale the index to a longword and add it to the table address, which is
+// one s4addq; load the entry -- ldl, which sign-extends the longword it reads,
+// so the offset arrives already widened -- add the global pointer back to
+// recover the absolute address, and jump to it.
+bool AlphaInstructionSelector::selectBrJT(MachineInstr &I,
+                                          MachineRegisterInfo &MRI) const {
+  MachineBasicBlock &MBB = *I.getParent();
+  MachineFunction &MF = *MBB.getParent();
+  const DebugLoc &DL = I.getDebugLoc();
+
+  Register Table = I.getOperand(0).getReg();
+  Register Index = I.getOperand(2).getReg();
+
+  // The global pointer is live into the jump, and the entries are meaningless
+  // without it.  G_JUMP_TABLE below sets this too, but a G_BRJT whose table
+  // operand was rematerialised elsewhere must not depend on that having run.
+  MF.getInfo<AlphaMachineFunctionInfo>()->setUsesGP();
+
+  // The shift-and-add is written as one instruction here rather than left to a
+  // combine, because there is no GlobalISel combiner on this target to do it.
+  Register EntryAddr = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  MachineInstrBuilder Add =
+      BuildMI(MBB, I, DL, TII.get(Alpha::S4ADDQ), EntryAddr)
+          .addUse(Index)
+          .addUse(Table);
+  constrainSelectedInstRegOperands(*Add, TII, TRI, RBI);
+
+  Register Offset = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  MachineInstrBuilder Ld = BuildMI(MBB, I, DL, TII.get(Alpha::LDL), Offset)
+                               .addUse(EntryAddr)
+                               .addImm(0);
+  Ld.addMemOperand(MF.getMachineMemOperand(MachinePointerInfo::getJumpTable(MF),
+                                           MachineMemOperand::MOLoad, 4,
+                                           Align(4)));
+  constrainSelectedInstRegOperands(*Ld, TII, TRI, RBI);
+
+  Register Target = MRI.createVirtualRegister(&Alpha::GPRCRegClass);
+  MachineInstrBuilder Abs = BuildMI(MBB, I, DL, TII.get(Alpha::ADDQ), Target)
+                                .addUse(Alpha::R29)
+                                .addUse(Offset);
+  constrainSelectedInstRegOperands(*Abs, TII, TRI, RBI);
+
+  MachineInstrBuilder Jmp =
+      BuildMI(MBB, I, DL, TII.get(Alpha::JMP)).addUse(Target);
+  constrainSelectedInstRegOperands(*Jmp, TII, TRI, RBI);
+
+  I.eraseFromParent();
+  return true;
 }
 
 namespace llvm {

@@ -215,6 +215,13 @@ AlphaRegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
     OperandsMapping =
         getOperandsMapping({&Alpha::ValueMappings[Alpha::GPR3OpsIdx], nullptr});
     break;
+  case G_BRJT:
+    // The table address and the index are both integers; the jump-table index
+    // in between them is not a register.
+    OperandsMapping =
+        getOperandsMapping({&Alpha::ValueMappings[Alpha::GPR3OpsIdx], nullptr,
+                            &Alpha::ValueMappings[Alpha::GPR3OpsIdx]});
+    break;
   case G_ICMP:
     // The predicate operand carries no register.
     OperandsMapping =
@@ -239,6 +246,7 @@ AlphaRegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
   case G_CONSTANT:
   case G_FRAME_INDEX:
   case G_GLOBAL_VALUE:
+  case G_JUMP_TABLE:
     // What these produce comes from an immediate, a frame index or a symbol,
     // none of which is a register and none of which may be given a mapping.
     OperandsMapping =

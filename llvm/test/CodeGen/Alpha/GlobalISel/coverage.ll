@@ -16,13 +16,11 @@
 ; each of those instructions, which is what makes the two prefixes mean
 ; something: without it the BASE checks would pass on ev67 output too.
 ;
-; A switch dense enough to become a jump table is deliberately absent: the
-; dispatch is the gp-relative sequence LowerBR_JT builds and the selector has
-; no counterpart, so G_BRJT is marked unsupported and such a function goes to
-; the SelectionDAG path whole.  The address of a block or of a constant-pool
-; entry is left the same way, for the same reason, as are the atomics, whose
-; retry loop the SelectionDAG path builds with a custom inserter that
-; GlobalISel does not run.  See fallback.ll.
+; A switch dense enough to become a jump table is covered by jump-table.ll
+; rather than here, because the sequence it checks is long enough to be worth a
+; file.  The address of a block or of a constant-pool entry is still left to the
+; SelectionDAG path, as are the atomics, whose retry loop that path builds with
+; a custom inserter GlobalISel does not run.  See fallback.ll.
 
 ; CHECK-LABEL: fence:
 ; CHECK:      mb

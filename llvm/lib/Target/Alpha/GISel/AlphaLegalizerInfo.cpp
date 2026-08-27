@@ -388,12 +388,13 @@ AlphaLegalizerInfo::AlphaLegalizerInfo(const AlphaSubtarget &ST) {
   getActionDefinitionsBuilder({G_BRINDIRECT, G_BLOCK_ADDR, G_CONSTANT_POOL})
       .unsupported();
 
-  // A jump table dispatch is the gp-relative sequence LowerBR_JT builds, which
-  // the selector has no counterpart for.  Say so rather than call it legal:
-  // unsupported hands the function to the SelectionDAG path, where it is
-  // lowered correctly, while claiming legality would reach the selector and
-  // fail there.
-  getActionDefinitionsBuilder({G_BRJT, G_JUMP_TABLE}).unsupported();
+  // A jump table dispatch: the table address is formed gp-relative and the
+  // dispatch reads a 32-bit gp-relative offset out of it, which is what
+  // selectBrJT builds.  The index arrives as a scalar of pointer width --
+  // emitJumpTableHeader zero-extends or truncates it to exactly that -- so
+  // there is one shape to accept and nothing to clamp.
+  getActionDefinitionsBuilder(G_JUMP_TABLE).legalFor({p0});
+  getActionDefinitionsBuilder(G_BRJT).legalFor({{p0, s64}});
 
   // These need a custom lowering that matches what the SelectionDAG path
   // builds, so leave them to it rather than open-code a second version.
