@@ -36,6 +36,46 @@ body:             |
     RET implicit $r0
 ...
 ---
+# A misaligned access is legal, and stays exactly as it is: the rule names one
+# byte as the alignment for every width, so `isCompatible` matches whatever
+# alignment the access carries.  Alpha has no instruction that touches a datum
+# straddling two quadwords, but that is the selector's business -- it expands
+# this to the same ldq_u/extql/extqh sequence AlphaTargetLowering::LowerLOAD
+# builds, and select-misaligned.mir is where that is checked.  What must not
+# happen here is `lower()`, which would split it into byte accesses.
+name:            load_misaligned
+legalized:       false
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $r16
+    ; CHECK-LABEL: name: load_misaligned
+    ; CHECK-NOT: G_PTR_ADD
+    ; CHECK: {{%[0-9]+}}:_(s64) = G_LOAD %{{[0-9]+}}(p0) :: (load (s64), align 1)
+    %0:_(p0) = COPY $r16
+    %1:_(s64) = G_LOAD %0(p0) :: (load (s64), align 1)
+    $r0 = COPY %1(s64)
+    RET implicit $r0
+...
+---
+# The store side of the same thing.  A misaligned store is a read-modify-write
+# of both quadwords the field can fall in; splitting it here into two aligned
+# halves would be correct and much worse, and into byte stores worse again.
+name:            store_misaligned
+legalized:       false
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    liveins: $r16, $r17
+    ; CHECK-LABEL: name: store_misaligned
+    ; CHECK-NOT: G_PTR_ADD
+    ; CHECK: G_STORE %{{[0-9]+}}(s64), %{{[0-9]+}}(p0) :: (store (s64), align 1)
+    %0:_(p0) = COPY $r16
+    %1:_(s64) = COPY $r17
+    G_STORE %1(s64), %0(p0) :: (store (s64), align 1)
+    RET
+...
+---
 # A narrow add is widened to the register width, and the truncations that
 # produced its operands disappear with it: nothing on Alpha adds eight bits.
 name:            add_s8

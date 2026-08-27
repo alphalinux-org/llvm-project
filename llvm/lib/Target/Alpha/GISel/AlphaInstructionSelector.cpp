@@ -49,6 +49,8 @@ public:
 private:
   bool selectImpl(MachineInstr &I, CodeGenCoverage &CoverageInfo) const;
   bool selectLoadStore(MachineInstr &I, MachineRegisterInfo &MRI) const;
+  bool selectMisalignedLoadStore(MachineInstr &I, MachineRegisterInfo &MRI,
+                                 bool IsLoad, bool IsFP, uint64_t Size) const;
   bool selectICmp(MachineInstr &I, MachineRegisterInfo &MRI) const;
   bool selectFCmp(MachineInstr &I, MachineRegisterInfo &MRI) const;
   Register emitFCmpBit(MachineInstr &I, MachineRegisterInfo &MRI,
@@ -289,17 +291,14 @@ bool AlphaInstructionSelector::selectLoadStore(MachineInstr &I,
   const MachineMemOperand &MMO = **I.memoperands_begin();
   uint64_t Size = MMO.getSizeInBits().getValue();
 
-  // An access narrower than its own width is a misaligned one, and Alpha has no
-  // instruction for it: the datum can straddle two quadwords, so it takes the
-  // read-modify-write of both that the SelectionDAG path lowers it to.  Leave
-  // it to that path rather than emit an access that would write only the part
-  // of the value that fell in one quadword.
-  if (MMO.getAlign().value() * 8 < Size)
-    return false;
-
   const AlphaSubtarget &STI =
       I.getParent()->getParent()->getSubtarget<AlphaSubtarget>();
   bool IsFP = RBI.getRegBank(ValReg, MRI, TRI)->getID() == Alpha::FPRRegBankID;
+
+  // An access narrower than its own width is a misaligned one, and Alpha has no
+  // instruction for it: the datum can straddle two quadwords, so it takes both.
+  if (MMO.getAlign().value() * 8 < Size)
+    return selectMisalignedLoadStore(I, MRI, IsLoad, IsFP, Size);
 
   // Which narrow store to use without BWX.  The plain read-modify-write updates
   // one field of a quadword in place and is not atomic against another thread
@@ -444,6 +443,108 @@ bool AlphaInstructionSelector::selectLoadStore(MachineInstr &I,
     MIB.addUse(ValReg);
   MIB.addUse(AddrReg).addImm(Disp);
   MIB.setMemRefs(I.memoperands());
+
+  I.eraseFromParent();
+  return true;
+}
+
+// A misaligned access, expanded the way AlphaTargetLowering::LowerLOAD and
+// LowerSTORE expand it on the SelectionDAG path.  The datum falls in one
+// quadword or straddles two, and which it is is not known until the address is:
+// a load therefore reads both quadwords the datum can fall in, extracts the
+// part of the field each holds, and splices the two halves together, and a
+// store goes to the read-modify-write pseudo, which needs scratch registers and
+// a bundle of its own and so is expanded later rather than written out here.
+//
+// Only two, four and eight bytes have extract instructions of the right width.
+// A one-byte access is aligned by construction and never arrives here.
+bool AlphaInstructionSelector::selectMisalignedLoadStore(
+    MachineInstr &I, MachineRegisterInfo &MRI, bool IsLoad, bool IsFP,
+    uint64_t Size) const {
+  unsigned Bytes = Size / 8;
+  if (Bytes != 2 && Bytes != 4 && Bytes != 8)
+    return false;
+  // The floating registers cannot be extracted from or inserted into; a
+  // misaligned floating access moves through an integer register, in the same
+  // S_floating form the aligned narrow move uses.
+  if (IsFP && Bytes == 2)
+    return false;
+
+  MachineBasicBlock &MBB = *I.getParent();
+  MachineFunction &MF = *MBB.getParent();
+  const AlphaSubtarget &STI = MF.getSubtarget<AlphaSubtarget>();
+  Register ValReg = I.getOperand(0).getReg();
+  Register AddrReg = I.getOperand(1).getReg();
+  const MachineMemOperand &MMO = **I.memoperands_begin();
+
+  auto NewGPR = [&] { return MRI.createVirtualRegister(&Alpha::GPRCRegClass); };
+  if (IsLoad) {
+    // Each ldq_u reads the aligned quadword holding its address, so neither
+    // touches the bytes the load names and both are described as a quadword at
+    // an unknown address -- as the SelectionDAG path describes them.
+    auto Flags = (MMO.getFlags() & MachineMemOperand::MOVolatile) |
+                 MachineMemOperand::MOLoad;
+    auto WideMMO = [&] {
+      return MF.getMachineMemOperand(MachinePointerInfo(), Flags, 8, Align(8));
+    };
+
+    Alpha::FieldOps Ops = Alpha::getFieldOps(Bytes);
+    unsigned ExtL = Ops.ExtL, ExtH = Ops.ExtH;
+
+    Register Lo = NewGPR();
+    MachineInstrBuilder LdLo = emit(I, Alpha::LDQ_U, Lo).addUse(AddrReg);
+    LdLo.setMemRefs({WideMMO()});
+
+    // The last byte of the field, which is in the second quadword exactly when
+    // the field straddles the boundary; when it does not, this reads the same
+    // quadword again and extqh contributes nothing.
+    Register AddrHi = NewGPR();
+    emit(I, Alpha::LDA, AddrHi).addImm(Bytes - 1).addUse(AddrReg);
+    Register Hi = NewGPR();
+    MachineInstrBuilder LdHi = emit(I, Alpha::LDQ_U, Hi).addUse(AddrHi);
+    LdHi.setMemRefs({WideMMO()});
+
+    // Both extracts take the *original* address: it is what says where in the
+    // quadword pair the field begins.
+    Register PartL = NewGPR();
+    emit(I, ExtL, PartL).addUse(Lo).addUse(AddrReg);
+    Register PartH = NewGPR();
+    emit(I, ExtH, PartH).addUse(Hi).addUse(AddrReg);
+
+    Register Whole = IsFP ? NewGPR() : ValReg;
+    emit(I, Alpha::BIS, Whole).addUse(PartL).addUse(PartH);
+
+    if (IsFP)
+      emit(I, Bytes == 4 ? Alpha::MOVi2f_S : Alpha::MOVi2f, ValReg)
+          .addUse(Whole);
+
+    I.eraseFromParent();
+    return true;
+  }
+
+  Register Val = ValReg;
+  MachineInstrBuilder Mov;
+  if (IsFP) {
+    Val = NewGPR();
+    Mov = emit(I, Bytes == 4 ? Alpha::MOVf2i_S : Alpha::MOVf2i, Val)
+              .addUse(ValReg);
+  }
+
+  // With -msafe-partial each spanned quadword is updated by a lock-based loop
+  // instead, so that the read-modify-write is atomic against a thread writing
+  // another field of the same quadword.  The two pseudos differ in that and in
+  // nothing else; the plain one needs four scratch registers, the lock-based
+  // one gets its own inside its inserter.
+  MachineInstrBuilder St;
+  if (STI.hasSafePartial()) {
+    St = emit(I, Alpha::SAFE_USTORE);
+  } else {
+    St = emit(I, Alpha::RMW_USTORE);
+    for (unsigned N = 0; N != 4; ++N)
+      St.addDef(NewGPR(), RegState::Dead);
+  }
+  St.addUse(Val).addUse(AddrReg).addImm(Bytes);
+  St.setMemRefs(I.memoperands());
 
   I.eraseFromParent();
   return true;

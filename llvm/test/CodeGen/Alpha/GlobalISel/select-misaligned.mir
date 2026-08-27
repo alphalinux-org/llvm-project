@@ -1,24 +1,24 @@
 # RUN: llc -mtriple=alpha-unknown-linux-gnu -run-pass=instruction-select \
-# RUN:   -global-isel-abort=0 -verify-machineinstrs %s -o - | FileCheck %s
+# RUN:   -global-isel-abort=1 -verify-machineinstrs %s -o - | FileCheck %s
+# RUN: llc -mtriple=alpha-unknown-linux-gnu -mattr=+safe-partial \
+# RUN:   -run-pass=instruction-select -global-isel-abort=1 \
+# RUN:   -verify-machineinstrs %s -o - | FileCheck %s --check-prefix=SAFE
 
-# An under-aligned quadword access must not reach a selected ldq or stq.
-# Alpha does not fault on one: it ignores the low address bits and touches the
-# wrong bytes, so a wrong answer is the failure mode, not a signal.
-# KNOWN-ISSUES.md records the shape of the bug that lets one through.
+# An under-aligned access must not reach a selected ldq or stq.  Alpha does not
+# fault on one: it ignores the low address bits and touches the wrong bytes, so
+# a wrong answer is the failure mode, not a signal.
 #
-# This asks the question of the selection pass alone, which is where the two
-# refusals that exist can be told apart.  The refusal that fires here is not
-# AlphaInstructionSelector::selectLoadStore's own alignment check: it is
-# InstructionSelect's legality check, which asks AlphaLegalizerInfo directly
-# and reports "instruction is not legal" before the selector is called at all.
-# The selector's check is never reached, here or in a whole-pipeline run --
-# and it could not help if it were, because select() calls selectImpl() before
-# the switch that reaches selectLoadStore, so an imported pattern matching
-# G_LOAD would win first.  The legalizer's AlignInBits is the whole defence,
-# and this test is the assertion that it is still standing where it counts.
+# The legalizer declares these legal -- deliberately, because saying otherwise
+# handed the whole function to the SelectionDAG path, and a load from a packed
+# struct member was enough to do it -- so the selector is the only thing
+# standing between an align-1 quadword access and an ldq.  This asks the
+# question of the selection pass alone, where nothing else can answer it: an
+# end-to-end run would produce plausible output either way, since the
+# SelectionDAG path builds the same sequence.
 #
-# Both under-aligned functions must fail selection; with -global-isel-abort=0
-# that is recorded as failedISel with the generic instruction left in place.
+# -global-isel-abort=1 is part of the question.  Without it a refusal here is
+# recorded as failedISel and the function falls back, which is exactly the
+# state this expansion exists to end.
 
 ---
 name:            load_underaligned
@@ -35,9 +35,19 @@ body:             |
   bb.1:
     liveins: $r16
 
+    ; Both extracts take the original address, which is what says where in the
+    ; quadword pair the field begins; only the second ldq_u takes the address
+    ; of the field's last byte, which is in the second quadword exactly when
+    ; the field straddles the boundary.
     ; CHECK-LABEL: name: load_underaligned
-    ; CHECK: failedISel: true
-    ; CHECK: G_LOAD
+    ; CHECK-NOT: failedISel: true
+    ; CHECK: %[[LO:[0-9]+]]:gprc = LDQ_U %[[P:[0-9]+]]
+    ; CHECK: %[[HIP:[0-9]+]]:gprc = LDA 7, %[[P]]
+    ; CHECK: %[[HI:[0-9]+]]:gprc = LDQ_U %[[HIP]]
+    ; CHECK: %[[EL:[0-9]+]]:gprc = EXTQL %[[LO]], %[[P]]
+    ; CHECK: %[[EH:[0-9]+]]:gprc = EXTQH %[[HI]], %[[P]]
+    ; CHECK: BIS %[[EL]], %[[EH]]
+    ; CHECK-NOT: LDQ %
     %0:gpr(p0) = COPY $r16
     %1:gpr(s64) = G_LOAD %0(p0) :: (load (s64), align 1)
     $r0 = COPY %1(s64)
@@ -59,9 +69,18 @@ body:             |
   bb.1:
     liveins: $r16, $r17
 
+    ; The store is one pseudo, expanded later: it needs four scratch registers,
+    ; and it has to stay indivisible until it is expanded, because two such
+    ; stores can fall in one quadword and interleaving one's reads with the
+    ; other's write-backs loses the field written first.  With -msafe-partial
+    ; it is the lock-based form, which finds its own scratch registers inside
+    ; its inserter.
     ; CHECK-LABEL: name: store_underaligned
-    ; CHECK: failedISel: true
-    ; CHECK: G_STORE
+    ; CHECK-NOT: failedISel: true
+    ; CHECK: dead early-clobber %{{[0-9]+}}:gprc, dead early-clobber %{{[0-9]+}}:gprc, dead early-clobber %{{[0-9]+}}:gprc, dead early-clobber %{{[0-9]+}}:gprc = RMW_USTORE %{{[0-9]+}}, %{{[0-9]+}}, 8 :: (store (s64), align 1)
+    ; CHECK-NOT: STQ %
+    ; SAFE-LABEL: name: store_underaligned
+    ; SAFE: SAFE_USTORE %{{[0-9]+}}, %{{[0-9]+}}, 8 :: (store (s64), align 1)
     %0:gpr(p0) = COPY $r16
     %1:gpr(s64) = COPY $r17
     G_STORE %1(s64), %0(p0) :: (store (s64), align 1)
@@ -82,13 +101,13 @@ body:             |
   bb.1:
     liveins: $r16
 
-    ; The accept side.  A refusal that refuses everything proves nothing -- the
-    ; round-11 verifier that rejected every function with two divisions passed
-    ; its reject-side tests too -- so the naturally aligned form of the same
-    ; load has to select.
+    ; The accept side, and the one that says the expansion above is reached by
+    ; the alignment and not by the opcode: a naturally aligned load of the same
+    ; width is a plain ldq.
     ; CHECK-LABEL: name: load_aligned
     ; CHECK-NOT: failedISel: true
     ; CHECK: LDQ
+    ; CHECK-NOT: LDQ_U
     %0:gpr(p0) = COPY $r16
     %1:gpr(s64) = G_LOAD %0(p0) :: (load (s64))
     $r0 = COPY %1(s64)

@@ -79,31 +79,28 @@ AlphaLegalizerInfo::AlphaLegalizerInfo(const AlphaSubtarget &ST) {
       // general register and had to reach $f0 through the stack.
       //
       // The fourth field is the alignment, in bits, at or above which the
-      // access is legal, and it must be the natural one.  Naming 8 -- one byte
-      // -- would declare a quadword load from a one-byte-aligned address legal,
-      // because `isCompatible` accepts any alignment at or above what the rule
-      // names.  Alpha has no such access: the datum can straddle two quadwords,
-      // and the SelectionDAG path lowers it to the ldq_u/extql/extqh pair
-      // `LowerLOAD` builds, or for a store to the `USTORE` pseudo and its
-      // custom inserter.  GlobalISel runs neither.
+      // access is legal, and every entry names one byte.  `isCompatible`
+      // accepts any alignment at or above what the rule names, so this declares
+      // the misaligned forms legal too -- deliberately.  Alpha has no
+      // misaligned access, and the datum can straddle two quadwords, but that
+      // is a matter for the selector, which expands one to the same
+      // ldq_u/extql/extqh sequence `AlphaTargetLowering::LowerLOAD` builds, or
+      // for a store to the read-modify-write pseudo `LowerSTORE` builds.  The
+      // alternative, saying `unsupported` and handing the function to the
+      // SelectionDAG path, cost the fallback more than half of every function
+      // this target failed to build under `-global-isel-abort=1`: a load from a
+      // packed struct member is enough to trigger it.
+      //
+      // Two, four and eight bytes are what the extract instructions cover.  A
+      // width that is none of those cannot arrive with a natural alignment to
+      // fall short of -- it is not a power of two -- so it never matches here,
+      // and `lower()` below splits it into accesses that do.
       .legalForTypesWithMemDesc({{s64, p0, s8, 8},
-                                 {s64, p0, s16, 16},
-                                 {s64, p0, s32, 32},
-                                 {s64, p0, s64, 64},
-                                 {s32, p0, s32, 32},
-                                 {p0, p0, s64, 64}})
-      // What is left is a misaligned access, and it goes to the SelectionDAG
-      // path whole rather than to `.lower()`, which would split it into byte
-      // accesses and is much worse than the two-instruction sequence that path
-      // already emits.  This is the same choice, for the same reason, as the
-      // atomics and the jump tables in this file: say `unsupported` and hand
-      // the function over, rather than claim a legality the selector cannot
-      // honour.
-      .unsupportedIf([](const LegalityQuery &Q) {
-        return !Q.MMODescrs.empty() &&
-               Q.MMODescrs[0].AlignInBits <
-                   Q.MMODescrs[0].MemoryTy.getSizeInBits();
-      })
+                                 {s64, p0, s16, 8},
+                                 {s64, p0, s32, 8},
+                                 {s64, p0, s64, 8},
+                                 {s32, p0, s32, 8},
+                                 {p0, p0, s64, 8}})
       .clampScalar(0, s64, s64)
       .lower();
 
