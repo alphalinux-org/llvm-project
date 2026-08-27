@@ -175,10 +175,15 @@ class PalForm<bits<26> func, dag outs, dag ins, string asmstr,
   let Inst{25-0} = func;
 }
 
-// PALcode call whose 26-bit function code is an operand (call_pal <n>).
-class PalCallForm<dag outs, dag ins, string asmstr, list<dag> pattern>
-    : AlphaInst<outs, ins, asmstr, pattern> {
+// PALcode call whose 26-bit function code is an operand (call_pal <n>).  The
+// opcode is a parameter because the five PALmode-only primary opcodes have the
+// same shape: everything below bit 26 is a function code the hardware's PALcode
+// interprets.
+class PalCallFormOp<bits<6> opcode, dag outs, dag ins, string asmstr,
+                    list<dag> pattern> : AlphaInst<outs, ins, asmstr, pattern> {
   bits<26> func;
-  let Opcode = 0x00;
+  let Opcode = opcode;
   let Inst{25-0} = func;
 }
+class PalCallForm<dag outs, dag ins, string asmstr, list<dag> pattern>
+    : PalCallFormOp<0x00, outs, ins, asmstr, pattern>;

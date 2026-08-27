@@ -1071,6 +1071,24 @@ def : PalAlias<"rduniq",  0x009e>;
 def : PalAlias<"wruniq",  0x009f>;
 def : PalAlias<"gentrap", 0x00aa>;
 
+// The five PALmode-only primary opcodes.  A processor executing in PALmode
+// interprets the whole 26-bit remainder of the word itself -- what a given
+// implementation does with it is PALcode's business and not the
+// architecture's -- so there is one mnemonic per opcode and the operand is the
+// raw function code, which is how GNU as spells them too.  None can execute
+// outside PALmode and this is a user-mode Linux target, so they are
+// assembler-only: they exist so that a word in this space disassembles instead
+// of coming back unknown, and so that hand-written PALcode assembles.
+class PalModeOp<bits<6> opcode, string mnem>
+    : PalCallFormOp<opcode, (outs), (ins palfn:$func), mnem # " $func", []>;
+let hasSideEffects = 1 in {
+def PAL19 : PalModeOp<0x19, "pal19">;
+def PAL1B : PalModeOp<0x1b, "pal1b">;
+def PAL1D : PalModeOp<0x1d, "pal1d">;
+def PAL1E : PalModeOp<0x1e, "pal1e">;
+def PAL1F : PalModeOp<0x1f, "pal1f">;
+}
+
 // Thread-pointer-relative address parts: ldah !tprelhi / lda !tprello, formed
 // against the thread pointer instead of the global pointer.
 let hasSideEffects = 0, isCodeGenOnly = 1 in {

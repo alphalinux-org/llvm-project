@@ -48,3 +48,11 @@
 
 # CHECK: rpcc $2
 0x00 0xc0 0x5f 0x60
+
+# The PALmode-only opcodes: the mnemonic is the opcode and the rest of the word
+# is a function code only PALcode interprets.
+# CHECK: pal19 4660
+0x34 0x12 0x00 0x64
+
+# CHECK: pal1f 4
+0x04 0x00 0x00 0x7c
