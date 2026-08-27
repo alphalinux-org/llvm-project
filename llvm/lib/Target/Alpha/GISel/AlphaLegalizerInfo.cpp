@@ -44,11 +44,20 @@ AlphaLegalizerInfo::AlphaLegalizerInfo(const AlphaSubtarget &ST) {
         return HasNoFPRegs;
       };
 
+  // There are no vector registers and no vector instructions, so a vector is
+  // taken apart into its elements and the operation is done once per element.
+  // That is what the SelectionDAG path does with the same input; the point of
+  // saying so here is that without a rule the legalizer gave up and handed the
+  // whole function to that path instead.  .scalarize has to come before the
+  // scalar sizing actions, which ask a type for its bit width and would see a
+  // vector's total width instead of an element's.
+
   // A register is a quadword and the 32-bit operations sign-extend their
   // result, so a narrower integer is kept widened to one rather than given
   // operations of its own.
   getActionDefinitionsBuilder({G_ADD, G_SUB, G_MUL, G_AND, G_OR, G_XOR})
       .legalFor({s64})
+      .scalarize(0)
       .widenScalarToNextPow2(0)
       .clampScalar(0, s64, s64);
 
@@ -78,6 +87,7 @@ AlphaLegalizerInfo::AlphaLegalizerInfo(const AlphaSubtarget &ST) {
         const unsigned Bits = Query.Types[0].getSizeInBits();
         return Bits > 64 && Bits % 64 != 0;
       })
+      .scalarize(0)
       .clampScalar(0, s64, s64)
       .clampScalar(1, s64, s64);
 
@@ -122,6 +132,7 @@ AlphaLegalizerInfo::AlphaLegalizerInfo(const AlphaSubtarget &ST) {
                                  {s64, p0, s64, 8},
                                  {s32, p0, s32, 8},
                                  {p0, p0, s64, 8}})
+      .scalarize(0)
       .clampScalar(0, s64, s64)
       .lower();
 
@@ -193,6 +204,8 @@ AlphaLegalizerInfo::AlphaLegalizerInfo(const AlphaSubtarget &ST) {
   // whose `and $reg, 1, $reg' is dead by construction.
   getActionDefinitionsBuilder(G_ICMP)
       .legalFor({{s64, s64}, {s64, p0}})
+      .scalarize(1)
+      .scalarize(0)
       .clampScalar(0, s64, s64)
       .clampScalar(1, s64, s64);
 
@@ -206,13 +219,16 @@ AlphaLegalizerInfo::AlphaLegalizerInfo(const AlphaSubtarget &ST) {
 
   getActionDefinitionsBuilder({G_FADD, G_FSUB, G_FMUL, G_FDIV})
       .unsupportedIf(NoFPRegs)
-      .legalFor({s32, s64});
+      .legalFor({s32, s64})
+      .scalarize(0);
 
   // A floating compare leaves its answer in an integer register, the way an
   // integer compare does.
   getActionDefinitionsBuilder(G_FCMP)
       .unsupportedIf(NoFPRegs)
       .legalFor({{s64, s32}, {s64, s64}})
+      .scalarize(1)
+      .scalarize(0)
       .clampScalar(0, s64, s64);
 
   getActionDefinitionsBuilder(G_FCONSTANT)
@@ -263,6 +279,8 @@ AlphaLegalizerInfo::AlphaLegalizerInfo(const AlphaSubtarget &ST) {
   // thing the SelectionDAG path relies on.
   getActionDefinitionsBuilder(G_SELECT)
       .legalFor({{s32, s64}, {s64, s64}, {p0, s64}})
+      .scalarize(1)
+      .scalarize(0)
       .clampScalar(0, s32, s64)
       .widenScalarToNextPow2(0, 32)
       .clampScalar(1, s64, s64);
@@ -299,7 +317,10 @@ AlphaLegalizerInfo::AlphaLegalizerInfo(const AlphaSubtarget &ST) {
   // legal for a selector that has no case for it.
   getActionDefinitionsBuilder(G_BITCAST).legalFor({{s64, s64}}).unsupported();
 
-  // Alpha is scalar-only, so these only ever split or join a wide integer.
+  // These only ever split or join a wide integer.  Scalarizing a vector also
+  // builds an unmerge of one, but the artifact combiner pairs that with the
+  // build_vector or the load it came from and both disappear before the rules
+  // are consulted.
   for (unsigned Op : {G_MERGE_VALUES, G_UNMERGE_VALUES}) {
     unsigned BigTy = Op == G_MERGE_VALUES ? 0 : 1;
     unsigned LitTy = Op == G_MERGE_VALUES ? 1 : 0;
@@ -311,6 +332,30 @@ AlphaLegalizerInfo::AlphaLegalizerInfo(const AlphaSubtarget &ST) {
         .lower();
   }
   getActionDefinitionsBuilder({G_EXTRACT, G_INSERT}).lower();
+
+  // Reading or writing one element of a vector that is already in pieces is
+  // choosing among those pieces, which is what the lowering does when the index
+  // is a constant.  An index that is not lands the vector in a stack slot and
+  // computes the address, since a register cannot be selected at run time.
+  getActionDefinitionsBuilder({G_EXTRACT_VECTOR_ELT, G_INSERT_VECTOR_ELT})
+      .lower();
+  // A shuffle with the pieces to hand is a permutation of them, so the lowering
+  // costs nothing beyond the extracts it builds.
+  getActionDefinitionsBuilder(G_SHUFFLE_VECTOR).lower();
+  // Assembling a vector is the one thing that cannot survive scalarization: if
+  // an element is still needed as a vector afterwards there is nowhere to put
+  // it.  So report it rather than mislower it, and do not ask to scalarize
+  // first: scalarize(0) is fewerElementsIf with a scalar narrow type, and for
+  // these two opcodes the FewerElements action is fewerElementsVectorMerge,
+  // whose first line asserts that the narrow type is a vector.  The rule could
+  // therefore never fire -- it aborted the compiler under assertions and ran
+  // past the precondition without them -- and it was reachable: a vector
+  // argument arrives one element per register, is assembled with
+  // G_BUILD_VECTOR <N x s64> and truncated, and when its only use is a G_ZEXT
+  // or G_SEXT the artifact combiner has no trunc to fold and the build_vector
+  // survives.  Whatever the scalarize was meant to dissolve now reports a
+  // fallback instead, which is what unsupported() promises.
+  getActionDefinitionsBuilder({G_BUILD_VECTOR, G_CONCAT_VECTORS}).unsupported();
 
   // G_SEXT_INREG is deliberately left without a rule.  Nothing produces it for
   // this target today, and giving it one enables a combine that rewrites the
@@ -325,7 +370,8 @@ AlphaLegalizerInfo::AlphaLegalizerInfo(const AlphaSubtarget &ST) {
   // instructions rather than the mask-and-or lowering would give.
   getActionDefinitionsBuilder({G_FNEG, G_FABS})
       .unsupportedIf(NoFPRegs)
-      .legalFor({s32, s64});
+      .legalFor({s32, s64})
+      .scalarize(0);
   // cpys takes the sign from one register and the rest from another, so both
   // operands are named.
   getActionDefinitionsBuilder(G_FCOPYSIGN)
