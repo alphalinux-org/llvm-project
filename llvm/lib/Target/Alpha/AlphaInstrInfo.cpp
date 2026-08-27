@@ -19,6 +19,7 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Module.h"
 #include "llvm/MC/MCAsmInfo.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Target/TargetMachine.h"
 
@@ -547,6 +548,40 @@ bool AlphaInstrInfo::shouldOutlineFromFunctionByDefault(
   return MF.getFunction().hasMinSize();
 }
 
+// The outlined call is a bsr, whose displacement reaches +/-4 MiB.  Nothing
+// relaxes it -- BranchRelaxation runs in addPreEmitPass and the outliner runs
+// after that -- so a module whose text approaches that size can produce a call
+// that does not reach.  That is an assembler error rather than a wrong answer
+// (AlphaAsmBackend reports "branch target out of range"), but failing to
+// assemble is not an acceptable outcome for a size optimization, so stop
+// outlining before it can happen.  The default leaves a megabyte of margin for
+// what the estimate below cannot see.
+static cl::opt<uint64_t> OutlinerMaxTextSize(
+    "alpha-outliner-max-text-size", cl::Hidden, cl::init(3 << 20),
+    cl::desc("Do not outline once the module's text is estimated to exceed "
+             "this many bytes, since the outlined call is a bsr"));
+
+// Add up what the functions already through codegen will emit.  Inline
+// assembly is guessed at rather than measured, which is the one thing that can
+// make this an underestimate, and is why the limit is not the hardware's.
+uint64_t
+AlphaInstrInfo::getModuleTextSizeEstimate(const MachineModuleInfo &MMI) const {
+  const Module &M = *MMI.getModule();
+  if (TextSizeModule == &M)
+    return TextSizeEstimate;
+
+  uint64_t Size = 0;
+  for (const Function &F : M)
+    if (MachineFunction *MF = MMI.getMachineFunction(F))
+      for (const MachineBasicBlock &MBB : *MF)
+        for (const MachineInstr &MI : MBB)
+          Size += getInstSizeInBytes(MI);
+
+  TextSizeModule = &M;
+  TextSizeEstimate = Size;
+  return Size;
+}
+
 bool AlphaInstrInfo::isFunctionSafeToOutlineFrom(
     MachineFunction &MF, bool OutlineFromLinkOnceODRs) const {
   const Function &F = MF.getFunction();
@@ -565,6 +600,9 @@ AlphaInstrInfo::getOutliningCandidateInfo(
     const MachineModuleInfo &MMI,
     std::vector<outliner::Candidate> &RepeatedSequenceLocs,
     unsigned MinRepeats) const {
+  if (getModuleTextSizeEstimate(MMI) > OutlinerMaxTextSize)
+    return std::nullopt;
+
   const TargetRegisterInfo &TRI =
       *RepeatedSequenceLocs[0].getMF()->getSubtarget().getRegisterInfo();
 

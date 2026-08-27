@@ -35,6 +35,15 @@ void addNarrowedMemOperands(MachineInstrBuilder MIB, const MachineInstr &MI,
 class AlphaInstrInfo : public AlphaGenInstrInfo {
   const AlphaRegisterInfo RI;
 
+  // An estimate of the module's text size, and the module it was taken from.
+  // The outliner asks for it once per candidate and the answer cannot change
+  // while it runs, so it is computed on the first ask and kept; a
+  // TargetMachine, and so an AlphaInstrInfo, handles one module.
+  mutable const Module *TextSizeModule = nullptr;
+  mutable uint64_t TextSizeEstimate = 0;
+
+  uint64_t getModuleTextSizeEstimate(const MachineModuleInfo &MMI) const;
+
 public:
   explicit AlphaInstrInfo(const AlphaSubtarget &STI);
 
