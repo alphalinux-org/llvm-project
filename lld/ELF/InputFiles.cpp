@@ -586,6 +586,35 @@ template <class ELFT> void ObjFile<ELFT>::parse(bool ignoreComdats) {
   for (size_t i = 0; i != size; ++i) {
     const Elf_Shdr &sec = objSections[i];
 
+    // .gnu.linkonce.<kind>.<name> is what GNU ld used for one-only sections
+    // before section groups existed: the first copy is kept and every later one
+    // is discarded, keyed on the whole section name rather than on a group
+    // signature. It is obsolete but still emitted -- glibc's Alpha division
+    // helpers put __divbyzero in .gnu.linkonce.t.divbyzero, so without this a
+    // static link picks up one copy from each of the eight div/rem members of
+    // libc.a and reports a duplicate symbol. The name lookup is guarded by a
+    // prefix test on the string table so that the common case pays only a
+    // compare of the first character.
+    //
+    // A member of a section group is not one of these, whatever it is called:
+    // the group already says which copies go together, and discarding one
+    // member by name would split the group and leave the rest of it referring
+    // to a section that is gone. bfd tests SEC_LINK_ONCE the same way, and
+    // producers do pair the two -- gcc's default_unique_section emits
+    // .gnu.linkonce.<kind>.<name> names for -ffunction-sections when the
+    // assembler has no comdat groups, and an assembler that does have them
+    // wraps the result in one.
+    if (LLVM_UNLIKELY(
+            shstrtab.substr(sec.sh_name).starts_with(".gnu.linkonce.")) &&
+        !(sec.sh_flags & SHF_GROUP) && !ignoreComdats) {
+      StringRef name = check(obj.getSectionName(sec, shstrtab));
+      if (!ctx.symtab->comdatGroups.try_emplace(CachedHashStringRef(name), this)
+               .second) {
+        sections[i] = &InputSection::discarded;
+        continue;
+      }
+    }
+
     if (LLVM_LIKELY(sec.sh_type == SHT_PROGBITS))
       continue;
     if (LLVM_LIKELY(sec.sh_type == SHT_GROUP)) {
@@ -878,6 +907,29 @@ void ObjFile<ELFT>::initializeSections(bool ignoreComdats,
     }
   }
 
+  // A SHF_LINK_ORDER section whose linked-to section is already discarded
+  // (comdat, SHF_EXCLUDE) is discarded too. Do this before the loop below,
+  // which creates relocation sections and would otherwise create one for a
+  // section discarded a few iterations later. Repeat until a fixed point so
+  // that a chain of SHF_LINK_ORDER sections is handled regardless of section
+  // order. An sh_link that is out of range or does not designate an input
+  // section is diagnosed by the loop below.
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    for (size_t i = 0; i != size; ++i) {
+      const Elf_Shdr &sec = objSections[i];
+      if (!this->sections[i] || this->sections[i] == &InputSection::discarded ||
+          !sec.sh_link || !(sec.sh_flags & SHF_LINK_ORDER) ||
+          sec.sh_link >= size)
+        continue;
+      if (this->sections[sec.sh_link] == &InputSection::discarded) {
+        this->sections[i] = &InputSection::discarded;
+        changed = true;
+      }
+    }
+  }
+
   // We have a second loop. It is used to:
   // 1) handle SHF_LINK_ORDER sections.
   // 2) create relocation sections. In some cases the section header index of a
@@ -948,8 +1000,9 @@ void ObjFile<ELFT>::initializeSections(bool ignoreComdats,
       continue;
     }
 
-    // A SHF_LINK_ORDER section is discarded if its linked-to section is
-    // discarded.
+    // Record the dependency so that the section is discarded along with its
+    // linked-to section if that is discarded later by /DISCARD/ or
+    // --gc-sections.
     InputSection *isec = cast<InputSection>(this->sections[i]);
     linkSec->dependentSections.push_back(isec);
     if (!isa<InputSection>(linkSec))
