@@ -45,6 +45,22 @@ def : ProcessorModel<"ev67",    Alpha21264Model,
                      [FeatureBWX, FeatureMVI, FeatureFIX, FeatureCIX,
                       FeaturePrefetch, FeaturePreciseArithTraps]>;
 
+// GCC's alpha_cpu_table also spells each of these as the chip's part number,
+// and those spellings turn up in real build systems (`-mcpu=21264').  They are
+// the same processors, so they share the model and the feature set; 21164PC is
+// listed twice because GCC accepts both cases of it and no others.
+def : ProcessorModel<"21064",   Alpha21064Model, []>;
+def : ProcessorModel<"21164",   Alpha21164Model, []>;
+def : ProcessorModel<"21164a",  Alpha21164Model, [FeatureBWX]>;
+def : ProcessorModel<"21164pc", Alpha21164Model, [FeatureBWX, FeatureMVI]>;
+def : ProcessorModel<"21164PC", Alpha21164Model, [FeatureBWX, FeatureMVI]>;
+def : ProcessorModel<"21264",   Alpha21264Model,
+                     [FeatureBWX, FeatureMVI, FeatureFIX, FeaturePrefetch,
+                      FeaturePreciseArithTraps]>;
+def : ProcessorModel<"21264a",  Alpha21264Model,
+                     [FeatureBWX, FeatureMVI, FeatureFIX, FeatureCIX,
+                      FeaturePrefetch, FeaturePreciseArithTraps]>;
+
 //===----------------------------------------------------------------------===//
 // Target declaration.
 //===----------------------------------------------------------------------===//
