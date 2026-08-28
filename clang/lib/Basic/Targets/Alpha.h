@@ -14,6 +14,7 @@
 #define LLVM_CLANG_LIB_BASIC_TARGETS_ALPHA_H
 
 #include "clang/Basic/TargetInfo.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/TargetParser/Triple.h"
 
@@ -85,13 +86,14 @@ public:
                  StringRef CPU,
                  const std::vector<std::string> &FeaturesVec) const override {
     bool BWX = false, MVI = false, FIX = false, CIX = false;
-    if (CPU == "ev56") {
+    StringRef Chip = canonicalizeCPUName(CPU);
+    if (Chip == "ev56") {
       BWX = true;
-    } else if (CPU == "pca56") {
+    } else if (Chip == "pca56") {
       BWX = MVI = true;
-    } else if (CPU == "ev6") {
+    } else if (Chip == "ev6") {
       BWX = MVI = FIX = true;
-    } else if (CPU == "ev67") {
+    } else if (Chip == "ev67") {
       BWX = MVI = FIX = CIX = true;
     }
     if (BWX)
@@ -189,20 +191,55 @@ public:
 
   std::string_view getClobbers() const override { return ""; }
 
+  // The part number a build system may have passed and the EV name naming the
+  // same chip are the same processor, so answer every question about a
+  // processor -- which extensions it has, which family macro it defines --
+  // about the EV name.  Everything else is left alone, including "generic" and
+  // an invalid name, which setCPU reports on separately.
+  static StringRef canonicalizeCPUName(StringRef Name) {
+    return llvm::StringSwitch<StringRef>(Name)
+        .Case("21064", "ev4")
+        .Case("21164", "ev5")
+        .Case("21164a", "ev56")
+        .Case("21164pc", "pca56")
+        .Case("21164PC", "pca56")
+        .Case("21264", "ev6")
+        .Case("21264a", "ev67")
+        .Default(Name);
+  }
+
+  static ArrayRef<const char *> getValidCPUNames() {
+    static const char *const Names[] = {
+        "generic", "ev4",    "ev45",     "21064",   "ev5",   "21164",
+        "ev56",    "21164a", "pca56",    "21164pc", "21164PC",
+        "ev6",     "21264",  "ev67",     "21264a"};
+    return Names;
+  }
+
   // _BitInt up to 64 bits works on Alpha: the backend promotes all sub-i64
   // integer types to i64 without special-casing.  Wider _BitInt is not
   // supported because Alpha has no 128-bit integer instructions.
   bool hasBitIntType() const override { return true; }
   size_t getMaxBitIntWidth() const override { return getLongLongWidth(); }
 
+  // The processors GCC's alpha_cpu_table names, and only those: each chip has
+  // an EV spelling and most also have the part number, which is what a build
+  // system that predates the EV names passes (`-mcpu=21264').  GCC matches
+  // them case-sensitively, with 21164PC the one name it also accepts in caps,
+  // so this list does too rather than lowercasing and accepting more than GCC.
   bool isValidCPUName(StringRef Name) const override {
-    return Name == "generic" || Name == "ev4" || Name == "ev45" ||
-           Name == "ev5" || Name == "ev56" || Name == "pca56" ||
-           Name == "ev6" || Name == "ev67";
+    return llvm::is_contained(getValidCPUNames(), Name);
+  }
+
+  void fillValidCPUList(SmallVectorImpl<StringRef> &Values) const override {
+    llvm::append_range(Values, getValidCPUNames());
   }
 
   bool setCPU(StringRef Name) override {
-    CPU = Name.str();
+    // Store the EV spelling: nothing downstream of here needs to know which of
+    // a chip's two names was written, and asking each site to know the alias
+    // list is how the family macro came to disagree with the feature macros.
+    CPU = canonicalizeCPUName(Name).str();
     return isValidCPUName(Name);
   }
 };
